@@ -454,6 +454,35 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
       const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
+      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open"]);
+      const requiresApproval = actionList.some(item => !readOnlyTypes.has(item.type));
+      if (!requiresApproval) {
+        const id = await createTask(env, userText.slice(0, 220), userId, action);
+        await env.DB.prepare("UPDATE tasks SET status='approved', approved_by=?, approved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind("policy:read_only", id).run();
+        await env.DB.prepare("UPDATE approvals SET status='approved', decided_by=?, decided_at=CURRENT_TIMESTAMP WHERE task_id=? AND status='pending'").bind("policy:read_only", id).run();
+        await env.DB.prepare("UPDATE agent_steps SET status='running', approval_required=0, approved_by=?, approved_at=CURRENT_TIMESTAMP, started_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='awaiting_approval'").bind("policy:read_only", id).run();
+        await env.DB.prepare("UPDATE agent_runs SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run();
+        try {
+          const execution = await executeApprovedAction(env, action, id, 1, String(userId));
+          await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(execution).slice(0, 20000), id).run();
+          await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')").bind(JSON.stringify(execution).slice(0, 20000), id).run();
+          await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({tool:execution.tool,completed:true}).slice(0,20000), id).run();
+          await log(env, userId, "task.auto_executed_read_only", "task", id, {tool:execution.tool,step_count:actionList.length});
+          const summary = await summarizeWolfExecution(env, execution, userText);
+          const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
+          const sourceText = sourceItems.length ? "\n\nمنابع:\n" + sourceItems.slice(0, 8).map((x,i) => (i+1) + ". " + String(x.title || "منبع") + "\n" + String(x.url || "")).join("\n") : execution.tool === "research.open" ? "\n\nمنبع: " + String(execution.title || "") + "\n" + String(execution.url || "") : "";
+          await saveConversation(env, chatId, history, userText, summary + sourceText);
+          await reply(env, chatId, summary + sourceText);
+        } catch (error) {
+          const message = String(error.message || error);
+          await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
+          await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='running'").bind(message.slice(0,2000), id).run();
+          await env.DB.prepare("UPDATE agent_runs SET status='failed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
+          await log(env, userId, "task.read_only_execution_failed", "task", id, {error:message});
+          await reply(env, chatId, (language === "fa" ? "اجرای درخواست فقط‌خواندنی ناموفق شد: " : "Read-only operation failed: ") + message);
+        }
+        return;
+      }
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
       const stepsPreview = actionList.map((item, index) => {
         let detail = (index + 1) + ". " + item.type;
