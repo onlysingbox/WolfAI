@@ -543,32 +543,54 @@ function decodeResearchHtml(value) {
 }
 
 async function executeResearchSearch(query) {
-  const endpoint = new URL("https://html.duckduckgo.com/html/");
-  endpoint.searchParams.set("q", query);
-  const response = await fetch(endpoint.toString(), { headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" } });
-  if (!response.ok) throw new Error("سرویس جست‌وجوی وب پاسخ نداد: HTTP " + response.status);
-  const html = (await response.text()).slice(0, 1200000);
-  const results = [];
-  const anchors = [...html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
-  for (const match of anchors) {
-    let url;
-    try {
-      url = new URL(match[1].replace(/&amp;/g, "&"), "https://html.duckduckgo.com");
-      if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") {
-        const target = url.searchParams.get("uddg");
-        if (target) url = new URL(target);
+  const headers = { "accept": "text/html,application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" };
+  const failures = [];
+  // Provider 1: DuckDuckGo HTML. Provider 2: Bing RSS, which has a stable XML result format.
+  const providers = [
+    { name: "DuckDuckGo", url: () => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", query); return u; }, parse: async response => {
+      const html = (await response.text()).slice(0, 1200000);
+      const found = [];
+      const anchors = [...html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
+      for (const match of anchors) {
+        let url;
+        try { url = new URL(match[1].replace(/&amp;/g, "&"), "https://html.duckduckgo.com"); if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") { const target=url.searchParams.get("uddg"); if(target) url=new URL(target); } } catch { continue; }
+        if (url.protocol !== "https:" || !url.hostname || url.hostname.endsWith(".local") || url.hostname.endsWith(".internal")) continue;
+        const nearby=html.slice(match.index+match[0].length,match.index+match[0].length+1800);
+        const sn=nearby.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+        const title=decodeResearchHtml(match[2]).slice(0,240);
+        if(title && !found.some(x=>x.url===url.toString())) found.push({title,url:url.toString(),snippet:decodeResearchHtml(sn?.[1]||"").slice(0,500)});
+        if(found.length>=8) break;
       }
-    } catch { continue; }
-    if (url.protocol !== "https:" || !url.hostname || url.hostname.endsWith(".local")) continue;
-    const nearby = html.slice(match.index + match[0].length, match.index + match[0].length + 1800);
-    const snippetMatch = nearby.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
-    const title = decodeResearchHtml(match[2]).slice(0, 240);
-    if (!title || results.some(item => item.url === url.toString())) continue;
-    results.push({ title, url: url.toString(), snippet: decodeResearchHtml(snippetMatch?.[1] || "").slice(0, 500) });
-    if (results.length >= 8) break;
+      return found;
+    }},
+    { name: "Bing RSS", url: () => { const u = new URL("https://www.bing.com/search"); u.searchParams.set("format","rss"); u.searchParams.set("q",query); return u; }, parse: async response => {
+      const xml=(await response.text()).slice(0,1200000);
+      const found=[];
+      for(const item of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+        const block=item[1];
+        const titleRaw=block.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i)?.[1]||"";
+        const linkRaw=block.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i)?.[1]||"";
+        const descRaw=block.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i)?.[1]||"";
+        const title=decodeResearchHtml(titleRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).slice(0,240);
+        const link=decodeResearchHtml(linkRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).trim();
+        let url; try { url=new URL(link); } catch { continue; }
+        if(!title || url.protocol!=="https:" || !url.hostname || url.hostname==="bing.com" || url.hostname.endsWith(".bing.com") || url.hostname.endsWith(".local") || url.hostname.endsWith(".internal")) continue;
+        if(!found.some(x=>x.url===url.toString())) found.push({title,url:url.toString(),snippet:decodeResearchHtml(descRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).slice(0,500)});
+        if(found.length>=8) break;
+      }
+      return found;
+    }}
+  ];
+  for (const provider of providers) {
+    try {
+      const response=await fetch(provider.url().toString(),{headers,redirect:"follow"});
+      if(!response.ok){failures.push(provider.name+" HTTP "+response.status);continue;}
+      const results=await provider.parse(response);
+      if(results.length) return {tool:"research.search",read_only:true,provider:provider.name,query,results};
+      failures.push(provider.name+" returned no parseable results");
+    } catch(error) { failures.push(provider.name+": "+String(error.message||error).slice(0,160)); }
   }
-  if (!results.length) throw new Error("نتیجه قابل‌خواندن از جست‌وجوی وب دریافت نشد؛ سرویس جست‌وجو ممکن است دسترسی را محدود کرده باشد.");
-  return { tool: "research.search", read_only: true, query, results };
+  throw new Error("جست‌وجوی وب از هر دو سرویس ناموفق شد ("+failures.join("; ")+"). احتمالاً دسترسی خروجی Worker به سرویس‌های جست‌وجو محدود است.");
 }
 
 async function executeResearchOpen(rawUrl) {
