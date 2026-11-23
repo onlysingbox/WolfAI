@@ -3,7 +3,7 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
 });
 
-const html = () => new Response(\`<!doctype html>
+const html = () => new Response(`<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -62,13 +62,13 @@ input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10p
      const r = await fetch("/api/github/overview", {headers:{"x-wolf-dashboard-key":key}});
      const d = await r.json();
      if (!r.ok || !d.ok) { out.textContent = "خطا: " + (d.error || ("HTTP " + r.status)); return; }
-     out.textContent = (d.repositories || []).map(x => (x.private ? "🔒 " : "🌐 ") + x.name + " | شاخه: " + x.default_branch + " | بروزرسانی: " + x.updated_at + "\\n" + x.html_url).join("\\n\\n") || "مخزنی پیدا نشد.";
+     out.textContent = (d.repositories || []).map(x => (x.private ? "🔒 " : "🌐 ") + x.name + " | شاخه: " + x.default_branch + " | بروزرسانی: " + x.updated_at + "\n" + x.html_url).join("\\n\\n") || "مخزنی پیدا نشد.";
    } catch (e) { out.textContent = "خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن."; }
    finally { github.disabled = false; }
  });
 })();
 </script>
-</main></body></html>\`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+</main></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
 async function log(env, actor, action, targetType = null, targetId = null, details = null) {
   await env.DB.prepare("INSERT INTO activity_logs (actor, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)")
