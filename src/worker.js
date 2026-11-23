@@ -446,8 +446,9 @@ function isWolfLinkDirectoryRequest(request) {
   const text = String(request || "");
   const destinationWords = /(?:سایت|وب.?سایت|منبع|لینک|website|websites|site|sites|sources|links)/i.test(text);
   const listIntent = /(?:فهرست|لیست|معرفی|پیدا\s*کن|بده|بیار|ارائه|list|find|give|show|provide|recommend)/i.test(text);
+  const countIntent = /(?:^|\s)(?:\d{1,2}|[۰-۹]{1,2}|ده|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده|پانزده|بیست)(?:\s*تا)?\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i.test(text);
   const explicitMinimal = /(?:فقط|صرفاً|only|just)\s*(?:نام|لینک|اسم|name|links?)/i.test(text);
-  return destinationWords && (listIntent || explicitMinimal);
+  return destinationWords && (listIntent || explicitMinimal || countIntent);
 }
 
 function formatWolfLinkDirectory(execution, request, language) {
@@ -467,8 +468,9 @@ function formatWolfLinkDirectory(execution, request, language) {
     unique.push({ title, url: url.toString() });
   }
   const digits = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
-  const match = String(request || "").match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i);
-  const expected = match ? Number(match[1].replace(/[۰-۹]/g, d => digits[d])) : 10;
+  const match = String(request || "").match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2}|ده|پنج|شش|هفت|هشت|نه|یازده|دوازده|پانزده|بیست)(?:\s*تا)?\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i);
+  const wordCounts = {پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20};
+  const expected = match ? (wordCounts[match[1]] || Number(match[1].replace(/[۰-۹]/g, d => digits[d]))) : 10;
   const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
   const lines = selected.map((item, index) => (index + 1) + ". [" + item.title + "](" + item.url + ")");
   if (selected.length < expected) lines.push(language === "fa" ? "لینک معتبر پیدا‌شده: " + selected.length + " از " + expected : "Valid links found: " + selected.length + " of " + expected);
