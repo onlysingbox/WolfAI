@@ -543,54 +543,89 @@ function decodeResearchHtml(value) {
 }
 
 async function executeResearchSearch(query) {
-  const headers = { "accept": "text/html,application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" };
+  const original = String(query || "").trim().slice(0, 300);
+  if (!original) throw new Error("عبارت جست‌وجو خالی است.");
+  const isWorkers = /cloudflare.{0,30}workers?|workers?.{0,30}cloudflare/i.test(original);
+  const queries = isWorkers
+    ? [...new Set([
+        original + " site:developers.cloudflare.com/workers/",
+        original + " site:blog.cloudflare.com workers",
+        original + " site:developers.cloudflare.com"
+      ])]
+    : [original];
+  const headers = { "accept": "text/html,application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.1)" };
   const failures = [];
-  // Provider 1: DuckDuckGo HTML. Provider 2: Bing RSS, which has a stable XML result format.
+  const scoreResult = item => {
+    const text = (item.title + " " + item.url + " " + item.snippet).toLowerCase();
+    let score = 0;
+    if (/developers\.cloudflare\.com/.test(text)) score += 12;
+    if (/blog\.cloudflare\.com/.test(text)) score += 9;
+    if (/workers|workerd|durable objects|queues|pages|wrangler|workers ai/.test(text)) score += 5;
+    if (/dashboard|login|speed test|one client|wikipedia|investor relations/.test(text)) score -= 12;
+    const terms = original.toLowerCase().split(/[^a-z0-9آ-ی]+/).filter(x => x.length > 2);
+    for (const term of terms) if (text.includes(term)) score += 2;
+    return { ...item, relevance: score };
+  };
   const providers = [
-    { name: "DuckDuckGo", url: () => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", query); return u; }, parse: async response => {
-      const html = (await response.text()).slice(0, 1200000);
+    { name: "DuckDuckGo", url: q => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", q); return u; }, parse: async response => {
+      const html = (await response.text()).slice(0, 900000);
       const found = [];
-      const anchors = [...html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
-      for (const match of anchors) {
+      for (const match of html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)) {
         let url;
-        try { url = new URL(match[1].replace(/&amp;/g, "&"), "https://html.duckduckgo.com"); if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") { const target=url.searchParams.get("uddg"); if(target) url=new URL(target); } } catch { continue; }
-        if (url.protocol !== "https:" || !url.hostname || url.hostname.endsWith(".local") || url.hostname.endsWith(".internal")) continue;
-        const nearby=html.slice(match.index+match[0].length,match.index+match[0].length+1800);
-        const sn=nearby.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
-        const title=decodeResearchHtml(match[2]).slice(0,240);
-        if(title && !found.some(x=>x.url===url.toString())) found.push({title,url:url.toString(),snippet:decodeResearchHtml(sn?.[1]||"").slice(0,500)});
-        if(found.length>=8) break;
+        try { url = new URL(match[1].replace(/&amp;/g, "&"), "https://html.duckduckgo.com"); if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") { const target = url.searchParams.get("uddg"); if (target) url = new URL(target); } } catch { continue; }
+        if (url.protocol !== "https:" || !url.hostname || /(^|\.)(localhost|local|internal)$/.test(url.hostname)) continue;
+        const nearby = html.slice(match.index + match[0].length, match.index + match[0].length + 1400);
+        const sn = nearby.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+        const title = decodeResearchHtml(match[2]).slice(0, 240);
+        if (title && !found.some(x => x.url === url.toString())) found.push({ title, url: url.toString(), snippet: decodeResearchHtml(sn?.[1] || "").slice(0, 420) });
+        if (found.length >= 8) break;
       }
       return found;
     }},
-    { name: "Bing RSS", url: () => { const u = new URL("https://www.bing.com/search"); u.searchParams.set("format","rss"); u.searchParams.set("q",query); return u; }, parse: async response => {
-      const xml=(await response.text()).slice(0,1200000);
-      const found=[];
-      for(const item of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
-        const block=item[1];
-        const titleRaw=block.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i)?.[1]||"";
-        const linkRaw=block.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i)?.[1]||"";
-        const descRaw=block.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i)?.[1]||"";
-        const title=decodeResearchHtml(titleRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).slice(0,240);
-        const link=decodeResearchHtml(linkRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).trim();
-        let url; try { url=new URL(link); } catch { continue; }
-        if(!title || url.protocol!=="https:" || !url.hostname || url.hostname==="bing.com" || url.hostname.endsWith(".bing.com") || url.hostname.endsWith(".local") || url.hostname.endsWith(".internal")) continue;
-        if(!found.some(x=>x.url===url.toString())) found.push({title,url:url.toString(),snippet:decodeResearchHtml(descRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1")).slice(0,500)});
-        if(found.length>=8) break;
+    { name: "Bing RSS", url: q => { const u = new URL("https://www.bing.com/search"); u.searchParams.set("format", "rss"); u.searchParams.set("q", q); return u; }, parse: async response => {
+      const xml = (await response.text()).slice(0, 900000);
+      const found = [];
+      for (const item of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+        const block = item[1];
+        const titleRaw = block.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i)?.[1] || "";
+        const linkRaw = block.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i)?.[1] || "";
+        const descRaw = block.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i)?.[1] || "";
+        const title = decodeResearchHtml(titleRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 240);
+        const link = decodeResearchHtml(linkRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).trim();
+        let url; try { url = new URL(link); } catch { continue; }
+        if (!title || url.protocol !== "https:" || !url.hostname || /(^|\.)(bing\.com|localhost|local|internal)$/.test(url.hostname)) continue;
+        if (!found.some(x => x.url === url.toString())) found.push({ title, url: url.toString(), snippet: decodeResearchHtml(descRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 420) });
+        if (found.length >= 8) break;
       }
       return found;
     }}
   ];
-  for (const provider of providers) {
+  const jobs = providers.flatMap(provider => queries.map(async q => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6500);
     try {
-      const response=await fetch(provider.url().toString(),{headers,redirect:"follow"});
-      if(!response.ok){failures.push(provider.name+" HTTP "+response.status);continue;}
-      const results=await provider.parse(response);
-      if(results.length) return {tool:"research.search",read_only:true,provider:provider.name,query,results};
-      failures.push(provider.name+" returned no parseable results");
-    } catch(error) { failures.push(provider.name+": "+String(error.message||error).slice(0,160)); }
+      const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const results = await provider.parse(response);
+      if (!results.length) throw new Error("no parseable results");
+      return results.map(scoreResult);
+    } finally { clearTimeout(timeout); }
+  }));
+  const settled = await Promise.allSettled(jobs);
+  const all = [];
+  for (let i = 0; i < settled.length; i++) {
+    const item = settled[i];
+    if (item.status === "fulfilled") all.push(...item.value);
+    else failures.push(String(item.reason?.message || item.reason).slice(0, 120));
   }
-  throw new Error("جست‌وجوی وب از هر دو سرویس ناموفق شد ("+failures.join("; ")+"). احتمالاً دسترسی خروجی Worker به سرویس‌های جست‌وجو محدود است.");
+  const unique = [];
+  for (const item of all.sort((a, b) => b.relevance - a.relevance)) {
+    if (!unique.some(x => x.url === item.url)) unique.push(item);
+  }
+  const filtered = isWorkers ? unique.filter(x => x.relevance >= 4) : unique;
+  const results = (filtered.length ? filtered : unique).slice(0, 8).map(({ relevance, ...item }) => item);
+  if (!results.length) throw new Error("جست‌وجوی وب نتیجه قابل‌استفاده نداد. " + failures.join("; "));
+  return { tool: "research.search", read_only: true, provider: "parallel-search", query: original, results, quality_warning: isWorkers && !filtered.length ? "نتایج تخصصی کافی پیدا نشد؛ منابع عمومی ممکن است نامرتبط باشند." : undefined };
 }
 
 async function executeResearchOpen(rawUrl) {
