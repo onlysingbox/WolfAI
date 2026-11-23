@@ -397,9 +397,14 @@ function inspectWolfAnswer(value, language, userRequest = "") {
     const tableRows = separatorIndex > 0 ? lines.slice(separatorIndex + 1).filter(line => line.trim().startsWith("|") && !/^\s*\|?\s*:?-{3,}/.test(line)).length : 0;
     if (expected > 1 && Math.max(numbered, tableRows) < expected) issues.push("requested_item_count_not_met");
   }
-  const lastLine = lines.filter(line => line.trim() && !line.trim().startsWith("```")).at(-1)?.trim() || "";
-  if (language === "fa" && /(?:\b(?:و|یا|برای|از|با|به|که|اما|اگر|تا)|[،:؛])$/u.test(lastLine)) issues.push("unfinished_final_line");
-  if (language !== "fa" && /(?:\b(?:and|or|for|with|to|of|because|which)|[:,;])$/i.test(lastLine)) issues.push("unfinished_final_line");
+  const lastLine = lines.filter(line => {
+    const value = line.trim();
+    if (!value || value.startsWith("```") || value.startsWith("|") || /^#{1,6}\s/.test(value)) return false;
+    if (/^(?:منابع|مراجع|sources|references|bibliography)\s*[:：]?$/i.test(value)) return false;
+    return true;
+  }).at(-1)?.trim() || "";
+  if (language === "fa" && /(?:\b(?:و|یا|برای|از|با|به|که|اما|اگر|تا)|[،؛])$/u.test(lastLine)) issues.push("unfinished_final_line");
+  if (language !== "fa" && /(?:\b(?:and|or|for|with|to|of|because|which)|[,;])$/i.test(lastLine)) issues.push("unfinished_final_line");
   return [...new Set(issues)];
 }
 
@@ -424,10 +429,14 @@ async function polishWolfAnswer(env, draft, language, userRequest = "") {
       : original;
     const issues = inspectWolfAnswer(candidate, language, userRequest);
     if (issues.length) {
-      console.warn("WOLF AI answer blocked by quality gate", { issues, language, chars: candidate.length });
+      const originalIssues = inspectWolfAnswer(original, language, userRequest);
+      console.warn("WOLF AI edited answer failed quality gate", { issues, originalIssues, language, editedChars: candidate.length, originalChars: original.length });
+      // A faulty editorial rewrite must not suppress an otherwise valid, evidence-bearing draft.
+      if (!originalIssues.length) return original;
+      const details = originalIssues.join(", ");
       return language === "fa"
-        ? "برای جلوگیری از ارسال اطلاعات ناقص یا متن نامفهوم، نتوانستم این پیش‌نویس را با کنترل کیفیت نهایی تأیید کنم. پاسخ ارسال نشد؛ لازم است جست‌وجو یا دامنه درخواست دقیق‌تر و دوباره بررسی شود."
-        : "I could not approve this draft through the final quality checks, so I withheld it rather than send incomplete or corrupted information. The research scope or source checks need to be refined before retrying.";
+        ? "پیش‌نویس از کنترل کیفیت عبور نکرد. علت فنی: " + details + ". متن برای جلوگیری از ارائه اطلاعات ناقص ارسال نشد."
+        : "The draft did not pass the quality checks. Technical reason: " + details + ". It was withheld to avoid sending incomplete information.";
     }
     return candidate;
   } catch (error) {
