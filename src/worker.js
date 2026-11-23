@@ -19,6 +19,7 @@ input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10p
 .result{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;margin-top:12px;color:#c8d8ee}.hint{font-size:13px;color:#9fb2cc;line-height:1.8}
 </style></head><body><main>
 <section class="hero"><h1>🐺 WOLF AI</h1><div class="muted">مرکز فرماندهی دستیار شخصی</div><p>هسته اولیه فعال است. همه عملیات حساس با تأیید مالک انجام می‌شوند.</p></section>
+<div id="scriptStatus" class="hint" style="margin-top:14px">در حال راه‌اندازی کد صفحه...</div>
 <section class="grid">
 <div class="card">وضعیت Worker<div class="value">فعال</div></div>
 <div class="card">حافظه D1<div class="value">متصل</div></div>
@@ -29,44 +30,54 @@ input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10p
 <h3>اتصال ربات تلگرام</h3>
 <p class="hint">کلید وب‌هوک را در این قسمت وارد کن. این کلید همان Secret با نام TELEGRAM_WEBHOOK_SECRET است. آن را در چت یا GitHub ارسال نکن.</p>
 <input id="telegramKey" type="password" autocomplete="off" placeholder="کلید اتصال تلگرام">
-<button id="connect" class="blue" type="button">اتصال ربات تلگرام</button>
+<button id="connect" class="blue" type="button" onclick="connectTelegram()">اتصال ربات تلگرام</button>
 <div id="telegramResult" class="result" role="status"></div>
 </section>
 <section class="panel">
 <h3>اتصال فقط‌خواندنی GitHub</h3>
 <p class="hint">فهرست مخازن و آخرین اجرای GitHub Actions. دسترسی فقط‌خواندنی است.</p>
 <input id="githubKey" type="password" autocomplete="off" placeholder="کلید دسترسی پنل (DASHBOARD_ACCESS_KEY)">
-<button id="github" class="green" type="button">بررسی مخازن GitHub</button>
+<button id="github" class="green" type="button" onclick="checkGithub()">بررسی مخازن GitHub</button>
 <div id="githubResult" class="result" role="status"></div>
 </section>
 <script>
-(() => {
- const byId = id => document.getElementById(id);
- const connect = byId("connect"), github = byId("github");
- connect.addEventListener("click", async () => {
-   const key = byId("telegramKey").value.trim(), out = byId("telegramResult");
-   if (!key) { out.textContent = "ابتدا کلید اتصال تلگرام را وارد کن."; return; }
-   connect.disabled = true; out.textContent = "در حال ثبت اتصال...";
-   try {
-     const r = await fetch("/api/setup-webhook", {method:"POST", headers:{"x-wolf-setup-key":key}});
-     const d = await r.json();
-     out.textContent = r.ok && d.ok ? "اتصال وب‌هوک با موفقیت ثبت شد." : "خطا: " + (d.error || ("HTTP " + r.status));
-   } catch (e) { out.textContent = "خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن."; }
-   finally { connect.disabled = false; }
- });
- github.addEventListener("click", async () => {
-   const key = byId("githubKey").value.trim(), out = byId("githubResult");
-   if (!key) { out.textContent = "ابتدا کلید دسترسی پنل را وارد کن."; return; }
-   github.disabled = true; out.textContent = "در حال دریافت فهرست مخازن...";
-   try {
-     const r = await fetch("/api/github/overview", {headers:{"x-wolf-dashboard-key":key}});
-     const d = await r.json();
-     if (!r.ok || !d.ok) { out.textContent = "خطا: " + (d.error || ("HTTP " + r.status)); return; }
-     out.textContent = (d.repositories || []).map(x => (x.private ? "🔒 " : "🌐 ") + x.name + " | شاخه: " + x.default_branch + " | بروزرسانی: " + x.updated_at + "\n" + x.html_url).join("\\n\\n") || "مخزنی پیدا نشد.";
-   } catch (e) { out.textContent = "خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن."; }
-   finally { github.disabled = false; }
- });
-})();
+window.connectTelegram = async function () {
+ const button = document.getElementById("connect");
+ const out = document.getElementById("telegramResult");
+ const key = document.getElementById("telegramKey").value.trim();
+ if (!out || !button) { alert("اجزای صفحه پیدا نشدند؛ صفحه را دوباره بارگذاری کن."); return; }
+ if (!key) { out.textContent = "ابتدا کلید اتصال تلگرام را وارد کن."; return; }
+ button.disabled = true;
+ out.textContent = "در حال اتصال به تلگرام...";
+ try {
+   const response = await fetch("/api/setup-webhook", { method: "POST", headers: { "x-wolf-setup-key": key } });
+   const data = await response.json();
+   out.textContent = response.ok && data.ok ? "وب‌هوک با موفقیت ثبت شد." : "خطا (" + response.status + "): " + (data.error || "پاسخ نامشخص سرور");
+ } catch (error) {
+   out.textContent = "خطای ارتباط: " + (error && error.message ? error.message : "اتصال برقرار نشد");
+ } finally { button.disabled = false; }
+};
+window.checkGithub = async function () {
+ const button = document.getElementById("github");
+ const out = document.getElementById("githubResult");
+ const key = document.getElementById("githubKey").value.trim();
+ if (!out || !button) { alert("اجزای صفحه پیدا نشدند؛ صفحه را دوباره بارگذاری کن."); return; }
+ if (!key) { out.textContent = "ابتدا کلید دسترسی پنل را وارد کن."; return; }
+ button.disabled = true;
+ out.textContent = "در حال دریافت فهرست مخازن...";
+ try {
+   const response = await fetch("/api/github/overview", { headers: { "x-wolf-dashboard-key": key } });
+   const data = await response.json();
+   if (!response.ok || !data.ok) { out.textContent = "خطا (" + response.status + "): " + (data.error || "پاسخ نامشخص سرور"); return; }
+   out.textContent = (data.repositories || []).map(item => (item.private ? "🔒 " : "🌐 ") + item.name + " | شاخه: " + item.default_branch + " | " + item.updated_at + "\n" + item.html_url).join("\n\n") || "مخزنی پیدا نشد.";
+ } catch (error) {
+   out.textContent = "خطای ارتباط: " + (error && error.message ? error.message : "اتصال برقرار نشد");
+ } finally { button.disabled = false; }
+};
+document.addEventListener("DOMContentLoaded", function () {
+ const status = document.getElementById("scriptStatus");
+ if (status) status.textContent = "کد صفحه فعال است؛ دکمه‌ها آماده‌اند.";
+});
 </script>
 </main></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
