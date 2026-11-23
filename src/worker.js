@@ -233,7 +233,7 @@ async function handleTelegramUpdate(request, env) {
     const [decision, id] = String(callback.data || "").split(":");
     if (!["approve", "reject"].includes(decision) || !id) return json({ ok: true });
     const result = await decideTask(env, id, userId, decision);
-    const label = result.error || (decision === "approve" ? "طرح وظیفه تأیید شد؛ اجرای خارجی هنوز فعال نیست." : "وظیفه رد شد.");
+    const label = result.error || (result.execution ? "ابزار با موفقیت اجرا شد." : result.execution_error ? "تأیید انجام شد، اما اجرای ابزار ناموفق بود." : decision === "approve" ? "طرح وظیفه تأیید شد؛ این وظیفه ابزار اجرایی نداشت." : "وظیفه رد شد.");
     await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: label });
     await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
     let detail = label;
