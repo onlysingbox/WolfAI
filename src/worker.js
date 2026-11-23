@@ -622,7 +622,7 @@ async function executeResearchSearch(query, env = {}) {
         const found = [];
         for (const match of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
           const block = match[1];
-          const value = name => block.match(new RegExp("<" + name + "(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)<\\\\/" + name + ">", "i"))?.[1] || "";
+          const value = name => block.match(new RegExp("<" + name + "(?:\\s[^>]*)?>([\\s\\S]*?)<\\/" + name + ">", "i"))?.[1] || "";
           const title = decodeResearchHtml(value("title").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 240);
           const url = normalizeUrl(decodeResearchHtml(value("link").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).trim());
           const snippet = decodeResearchHtml(value("description").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 420);
@@ -647,10 +647,11 @@ async function executeResearchSearch(query, env = {}) {
   const apiProviders = [];
   if (env.TAVILY_API_KEY) apiProviders.push({
     name: "Tavily",
-    run: async q => {
+    run: async (q, signal) => {
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "content-type": "application/json", "authorization": "Bearer " + env.TAVILY_API_KEY },
+        signal,
         body: JSON.stringify({ query: q, search_depth: "basic", max_results: 8, include_answer: false })
       });
       if (!response.ok) throw new Error("Tavily HTTP " + response.status);
@@ -660,10 +661,11 @@ async function executeResearchSearch(query, env = {}) {
   });
   if (env.SERPER_API_KEY) apiProviders.push({
     name: "Serper",
-    run: async q => {
+    run: async (q, signal) => {
       const response = await fetch("https://google.serper.dev/search", {
         method: "POST",
         headers: { "content-type": "application/json", "X-API-KEY": env.SERPER_API_KEY },
+        signal,
         body: JSON.stringify({ q, num: 8 })
       });
       if (!response.ok) throw new Error("Serper HTTP " + response.status);
@@ -688,10 +690,7 @@ async function executeResearchSearch(query, env = {}) {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5600);
       try {
-        const results = await Promise.race([
-          provider.run(q),
-          new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error(provider.name + " timeout")), { once: true }))
-        ]);
+        const results = await provider.run(q, controller.signal);
         if (!results.length) throw new Error(provider.name + " returned no results");
         return results.map(item => ({ ...item, provider: provider.name }));
       } finally { clearTimeout(timeout); }
