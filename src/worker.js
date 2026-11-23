@@ -117,7 +117,7 @@ async function createTask(env, title, ownerId, action = null) {
       .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
         item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path, title: item.args?.title, category: item.args?.category } }) : null).run();
   }
-  await log(env, ownerId, "task.created", "task", id, { title, run_id: runId, step_count: 1, capability });
+  await log(env, ownerId, "task.created", "task", id, { title, run_id: runId, step_count: plan.length, capabilities: [...new Set(plan.map(item => item.capability))] });
   return id;
 }
 
@@ -194,7 +194,7 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "github_update_file", description: "Replace the contents of an existing text file in an owned GitHub repository when the user explicitly asks to edit or update it. This is a write operation and will require owner approval. Do not use for vague requests.", parameters: { type: "object", properties: { repo: { type: "string" }, path: { type: "string" }, content: { type: "string" }, commit_message: { type: "string" } }, required: ["repo", "path", "content", "commit_message"] } } },
     { type: "function", function: { name: "artifact_create", description: "Save a text document, note, or report into the owner's private WOLF AI document library. This writes to D1 and requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, kind: { type: "string" }, content: { type: "string" }, mime_type: { type: "string" } }, required: ["title", "content"] } } },
     { type: "function", function: { name: "artifact_search", description: "Search the owner's private WOLF AI document library by title or content. Read-only.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
-    { type: "function", function: { name: "finance_add_entry", description: "Record an income or expense in the owner's private WOLF AI ledger. This records information only and does not move money. Requires owner approval.", parameters: { type: "object", properties: { entry_type: { type: "string", enum: ["income","expense"] }, category: { type: "string" }, amount_minor: { type: "integer" }, currency: { type: "string" }, occurred_at: { type: "string" }, description: { type: "string" } }, required: ["entry_type","category","amount_minor","currency","occurred_at"] } } },
+    { type: "function", function: { name: "finance_add_entry", description: "Record an income or expense in the owner's private WOLF AI ledger. This records information only and does not move money. amount_minor is the smallest currency unit (for example USD cents; whole rials for IRR). Requires owner approval.", parameters: { type: "object", properties: { entry_type: { type: "string", enum: ["income","expense"] }, category: { type: "string" }, amount_minor: { type: "integer", description: "Amount in the smallest currency unit, e.g. 2500 for USD 25.00 or whole rials for IRR" }, currency: { type: "string" }, occurred_at: { type: "string" }, description: { type: "string" } }, required: ["entry_type","category","amount_minor","currency","occurred_at"] } } },
     { type: "function", function: { name: "finance_summary", description: "Summarize recorded income and expenses in the owner's WOLF AI ledger for a date range. Read-only.", parameters: { type: "object", properties: { start_date: { type: "string" }, end_date: { type: "string" }, currency: { type: "string" } }, required: ["start_date","end_date"] } } }
   ];
 }
@@ -280,8 +280,8 @@ async function summarizeWolfExecution(env, execution, originalRequest) {
     const language = await responseLanguage(env, originalRequest);
     const isWrite = execution?.read_only === false;
     const prompt = language === "fa"
-      ? (isWrite ? "نتیجه عملیات نوشتن WOLF AI را به فارسی ساده گزارش کن. فقط بر اساس داده‌ها بگو چه تغییری تأیید و انجام شده، مسیر فایل و لینک commit را ذکر کن و اگر نسخه بازگشت موجود است توضیح بده. خطا را پنهان نکن." : "نتیجه ابزار فقط‌خواندنی WOLF AI را به فارسی ساده خلاصه کن. فقط بر اساس داده‌ها حرف بزن و خطا را واضح بگو.")
-      : (isWrite ? "Report this WOLF AI write operation in clear English. State exactly what was changed, include file path and commit link, and mention rollback availability if present. Do not hide errors." : "Summarize this WOLF AI read-only tool result in clear English. Use only supplied data and clearly mention errors.");
+      ? (isWrite ? "نتیجه عملیات ثبت یا تغییر داده را به فارسی ساده گزارش کن. فقط بر اساس داده‌ها نوع عملیات، عنوان یا شناسه، و لینک commit در صورت وجود را ذکر کن. برای ثبت مالی روشن بگو که فقط رکورد ثبت شده و پولی جابه‌جا نشده است. خطا را پنهان نکن." : "نتیجه ابزار فقط‌خواندنی WOLF AI را به فارسی ساده خلاصه کن. فقط بر اساس داده‌ها حرف بزن و خطا را واضح بگو.")
+      : (isWrite ? "Report this WOLF AI data write in clear English. State the exact operation and identifier or title, and include a commit link only if present. For finance ledger entries, say that only a record was saved and no money was moved. Do not hide errors." : "Summarize this WOLF AI read-only tool result in clear English. Use only supplied data and clearly mention errors.");
     const { result: out } = await runWolfModel(env, {
       messages: [{ role: "system", content: prompt }, { role: "user", content: "User request: " + String(originalRequest || "") + "\nTool result: " + JSON.stringify(execution) }],
       max_tokens: 350,
@@ -357,7 +357,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
             if (item.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
           }
         }
-        const totalWriteChars = actions.filter(item => item.type === "github.create_file" || item.type === "github.update_file").reduce((sum, item) => sum + item.args.content.length, 0);
+        const totalWriteChars = actions.filter(item => ["github.create_file","github.update_file","artifact.create"].includes(item.type)).reduce((sum, item) => sum + String(item.args.content || "").length, 0);
         if (totalWriteChars > 18000) throw new Error("مجموع محتوای تغییرات این مأموریت از سقف امن ۱۸۰۰۰ نویسه بیشتر است؛ آن را به چند مأموریت جدا تقسیم کن.");
         action = actions.length === 1 ? actions[0] : { type: "agent.sequence", args: { steps: actions } };
       } catch (error) {
@@ -368,17 +368,24 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       }
       const id = await createTask(env, userText.slice(0, 220), userId, action);
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
-      const isWrite = actionList.some(item => item.type === "github.create_file" || item.type === "github.update_file");
+      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
-      const stepsPreview = actionList.map((item, index) => (index + 1) + ". " + item.type +
-        (item.args?.repo ? " | onlysingbox/" + item.args.repo : "") +
-        (item.args?.path ? " | " + item.args.path : "")).join("\n");
-      const preview = isWrite ? actionList.filter(item => item.type === "github.create_file" || item.type === "github.update_file").map((item, index) =>
-        "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
-        "\nRepository: onlysingbox/" + item.args.repo + "\nPath: " + item.args.path +
-        "\nCommit: " + item.args.commit_message + "\nExact content to be committed:\n" + item.args.content
-      ).join("\n\n") : "";
+      const stepsPreview = actionList.map((item, index) => {
+        let detail = (index + 1) + ". " + item.type;
+        if (item.args?.repo) detail += " | onlysingbox/" + item.args.repo;
+        if (item.args?.path) detail += " | " + item.args.path;
+        if (item.type === "artifact.create") detail += " | " + item.args.title;
+        if (item.type === "finance.add_entry") detail += " | " + item.args.entry_type + " | " + item.args.category + " | " + item.args.amount_minor + " " + item.args.currency + " | " + item.args.occurred_at;
+        return detail;
+      }).join("\n");
+      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry"].includes(item.type)).map((item, index) => {
+        if (item.type === "artifact.create") return "\nWrite step " + (index + 1) + ": SAVE DOCUMENT\nTitle: " + item.args.title + "\nKind: " + item.args.kind + "\nExact document content:\n" + item.args.content;
+        if (item.type === "finance.add_entry") return "\nWrite step " + (index + 1) + ": RECORD LEDGER ENTRY\nType: " + item.args.entry_type + "\nCategory: " + item.args.category + "\nAmount: " + item.args.amount_minor + " " + item.args.currency + "\nDate: " + item.args.occurred_at + "\nDescription: " + (item.args.description || "-") + "\nThis records information only; no money is moved.";
+        return "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
+          "\nRepository: onlysingbox/" + item.args.repo + "\nPath: " + item.args.path +
+          "\nCommit: " + item.args.commit_message + "\nExact content to be committed:\n" + item.args.content;
+      }).join("\n\n") : "";
       await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
       const previewChunks = [];
       for (let offset = 0; offset < preview.length; offset += 3200) previewChunks.push(preview.slice(offset, offset + 3200));
@@ -442,7 +449,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
   }
   if (action.type === "artifact.search") {
     if (!ownerId) throw new Error("مالک مأموریت برای جست‌وجوی اسناد مشخص نیست.");
-    const query = "%" + String(action.args.query || "").replace(/[%_]/g, "\\  if (action.type === "system.health") {") + "%";
+    const query = "%" + String(action.args.query || "") + "%";
     const rows = await env.DB.prepare("SELECT id, kind, title, mime_type, created_at, substr(content_text,1,700) AS excerpt FROM artifacts WHERE owner_id=? AND (title LIKE ? OR content_text LIKE ?) ORDER BY created_at DESC LIMIT 10")
       .bind(String(ownerId), query, query).all();
     return { tool: action.type, read_only: true, results: rows.results || [] };
