@@ -148,6 +148,9 @@ const WOLF_AI_DEFAULT_MODEL = "auto";
 function chooseWolfModel(mode, userText) {
   if (mode === "glm" || mode === "gemma") return mode;
   const text = String(userText || "");
+  const quickResearch = /(جست.?وجو|جستجو|تحقیق|آخرین قابلیت|خبرهای جدید|search|look up|latest features|recent updates|find sources)/i.test(text);
+  const deepResearch = /(تحقیق جامع|بررسی جامع|چند منبع|چندین منبع|تحلیل عمیق|comprehensive research|deep research|multiple sources)/i.test(text);
+  if (quickResearch && !deepResearch) return "glm";
   const complex = /(کدنویس|کد|برنامه|باگ|خطا|معمار|معماری|تحلیل عمیق|مقایسه|طراحی سیستم|پروژه|چندمرحله|مرحله به مرحله|تحقیق جامع|سند|فایل|گیت.?هاب|cloudflare|github|code|coding|debug|architecture|deep analysis|compare|system design|multi.?step|comprehensive research|document|repository|worker)/i.test(text);
   return complex ? "gemma" : "glm";
 }
