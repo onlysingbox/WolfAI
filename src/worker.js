@@ -3,28 +3,72 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
 });
 
-const html = () => new Response(`<!doctype html>
+const html = () => new Response(\`<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>WOLF AI</title>
 <style>
 :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0b1220;color:#edf3ff;font-family:Tahoma,Arial,sans-serif}
-main{max-width:900px;margin:40px auto;padding:24px}.hero{padding:28px;border:1px solid #263b5b;border-radius:20px;background:linear-gradient(135deg,#142c4c,#102033)}
-h1{margin:0 0 8px;font-size:34px}.muted{color:#a9bad3}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-top:18px}
-.card{padding:18px;border:1px solid #263b5b;border-radius:14px;background:#111d30}.value{font-size:20px;font-weight:bold;margin-top:10px;color:#8bd7b1}
-.notice{margin-top:20px;padding:16px;border-radius:12px;background:#192b43;color:#c8d8ee;line-height:1.9}
-code{color:#9bd7ff}a{color:#9bd7ff}
+main{max-width:900px;margin:32px auto;padding:20px}.hero{padding:26px;border:1px solid #263b5b;border-radius:20px;background:linear-gradient(135deg,#142c4c,#102033)}
+h1{margin:0 0 8px;font-size:32px}.muted{color:#a9bad3;line-height:1.8}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:16px}
+.card,.panel{padding:18px;border:1px solid #263b5b;border-radius:14px;background:#111d30;margin-top:14px}.value{font-size:20px;font-weight:bold;margin-top:10px;color:#8bd7b1}
+button{cursor:pointer;border:0;border-radius:10px;padding:12px 18px;color:white;font-weight:bold;font-size:14px;min-height:44px}
+button:disabled{opacity:.55;cursor:wait}.blue{background:#2563eb}.green{background:#16845b}
+input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10px;border:1px solid #3b5272;background:#0b1627;color:#fff;font-size:15px}
+.result{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;margin-top:12px;color:#c8d8ee}.hint{font-size:13px;color:#9fb2cc;line-height:1.8}
 </style></head><body><main>
-<section class="hero"><h1>🐺 WOLF AI</h1><div class="muted">مرکز فرماندهی دستیار شخصی</div><p>هسته اولیه فعال است. اتصال تلگرام پس از تنظیم امن توکن و شناسه مالک فعال می‌شود.</p></section>
+<section class="hero"><h1>🐺 WOLF AI</h1><div class="muted">مرکز فرماندهی دستیار شخصی</div><p>هسته اولیه فعال است. همه عملیات حساس با تأیید مالک انجام می‌شوند.</p></section>
 <section class="grid">
 <div class="card">وضعیت Worker<div class="value">فعال</div></div>
 <div class="card">حافظه D1<div class="value">متصل</div></div>
 <div class="card">حالت عملیات<div class="value">نیازمند تأیید</div></div>
 <div class="card">ربات<div class="value">@OnlyWolfbot</div></div>
 </section>
-<div class="notice"><b>اتصال تلگرام:</b><br>ابتدا Secret با نام <code>BOT_TOKEN</code> و متغیر <code>ADMIN_TELEGRAM_ID</code> را در Cloudflare تنظیم کن. سپس دکمه زیر را بزن و کلید اتصال را وارد کن. توکن ربات در مرورگر یا GitHub نمایش داده نمی‌شود.<br><button id="connect" style="margin-top:14px;padding:12px 18px;border:0;border-radius:10px;background:#2563eb;color:white;font-weight:bold">اتصال ربات تلگرام</button><div id="result" style="margin-top:10px"></div><hr style="border-color:#263b5b;margin:22px 0"><b>اتصال فقط‌خواندنی GitHub</b><p class="muted">فهرست مخازن و آخرین اجرای GitHub Actions؛ بدون امکان تغییر فایل‌ها یا تنظیمات.</p><button id="github" style="padding:12px 18px;border:0;border-radius:10px;background:#16845b;color:white;font-weight:bold">بررسی مخازن GitHub</button><pre id="githubResult" style="white-space:pre-wrap;overflow-wrap:anywhere;color:#c8d8ee"></pre></div><script>document.getElementById("connect").onclick=async()=>{const key=prompt("کلید اتصال WOLF AI را وارد کن");if(!key)return;const r=await fetch("/api/setup-webhook",{method:"POST",headers:{"x-wolf-setup-key":key}});const d=await r.json();document.getElementById("result").textContent=d.ok?"اتصال وب‌هوک با موفقیت ثبت شد.":("خطا: "+(d.error||"نامشخص"));};document.getElementById("github").onclick=async()=>{const key=prompt("کلید دسترسی پنل را وارد کن");if(!key)return;const out=document.getElementById("githubResult");out.textContent="در حال دریافت فهرست مخازن...";try{const r=await fetch("/api/github/overview",{headers:{"x-wolf-dashboard-key":key}});const d=await r.json();if(!d.ok){out.textContent="خطا: "+(d.error||"نامشخص");return;}out.textContent=d.repositories.map(x=>(x.private?"🔒 ":"🌐 ")+x.name+" | شاخه: "+x.default_branch+" | بروزرسانی: "+x.updated_at+"\n"+x.html_url).join("\n\n")||"مخزنی پیدا نشد."; }catch(e){out.textContent="خطا در ارتباط با سرور";}};</script>
-</main></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+<section class="panel">
+<h3>اتصال ربات تلگرام</h3>
+<p class="hint">کلید وب‌هوک را در این قسمت وارد کن. این کلید همان Secret با نام TELEGRAM_WEBHOOK_SECRET است. آن را در چت یا GitHub ارسال نکن.</p>
+<input id="telegramKey" type="password" autocomplete="off" placeholder="کلید اتصال تلگرام">
+<button id="connect" class="blue" type="button">اتصال ربات تلگرام</button>
+<div id="telegramResult" class="result" role="status"></div>
+</section>
+<section class="panel">
+<h3>اتصال فقط‌خواندنی GitHub</h3>
+<p class="hint">فهرست مخازن و آخرین اجرای GitHub Actions. دسترسی فقط‌خواندنی است.</p>
+<input id="githubKey" type="password" autocomplete="off" placeholder="کلید دسترسی پنل (DASHBOARD_ACCESS_KEY)">
+<button id="github" class="green" type="button">بررسی مخازن GitHub</button>
+<div id="githubResult" class="result" role="status"></div>
+</section>
+<script>
+(() => {
+ const byId = id => document.getElementById(id);
+ const connect = byId("connect"), github = byId("github");
+ connect.addEventListener("click", async () => {
+   const key = byId("telegramKey").value.trim(), out = byId("telegramResult");
+   if (!key) { out.textContent = "ابتدا کلید اتصال تلگرام را وارد کن."; return; }
+   connect.disabled = true; out.textContent = "در حال ثبت اتصال...";
+   try {
+     const r = await fetch("/api/setup-webhook", {method:"POST", headers:{"x-wolf-setup-key":key}});
+     const d = await r.json();
+     out.textContent = r.ok && d.ok ? "اتصال وب‌هوک با موفقیت ثبت شد." : "خطا: " + (d.error || ("HTTP " + r.status));
+   } catch (e) { out.textContent = "خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن."; }
+   finally { connect.disabled = false; }
+ });
+ github.addEventListener("click", async () => {
+   const key = byId("githubKey").value.trim(), out = byId("githubResult");
+   if (!key) { out.textContent = "ابتدا کلید دسترسی پنل را وارد کن."; return; }
+   github.disabled = true; out.textContent = "در حال دریافت فهرست مخازن...";
+   try {
+     const r = await fetch("/api/github/overview", {headers:{"x-wolf-dashboard-key":key}});
+     const d = await r.json();
+     if (!r.ok || !d.ok) { out.textContent = "خطا: " + (d.error || ("HTTP " + r.status)); return; }
+     out.textContent = (d.repositories || []).map(x => (x.private ? "🔒 " : "🌐 ") + x.name + " | شاخه: " + x.default_branch + " | بروزرسانی: " + x.updated_at + "\\n" + x.html_url).join("\\n\\n") || "مخزنی پیدا نشد.";
+   } catch (e) { out.textContent = "خطا در ارتباط با سرور. اتصال اینترنت را بررسی کن."; }
+   finally { github.disabled = false; }
+ });
+})();
+</script>
+</main></body></html>\`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
 async function log(env, actor, action, targetType = null, targetId = null, details = null) {
   await env.DB.prepare("INSERT INTO activity_logs (actor, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)")
