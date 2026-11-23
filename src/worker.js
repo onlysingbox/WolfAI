@@ -104,6 +104,8 @@ async function createTask(env, title, ownerId, action = null) {
   const describe = item => {
     if (item?.type === "memory.save") return "ذخیره در حافظه: " + String(item.args?.key || "مورد جدید");
     if (item?.type === "memory.search") return "جست‌وجوی حافظه: " + String(item.args?.query || "");
+    if (item?.type === "memory.save") return "ذخیره در حافظه: " + String(item.args?.key || "مورد جدید");
+    if (item?.type === "memory.search") return "جست‌وجوی حافظه: " + String(item.args?.query || "");
     if (item?.type === "artifact.create") return "ذخیره سند: " + String(item.args?.title || "سند جدید");
     if (item?.type === "artifact.search") return "جست‌وجوی اسناد: " + String(item.args?.query || "");
     if (item?.type === "github.get_file") return "خواندن فایل GitHub: " + String(item.args?.repo || "") + "/" + String(item.args?.path || "");
@@ -117,7 +119,7 @@ async function createTask(env, title, ownerId, action = null) {
   const taskTitle = actions.length === 1 ? describe(actions[0]) : actions.length > 1 ? "مأموریت چندمرحله‌ای: " + actions.map(describe).join("؛ ").slice(0, 180) : String(title || "مأموریت جدید").slice(0, 240);
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const plan = actions.length
-    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : "general", title: item.type, action: item.type, approval_required: true }))
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : "general", title: item.type, action: item.type, approval_required: true }))
     : [{ step: 1, capability: "general", title: taskTitle, action: "planning", approval_required: true }];
   const approvalSummary = actions.length ? "نیازمند تأیید مالک: " + taskTitle : "بررسی و برنامه‌ریزی وظیفه: " + taskTitle;
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
@@ -728,10 +730,10 @@ async function handleTelegramUpdate(request, env) {
     }
     const [decision, id] = String(callback.data || "").split(":");
     if (!["approve", "reject"].includes(decision) || !id) return json({ ok: true });
+    await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: decision === "approve" ? "درخواست دریافت شد؛ در حال بررسی و اجرا..." : "در حال ثبت رد درخواست..." });
+    await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(error => console.warn("Could not clear approval buttons", error));
     const result = await decideTask(env, id, userId, decision);
     const label = result.error || (result.execution ? "ابزار با موفقیت اجرا شد." : result.execution_error ? "تأیید انجام شد، اما اجرای ابزار ناموفق بود." : decision === "approve" ? "طرح وظیفه تأیید شد؛ این وظیفه ابزار اجرایی نداشت." : "وظیفه رد شد.");
-    await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: label });
-    await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
     let detail = label;
     if (result.execution) {
       const summary = await summarizeWolfExecution(env, result.execution, result.task?.title || "");
@@ -776,7 +778,7 @@ async function handleTelegramUpdate(request, env) {
       ] }
     });
   } else if (command === "/help") {
-    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
+    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/memory - حافظه بلندمدت\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(); return {ok:t.n===14, text:t.n===14 ? "متصل؛ ۱۴ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
@@ -814,6 +816,11 @@ async function handleTelegramUpdate(request, env) {
     } else {
       await reply(env, chatId, "آخرین اجرای مأموریت‌ها:\\n" + lines.join("\\n"));
     }
+  } else if (command === "/memory") {
+    let entries = [];
+    try { const parsed = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); entries = Array.isArray(parsed) ? parsed : []; } catch { entries = []; }
+    const lines = entries.slice(-30).map((x, i) => (i + 1) + ". [" + String(x.category || "general") + "] " + String(x.key || "") + ": " + String(x.value || ""));
+    await reply(env, chatId, lines.length ? "حافظه بلندمدت ذخیره‌شده WOLF AI:\n" + lines.join("\n") : "هنوز موردی در حافظه بلندمدت ذخیره نشده است. برای ذخیره موردی مشخص، صریحاً بگو آن را به خاطر بسپار.");
   } else if (command === "/tasks") {
     const rows = await env.DB.prepare("SELECT id, title, status FROM tasks ORDER BY created_at DESC LIMIT 10").all();
     const lines = (rows.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title}`);
