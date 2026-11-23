@@ -90,6 +90,7 @@ Each integration is delivered as a working, tested vertical slice. A capability 
 - Approval-gated GitHub text-file creation and updates. Updates capture the prior content and blob SHA before approval, then use SHA preconditions to reject concurrent modifications.
 - Durable agent runs and up to five sequential tool steps, with per-step status stored in D1.
 - Private D1-backed document creation/search and an owner-scoped finance ledger with approval-gated record creation and date-range summaries. Ledger entries are records only; no money is moved.
-- The currently exposed tools cover health checks, GitHub, private documents and ledger reporting; this is not yet a general connector runtime for every product domain.
+- Owner-approved long-term memory stored privately in D1 settings, injected into relevant future conversations, searchable by natural language, and inspectable with `/memory`. Memory writes require approval and are limited to 50 keyed entries.
+- The currently exposed tools cover health checks, GitHub, private documents, explicit long-term memory and ledger reporting; this is not yet a general connector runtime for every product domain.
 - D1 migration `0002_agent_platform.sql` applied and verified. It adds persistent agent runs/steps, integration metadata, verified contacts, message drafts, artifacts, schedules and finance entries.
 - The eight capability domains above are the target scope. Most external actions, voice, messaging delivery, handset calls and general-purpose orchestration are not yet active.
