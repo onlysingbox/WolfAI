@@ -1,0 +1,11 @@
+name = "wolfai"
+main = "src/worker.js"
+compatibility_date = "2026-11-23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wolfai_db"
+database_id = "919f3c97-30a7-4b56-a2f5-57630c9f5e00"
+
+[vars]
+BOT_USERNAME = "OnlyWolfbot"
