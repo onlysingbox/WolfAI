@@ -295,7 +295,7 @@ function wolfSystemPrompt(language) {
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
     "You may call the declared tools only when the user clearly requests the corresponding task. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are preparing. The application stores a durable plan of up to five sequential steps and asks the owner to approve the complete plan before execution.",
-    "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data.",
+    "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Treat entries categorized status_snapshot as historical snapshots only: they describe a past observation, are not live telemetry, and must never be presented as current status without a fresh health check. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data.",
     "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
     "Never claim an action ran before it is approved and confirmed by the connected service. Do not use GitHub write tools for vague requests, deletes, deployments, branch protection, secrets or production changes. Finance ledger tools only record user-provided data and never move money.",
     "For repository writes, include the complete intended file content and a concise commit message. Prefer editing only the exact file requested. Do not invent a repository or path.",
@@ -356,8 +356,9 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       await reply(env, chatId, ask);
       return;
     }
-    const key = /گزارش\s*وضعیت\s*WOLF\s*AI|WOLF AI\s*(?:status|health)\s*report/i.test(value) ? "گزارش وضعیت WOLF AI" : "یادداشت " + new Date().toISOString().slice(0,10);
-    const action = { type: "memory.save", args: { key, value, category: "user_note" } };
+    const isStatusSnapshot = /گزارش\s*وضعیت\s*WOLF\s*AI|WOLF AI\s*(?:status|health)\s*report/i.test(value);
+    const key = isStatusSnapshot ? "گزارش وضعیت WOLF AI" : "یادداشت " + new Date().toISOString().slice(0,10);
+    const action = { type: "memory.save", args: { key, value, category: isStatusSnapshot ? "status_snapshot" : "user_note" } };
     const id = await createTask(env, "ذخیره در حافظه: " + key, userId, action);
     const notice = language === "fa" ? "موضوع قبلی را پیدا کردم. برای جلوگیری از ذخیره اشتباه، متن دقیق زیر را آماده کرده‌ام. پس از تأیید در حافظه خصوصی ذخیره می‌شود." : "I found the previous topic. Review the exact text below; it will be saved to private memory after approval.";
     await saveConversation(env, chatId, history, userText, notice);
@@ -843,7 +844,8 @@ async function handleTelegramUpdate(request, env) {
   } else if (command === "/memory") {
     let entries = [];
     try { const parsed = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); entries = Array.isArray(parsed) ? parsed : []; } catch { entries = []; }
-    const lines = entries.slice(-30).map((x, i) => (i + 1) + ". [" + String(x.category || "general") + "] " + String(x.key || "") + ": " + String(x.value || ""));
+    const categoryLabel = category => ({ status_snapshot: "گزارش تاریخی وضعیت", user_note: "یادداشت شخصی", general: "عمومی" }[String(category || "general")] || String(category || "عمومی"));
+    const lines = entries.slice(-30).map((x, i) => (i + 1) + ". نوع: " + categoryLabel(x.category) + "\nعنوان: " + String(x.key || "") + "\n" + String(x.value || ""));
     await reply(env, chatId, lines.length ? "حافظه بلندمدت ذخیره‌شده WOLF AI:\n" + lines.join("\n") : "هنوز موردی در حافظه بلندمدت ذخیره نشده است. برای ذخیره موردی مشخص، صریحاً بگو آن را به خاطر بسپار.");
   } else if (command === "/tasks") {
     const rows = await env.DB.prepare("SELECT id, title, status FROM tasks ORDER BY created_at DESC LIMIT 10").all();
