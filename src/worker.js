@@ -100,27 +100,39 @@ async function reply(env, chatId, text, extra = {}) {
 async function createTask(env, title, ownerId, action = null) {
   const id = crypto.randomUUID().slice(0, 8);
   const runId = id;
-  const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const actions = action?.type === "agent.sequence" && Array.isArray(action.args?.steps) ? action.args.steps : (action ? [action] : []);
+  const describe = item => {
+    if (item?.type === "artifact.create") return "ذخیره سند: " + String(item.args?.title || "سند جدید");
+    if (item?.type === "artifact.search") return "جست‌وجوی اسناد: " + String(item.args?.query || "");
+    if (item?.type === "github.get_file") return "خواندن فایل GitHub: " + String(item.args?.repo || "") + "/" + String(item.args?.path || "");
+    if (item?.type === "github.list_repos") return "فهرست مخازن GitHub";
+    if (item?.type === "github.workflow_runs") return "بررسی اجرای گردش‌کار: " + String(item.args?.repo || "");
+    if (item?.type === "finance.add_entry") return "ثبت رکورد مالی: " + String(item.args?.category || "");
+    if (item?.type === "finance.summary") return "گزارش مالی";
+    if (item?.type === "system.health") return "بررسی سلامت WOLF AI";
+    return String(title || "مأموریت جدید").slice(0, 240);
+  };
+  const taskTitle = actions.length === 1 ? describe(actions[0]) : actions.length > 1 ? "مأموریت چندمرحله‌ای: " + actions.map(describe).join("؛ ").slice(0, 180) : String(title || "مأموریت جدید").slice(0, 240);
+  const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const plan = actions.length
-    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type.startsWith("artifact.") ? "files_documents" : item.type.startsWith("finance.") ? "finance" : "general", title: item.type, action: item.type, approval_required: true }))
-    : [{ step: 1, capability: "general", title: title.slice(0, 240), action: "planning", approval_required: true }];
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : "general", title: item.type, action: item.type, approval_required: true }))
+    : [{ step: 1, capability: "general", title: taskTitle, action: "planning", approval_required: true }];
+  const approvalSummary = actions.length ? "نیازمند تأیید مالک: " + taskTitle : "بررسی و برنامه‌ریزی وظیفه: " + taskTitle;
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
-    .bind(id, title.slice(0, 240), description, String(ownerId)).run();
+    .bind(id, taskTitle.slice(0, 240), description, String(ownerId)).run();
   await env.DB.prepare("INSERT INTO approvals (id, task_id, action_summary, risk_level, status) VALUES (?, ?, ?, 'low', 'pending')")
-    .bind(crypto.randomUUID(), id, `بررسی و برنامه‌ریزی وظیفه: ${title.slice(0, 240)}`).run();
+    .bind(crypto.randomUUID(), id, approvalSummary.slice(0, 500)).run();
   await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, 'text', 'awaiting_approval', ?)")
-    .bind(runId, String(ownerId), title.slice(0, 4000), JSON.stringify(plan)).run();
+    .bind(runId, String(ownerId), taskTitle.slice(0, 4000), JSON.stringify(plan)).run();
   for (let index = 0; index < plan.length; index++) {
     const item = actions[index];
     await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
       .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
         item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path, title: item.args?.title, category: item.args?.category } }) : null).run();
   }
-  await log(env, ownerId, "task.created", "task", id, { title, run_id: runId, step_count: plan.length, capabilities: [...new Set(plan.map(item => item.capability))] });
+  await log(env, ownerId, "task.created", "task", id, { title: taskTitle, run_id: runId, step_count: plan.length, capabilities: [...new Set(plan.map(item => item.capability))] });
   return id;
 }
-
 
 const WOLF_AI_MODELS = {
   glm: "@cf/zai-org/glm-4.7-flash",
@@ -276,9 +288,14 @@ function wolfSystemPrompt(language) {
 }
 
 async function summarizeWolfExecution(env, execution, originalRequest) {
+  const language = await responseLanguage(env, originalRequest);
+  if (execution?.tool === "artifact.create") {
+    return language === "fa"
+      ? "سند «" + String(execution.title || "بدون عنوان") + "» با موفقیت در کتابخانه خصوصی WOLF AI ذخیره شد. شناسه سند: " + String(execution.artifact_id || "ثبت نشده")
+      : "The document “" + String(execution.title || "Untitled") + "” was saved successfully in your private WOLF AI library. Artifact ID: " + String(execution.artifact_id || "not provided");
+  }
   if (!env.AI?.run) return "نتیجه فنی در پیام زیر آمده است.";
   try {
-    const language = await responseLanguage(env, originalRequest);
     const isWrite = execution?.read_only === false;
     const prompt = language === "fa"
       ? (isWrite ? "نتیجه عملیات ثبت یا تغییر داده را به فارسی ساده گزارش کن. فقط بر اساس داده‌ها نوع عملیات، عنوان یا شناسه، و لینک commit در صورت وجود را ذکر کن. برای ثبت مالی روشن بگو که فقط رکورد ثبت شده و پولی جابه‌جا نشده است. خطا را پنهان نکن." : "نتیجه ابزار فقط‌خواندنی WOLF AI را به فارسی ساده خلاصه کن. فقط بر اساس داده‌ها حرف بزن و خطا را واضح بگو.")
@@ -547,7 +564,7 @@ async function decideTask(env, id, ownerId, decision) {
       await env.DB.prepare("UPDATE agent_steps SET status='running', started_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='approved'").bind(id).run().catch(() => {});
       const output = await executeApprovedAction(env, action, id, 1, String(ownerId));
       await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(output).slice(0,20000), id).run();
-      await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('approved','awaiting_approval')")
+      await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')")
         .bind(JSON.stringify(output).slice(0,20000), id).run().catch(() => {});
       await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .bind(JSON.stringify({ tool: output.tool, completed: true }).slice(0,20000), id).run().catch(() => {});
@@ -622,8 +639,10 @@ async function githubOverview(request, env, url) {
 }
 
 async function handleTelegramUpdate(request, env) {
-  if (!env.BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET || !env.ADMIN_TELEGRAM_ID) {
-    return json({ ok: false, error: "Telegram setup incomplete" }, 503);
+  const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID"].filter(key => !env[key]);
+  if (missingTelegramConfig.length) {
+    console.error("Telegram webhook configuration incomplete", { missing: missingTelegramConfig });
+    return json({ ok: false, error: "Telegram setup incomplete", missing: missingTelegramConfig }, 503);
   }
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
     return json({ ok: false, error: "Unauthorized" }, 401);
@@ -717,7 +736,7 @@ async function handleTelegramUpdate(request, env) {
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(); return {ok:t.n===14, text:t.n===14 ? "متصل؛ ۱۴ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
-      (async () => { try { const me = await telegram(env,"getMe",{}); const wh = await telegram(env,"getWebhookInfo",{}); const expected = new URL("/telegram/webhook", new URL(request.url).origin).toString(); return {ok:!!me.is_bot && wh.url===expected, text:(me.username ? "@"+me.username : "ربات شناسایی شد")+"؛ وب‌هوک "+(wh.url===expected ? "فعال و صحیح" : "نیازمند بررسی")+(wh.pending_update_count ? "؛ پیام‌های در انتظار: "+wh.pending_update_count : "")+(wh.last_error_message ? "؛ خطای اخیر: "+wh.last_error_message : "")}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })(),
+      (async () => { try { const me = await telegram(env,"getMe",{}); const wh = await telegram(env,"getWebhookInfo",{}); const expected = new URL("/telegram/webhook", new URL(request.url).origin).toString(); return {ok:!!me.is_bot && wh.url===expected, text:(me.username ? "@"+me.username : "ربات شناسایی شد")+"؛ وب‌هوک "+(wh.url===expected ? "فعال و صحیح" : "نیازمند بررسی")+(wh.pending_update_count ? "؛ پیام‌های در انتظار: "+wh.pending_update_count : "")+(wh.last_error_message ? (wh.last_error_date && Date.now()/1000 - wh.last_error_date > 600 ? "؛ خطای قدیمی وب‌هوک (آخرین مورد: "+new Date(wh.last_error_date*1000).toLocaleString("fa-IR")+"): "+wh.last_error_message : "؛ خطای اخیر: "+wh.last_error_message) : "")}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })(),
       (async () => { try { const u = await githubRequest(env,"/user"); return {ok:!!u.login,text:"متصل؛ حساب "+u.login}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })()
     ]);
     const [db, tg, gh] = checks;
