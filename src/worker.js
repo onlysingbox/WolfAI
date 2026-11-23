@@ -812,9 +812,9 @@ async function handleTelegramUpdate(request, env) {
     if (!lines.length) {
       const legacy = await env.DB.prepare("SELECT id, title, status, created_at FROM tasks WHERE requested_by=? ORDER BY created_at DESC LIMIT 10").bind(userId).all();
       lines = (legacy.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title} (وظیفه ثبت‌شده)`);
-      await reply(env, chatId, lines.length ? "مأموریت مستقلی در agent_runs پیدا نشد؛ این‌ها وظایف ثبت‌شده حساب تو هستند:\\n" + lines.join("\\n") : "هنوز مأموریتی ثبت نشده است.");
+      await reply(env, chatId, lines.length ? "مأموریت مستقلی در agent_runs پیدا نشد؛ این‌ها وظایف ثبت‌شده حساب تو هستند:\n" + lines.join("\n") : "هنوز مأموریتی ثبت نشده است.");
     } else {
-      await reply(env, chatId, "آخرین اجرای مأموریت‌ها:\\n" + lines.join("\\n"));
+      await reply(env, chatId, "آخرین اجرای مأموریت‌ها:\n" + lines.join("\n"));
     }
   } else if (command === "/memory") {
     let entries = [];
@@ -824,7 +824,7 @@ async function handleTelegramUpdate(request, env) {
   } else if (command === "/tasks") {
     const rows = await env.DB.prepare("SELECT id, title, status FROM tasks ORDER BY created_at DESC LIMIT 10").all();
     const lines = (rows.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title}`);
-    await reply(env, chatId, lines.length ? lines.join("\\n") : "هنوز وظیفه‌ای ثبت نشده است.");
+    await reply(env, chatId, lines.length ? lines.join("\n") : "هنوز وظیفه‌ای ثبت نشده است.");
   } else if (command === "/approve" || command === "/reject") {
     if (!arg) return reply(env, chatId, "شناسه وظیفه را وارد کن.");
     const result = await decideTask(env, arg, userId, command === "/approve" ? "approve" : "reject");
