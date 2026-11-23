@@ -267,6 +267,7 @@ function wolfSystemPrompt(language) {
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
     "You may call the declared tools only when the user clearly requests the corresponding task. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are preparing. The application stores a durable plan of up to five sequential steps and asks the owner to approve the complete plan before execution.",
+    "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
     "Never claim an action ran before it is approved and confirmed by the connected service. Do not use GitHub write tools for vague requests, deletes, deployments, branch protection, secrets or production changes. Finance ledger tools only record user-provided data and never move money.",
     "For repository writes, include the complete intended file content and a concise commit message. Prefer editing only the exact file requested. Do not invent a repository or path.",
     "Ask one short clarification only when a required repository or file path is genuinely missing from both the current message and recent conversation. Resolve explicit aliases: \\u0022WolfAI\\u0022 means repository onlysingbox/WolfAI. If the user says to inspect/read src/worker.js in WolfAI, call github_get_file with repo WolfAI and path src/worker.js; do not ask them to repeat either value. Do not guess other repositories.",
@@ -742,8 +743,14 @@ async function handleTelegramUpdate(request, env) {
     });
   } else if (command === "/runs") {
     const rows = await env.DB.prepare("SELECT id, request_text, status, created_at FROM agent_runs WHERE owner_id=? ORDER BY created_at DESC LIMIT 10").bind(userId).all();
-    const lines = (rows.results || []).map(x => `• ${x.id.slice(0,8)} | ${x.status} | ${x.request_text.slice(0,100)}`);
-    await reply(env, chatId, lines.length ? "آخرین اجرای مأموریت‌ها:\\n" + lines.join("\\n") : "هنوز مأموریتی ثبت نشده است.");
+    let lines = (rows.results || []).map(x => `• ${x.id.slice(0,8)} | ${x.status} | ${x.request_text.slice(0,100)}`);
+    if (!lines.length) {
+      const legacy = await env.DB.prepare("SELECT id, title, status, created_at FROM tasks WHERE requested_by=? ORDER BY created_at DESC LIMIT 10").bind(userId).all();
+      lines = (legacy.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title} (وظیفه ثبت‌شده)`);
+      await reply(env, chatId, lines.length ? "مأموریت مستقلی در agent_runs پیدا نشد؛ این‌ها وظایف ثبت‌شده حساب تو هستند:\\n" + lines.join("\\n") : "هنوز مأموریتی ثبت نشده است.");
+    } else {
+      await reply(env, chatId, "آخرین اجرای مأموریت‌ها:\\n" + lines.join("\\n"));
+    }
   } else if (command === "/tasks") {
     const rows = await env.DB.prepare("SELECT id, title, status FROM tasks ORDER BY created_at DESC LIMIT 10").all();
     const lines = (rows.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title}`);
