@@ -68,6 +68,52 @@ async function decideTask(env, id, ownerId, decision) {
   return { task, status };
 }
 
+
+async function githubRequest(env, path) {
+  if (!env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is not configured");
+  const response = await fetch("https://api.github.com" + path, {
+    headers: {
+      "accept": "application/vnd.github+json",
+      "authorization": "Bearer " + env.GITHUB_TOKEN,
+      "x-github-api-version": "2022-11-28",
+      "user-agent": "WOLF-AI"
+    }
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "GitHub API error");
+  return data;
+}
+
+function dashboardAuthorized(request, env) {
+  const supplied = request.headers.get("x-wolf-dashboard-key") || "";
+  return !!env.DASHBOARD_ACCESS_KEY && supplied.length === env.DASHBOARD_ACCESS_KEY.length &&
+    [...supplied].reduce((n, c, i) => n | (c.charCodeAt(0) ^ env.DASHBOARD_ACCESS_KEY.charCodeAt(i)), 0) === 0;
+}
+
+async function githubOverview(request, env, url) {
+  if (!dashboardAuthorized(request, env)) return json({ ok: false, error: "دسترسی پنل معتبر نیست" }, 401);
+  try {
+    const repo = url.searchParams.get("repo");
+    if (repo) {
+      if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) return json({ ok: false, error: "نام مخزن نامعتبر است" }, 400);
+      const data = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(repo) + "/actions/runs?per_page=5");
+      return json({ ok: true, type: "workflow_runs", repository: repo, runs: (data.workflow_runs || []).map(x => ({
+        name: x.name, event: x.event, status: x.status, conclusion: x.conclusion,
+        branch: x.head_branch, created_at: x.created_at, updated_at: x.updated_at, html_url: x.html_url
+      })) });
+    }
+    const repos = await githubRequest(env, "/user/repos?visibility=all&affiliation=owner&sort=updated&per_page=100");
+    return json({ ok: true, type: "repositories", repositories: repos
+      .filter(x => x.owner && x.owner.login.toLowerCase() === "onlysingbox")
+      .map(x => ({ name: x.name, private: x.private, description: x.description,
+        default_branch: x.default_branch, updated_at: x.updated_at, html_url: x.html_url }))
+      .slice(0, 50) });
+  } catch (error) {
+    console.error("github readonly request failed", error);
+    return json({ ok: false, error: error.message }, 502);
+  }
+}
+
 async function handleTelegramUpdate(request, env) {
   if (!env.BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET || !env.ADMIN_TELEGRAM_ID) {
     return json({ ok: false, error: "Telegram setup incomplete" }, 503);
@@ -133,10 +179,13 @@ async function handleTelegramUpdate(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (request.method === "GET" && url.pathname === "/api/github/overview") {
+      return await githubOverview(request, env, url);
+    }
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first();
-        return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", version: "0.1.0" });
+        return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, version: "0.2.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
