@@ -623,9 +623,10 @@ async function executeResearchSearch(query) {
     if (!unique.some(x => x.url === item.url)) unique.push(item);
   }
   const filtered = isWorkers ? unique.filter(x => x.relevance >= 4) : unique;
-  const results = (filtered.length ? filtered : unique).slice(0, 8).map(({ relevance, ...item }) => item);
+  if (isWorkers && !filtered.length) throw new Error("منبع تخصصی Cloudflare Workers پیدا نشد؛ برای جلوگیری از نمایش لینک‌های عمومی و نامرتبط، نتایج ضعیف حذف شدند. عبارت جست‌وجو را دقیق‌تر کن یا بعداً دوباره تلاش کن.");
+  const results = filtered.slice(0, 8).map(({ relevance, ...item }) => item);
   if (!results.length) throw new Error("جست‌وجوی وب نتیجه قابل‌استفاده نداد. " + failures.join("; "));
-  return { tool: "research.search", read_only: true, provider: "parallel-search", query: original, results, quality_warning: isWorkers && !filtered.length ? "نتایج تخصصی کافی پیدا نشد؛ منابع عمومی ممکن است نامرتبط باشند." : undefined };
+  return { tool: "research.search", read_only: true, provider: "parallel-search", query: original, results };
 }
 
 async function executeResearchOpen(rawUrl) {
