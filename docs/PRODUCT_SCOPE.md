@@ -86,6 +86,8 @@ Each integration is delivered as a working, tested vertical slice. A capability 
 
 - Telegram private-owner chat and webhook.
 - Cloudflare Worker, D1 and Workers AI (GLM/Gemma) conversational foundation.
-- GitHub read-only repository listing, workflow-run listing and file reading, with owner approval.
+- GitHub repository listing, workflow-run listing and file reading.
+- Approval-gated GitHub text-file creation and updates. Updates capture the prior content and blob SHA before approval, then use SHA preconditions to reject concurrent modifications.
+- Durable agent runs and up to five sequential tool steps, with per-step status stored in D1. The currently exposed tools are health checks and GitHub repository/file operations; this is not yet a general connector runtime for every product domain.
 - D1 migration `0002_agent_platform.sql` applied and verified. It adds persistent agent runs/steps, integration metadata, verified contacts, message drafts, artifacts, schedules and finance entries.
 - The eight capability domains above are the target scope. Most external actions, voice, messaging delivery, handset calls and general-purpose orchestration are not yet active.
