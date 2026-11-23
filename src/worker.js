@@ -373,7 +373,7 @@ function inspectWolfAnswer(value, language, userRequest = "") {
   }
   const numeralMap = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
   const request = String(userRequest || "");
-  const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|universit(?:y|ies)|items|options|sources)\b?/i);
+  const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|universit(?:y|ies)|items|options|sources)\b/i);
   if (countMatch) {
     const expected = Number(countMatch[1].replace(/[۰-۹]/g, d => numeralMap[d]));
     const numbered = (text.match(/^\s*(?:\|\s*)?(?:\*\*)?\d{1,2}[.)،-]\s+/gm) || []).length;
