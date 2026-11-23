@@ -9,3 +9,6 @@ database_id = "919f3c97-30a7-4b56-a2f5-57630c9f5e00"
 
 [vars]
 BOT_USERNAME = "OnlyWolfbot"
+
+[ai]
+binding = "AI"
