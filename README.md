@@ -1,38 +1,42 @@
 # WOLF AI
 
-Personal multi-purpose AI agent with Telegram and web interfaces.
+Personal multilingual conversational AI agent with Telegram and web interfaces.
 
 ## Current foundation
 - Cloudflare Worker API and web status dashboard
-- Cloudflare D1 persistent task, project, approval and audit storage
-- Telegram webhook handler for the owner bot
-- Approval-first operation model: no external action is executed automatically
+- Cloudflare D1 persistent task, project, approval, settings and audit storage
+- Workers AI conversational brain using `@cf/zai-org/glm-4.7-flash`
+- Natural-language chat in Telegram; slash commands are optional for normal conversation
+- Conversation history stored in D1
+- Response language setting: automatic (match the user's message), always English, or always Persian
+- Approval-first operation model: external tools are never executed without owner approval
 - Health endpoint: `/api/health`
 
 ## Runtime configuration
-Bind a D1 database as `DB` and configure these Worker secrets/variables:
+Bind a D1 database as `DB`, Workers AI as `AI`, and configure these Worker secrets/variables:
 - Secret `BOT_TOKEN`: Telegram BotFather token for @OnlyWolfbot
 - Secret `TELEGRAM_WEBHOOK_SECRET`: random webhook verification string
 - Variable `ADMIN_TELEGRAM_ID`: numeric Telegram user ID of the owner
 - Optional variable `BOT_USERNAME`: OnlyWolfbot
+- Secret `GITHUB_TOKEN`: GitHub token for repository read access
 
 Do not commit secrets to GitHub.
 
-## Telegram commands
-- `/start` and `/help`: show help
+## Telegram usage
+- Send an ordinary text message to chat with WOLF AI in English or Persian.
+- `/language`: choose Automatic, English, or Persian response language.
 - `/status`: service status
-- `/newtask <title>`: record a planning task awaiting owner approval
-- `/newaction system.health`: propose a read-only system health check
-- `/newaction github.list_repos`: propose listing accessible owner repositories
-- `/newaction github.workflow_runs <repo>`: propose reading recent workflow runs
-- `/newaction github.get_file <repo> <path>`: propose reading a repository file
-- Approving a `/newaction` executes that allowlisted read-only tool and stores the result in D1
-- `/tasks`: list recent tasks
-- `/approve <task-id>`: approve a task plan or execute an explicitly proposed allowlisted read-only action
-- `/reject <task-id>`: reject a task
+- `/tasks`: recent tasks
+- `/help`: help
+- Existing `/newtask`, `/newaction`, `/approve`, and `/reject` commands remain available.
+
+## Agent tools and safety
+The conversational model can propose only these read-only tools: internal health checks, GitHub repository listing, recent GitHub Actions runs, and reading a text file from an owned repository. A tool call creates an approval request and is not executed until the owner explicitly approves it. Results and failures are stored in D1 and recorded in the audit log.
+
+Repository writes, code edits, deployments, publishing, deletion, DNS/security changes, account settings and financial actions are not enabled in this release. They must be implemented with scoped permissions, audit records, rollback planning and explicit confirmation.
+
+## Usage and limits
+Workers AI has a free daily allocation that is subject to Cloudflare's current plan and model limits. Requests may stop when the free allocation is exhausted; monitor Workers AI usage in the Cloudflare dashboard.
 
 ## Local development
 Use Wrangler with the configuration in `wrangler.toml`. Apply `migrations/0001_init.sql` to the D1 database before running.
-
-## Tool execution and safety
-The first execution engine supports only read-only tools: internal health checks, GitHub repository listing, recent GitHub Actions runs, and reading a text file from an owned repository. Each action is proposed first and runs only after the owner explicitly approves it. Results and failures are stored in D1 and recorded in the audit log. File writes, deployments, publishing, deletion, DNS/security changes, account settings and financial actions are not enabled in this stage and must require explicit confirmation when added.
