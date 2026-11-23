@@ -23,7 +23,7 @@ code{color:#9bd7ff}a{color:#9bd7ff}
 <div class="card">حالت عملیات<div class="value">نیازمند تأیید</div></div>
 <div class="card">ربات<div class="value">@OnlyWolfbot</div></div>
 </section>
-<div class="notice"><b>مرحله بعد:</b><br>در Cloudflare برای Worker با نام <code>wolfai</code>، سه Secret با نام‌های <code>BOT_TOKEN</code>، <code>TELEGRAM_WEBHOOK_SECRET</code> و <code>ADMIN_TELEGRAM_ID</code> تنظیم می‌شوند. مقادیر محرمانه را در GitHub یا پیام چت قرار نده.</div>
+<div class="notice"><b>اتصال تلگرام:</b><br>ابتدا Secret با نام <code>BOT_TOKEN</code> و متغیر <code>ADMIN_TELEGRAM_ID</code> را در Cloudflare تنظیم کن. سپس دکمه زیر را بزن و کلید اتصال را وارد کن. توکن ربات در مرورگر یا GitHub نمایش داده نمی‌شود.<br><button id="connect" style="margin-top:14px;padding:12px 18px;border:0;border-radius:10px;background:#2563eb;color:white;font-weight:bold">اتصال ربات تلگرام</button><div id="result" style="margin-top:10px"></div></div><script>document.getElementById("connect").onclick=async()=>{const key=prompt("کلید اتصال WOLF AI را وارد کن");if(!key)return;const r=await fetch("/api/setup-webhook",{method:"POST",headers:{"x-wolf-setup-key":key}});const d=await r.json();document.getElementById("result").textContent=d.ok?"اتصال وب‌هوک با موفقیت ثبت شد.":("خطا: "+(d.error||"نامشخص"));};</script>
 </main></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 
 async function log(env, actor, action, targetType = null, targetId = null, details = null) {
@@ -139,6 +139,26 @@ export default {
         return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", version: "0.1.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
+      }
+    }
+    if (request.method === "POST" && url.pathname === "/api/setup-webhook") {
+      if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("x-wolf-setup-key") !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return json({ ok: false, error: "کلید اتصال نامعتبر است" }, 401);
+      }
+      if (!env.BOT_TOKEN || !env.ADMIN_TELEGRAM_ID) {
+        return json({ ok: false, error: "ابتدا BOT_TOKEN و ADMIN_TELEGRAM_ID را در تنظیمات Worker وارد کن" }, 503);
+      }
+      try {
+        const webhookUrl = new URL("/telegram/webhook", url.origin).toString();
+        const result = await telegram(env, "setWebhook", {
+          url: webhookUrl,
+          secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+          allowed_updates: ["message", "callback_query"],
+          drop_pending_updates: false
+        });
+        return json({ ok: true, webhook: result, url: webhookUrl });
+      } catch (error) {
+        return json({ ok: false, error: error.message }, 502);
       }
     }
     if (request.method === "POST" && url.pathname === "/telegram/webhook") {
