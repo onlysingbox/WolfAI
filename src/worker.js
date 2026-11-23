@@ -104,8 +104,6 @@ async function createTask(env, title, ownerId, action = null) {
   const describe = item => {
     if (item?.type === "memory.save") return "ذخیره در حافظه: " + String(item.args?.key || "مورد جدید");
     if (item?.type === "memory.search") return "جست‌وجوی حافظه: " + String(item.args?.query || "");
-    if (item?.type === "memory.save") return "ذخیره در حافظه: " + String(item.args?.key || "مورد جدید");
-    if (item?.type === "memory.search") return "جست‌وجوی حافظه: " + String(item.args?.query || "");
     if (item?.type === "artifact.create") return "ذخیره سند: " + String(item.args?.title || "سند جدید");
     if (item?.type === "artifact.search") return "جست‌وجوی اسناد: " + String(item.args?.query || "");
     if (item?.type === "github.get_file") return "خواندن فایل GitHub: " + String(item.args?.repo || "") + "/" + String(item.args?.path || "");
@@ -342,8 +340,8 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
   let ownerMemory = [];
-  try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-50) : []; } catch { ownerMemory = []; }
-  const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "")).join("\n") : "";
+  try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-25) : []; } catch { ownerMemory = []; }
+  const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "").slice(0,500)).join("\n") : "";
   const messages = [
     { role: "system", content: wolfSystemPrompt(language) + memoryContext },
     ...history,
