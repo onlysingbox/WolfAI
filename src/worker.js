@@ -97,18 +97,52 @@ async function reply(env, chatId, text, extra = {}) {
   return telegram(env, "sendMessage", { chat_id: chatId, text, ...extra });
 }
 
-async function createTask(env, title, ownerId) {
+async function createTask(env, title, ownerId, action = null) {
   const id = crypto.randomUUID().slice(0, 8);
-  await env.DB.prepare("INSERT INTO tasks (id, title, status, risk_level, requested_by) VALUES (?, ?, 'pending_approval', 'low', ?)")
-    .bind(id, title.slice(0, 240), String(ownerId)).run();
+  const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
+  await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
+    .bind(id, title.slice(0, 240), description, String(ownerId)).run();
   await env.DB.prepare("INSERT INTO approvals (id, task_id, action_summary, risk_level, status) VALUES (?, ?, ?, 'low', 'pending')")
     .bind(crypto.randomUUID(), id, `بررسی و برنامه‌ریزی وظیفه: ${title.slice(0, 240)}`).run();
   await log(env, ownerId, "task.created", "task", id, { title });
   return id;
 }
 
+async function executeApprovedAction(env, action) {
+  if (!action || typeof action.type !== "string" || !action.args || typeof action.args !== "object") throw new Error("ساختار عملیات نامعتبر است.");
+  if (action.type === "system.health") {
+    const [tables, tasks] = await Promise.all([
+      env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM tasks").first()
+    ]);
+    return { tool: action.type, read_only: true, tables: tables.n, tasks: tasks.n, worker: "active" };
+  }
+  if (action.type === "github.list_repos") {
+    const repos = await githubRequest(env, "/user/repos?visibility=all&affiliation=owner&sort=updated&per_page=30");
+    return { tool: action.type, read_only: true, repositories: repos.filter(x => x.owner?.login?.toLowerCase() === "onlysingbox").map(x => ({ name:x.name, private:x.private, branch:x.default_branch, updated_at:x.updated_at })) };
+  }
+  if (action.type === "github.workflow_runs") {
+    const repo = String(action.args.repo || "");
+    if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) throw new Error("نام مخزن نامعتبر است.");
+    const data = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(repo) + "/actions/runs?per_page=5");
+    return { tool: action.type, read_only: true, repository: repo, runs: (data.workflow_runs || []).map(x => ({ name:x.name, status:x.status, conclusion:x.conclusion, branch:x.head_branch, created_at:x.created_at, html_url:x.html_url })) };
+  }
+  if (action.type === "github.get_file") {
+    const repo = String(action.args.repo || "");
+    const path = String(action.args.path || "");
+    if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || !path || path.length > 300 || path.startsWith("/") || path.split("/").some(part => !part || part === "." || part === "..")) throw new Error("نام مخزن یا مسیر فایل نامعتبر است.");
+    const data = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(repo) + "/contents/" + path.split("/").map(encodeURIComponent).join("/"));
+    if (Array.isArray(data) || data.type !== "file" || !data.content) throw new Error("مسیر انتخاب‌شده یک فایل متنی ساده نیست.");
+    const decoded = atob(data.content.replace(/\s/g, ""));
+    const bytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+    const content = new TextDecoder().decode(bytes);
+    return { tool: action.type, read_only: true, repository: repo, path, content: content.slice(0, 12000), truncated: content.length > 12000 };
+  }
+  throw new Error("ابزار مجاز نیست. ابزارهای فعلی: system.health، github.list_repos، github.workflow_runs، github.get_file");
+}
+
 async function decideTask(env, id, ownerId, decision) {
-  const task = await env.DB.prepare("SELECT id, title, status FROM tasks WHERE id = ?").bind(id).first();
+  const task = await env.DB.prepare("SELECT id, title, description, status FROM tasks WHERE id = ?").bind(id).first();
   if (!task) return { error: "وظیفه پیدا نشد." };
   if (task.status !== "pending_approval") return { error: "این وظیفه قبلاً تعیین تکلیف شده است." };
   const status = decision === "approve" ? "approved" : "rejected";
@@ -117,6 +151,20 @@ async function decideTask(env, id, ownerId, decision) {
   await env.DB.prepare("UPDATE approvals SET status = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP WHERE task_id = ? AND status = 'pending'")
     .bind(status, String(ownerId), id).run();
   await log(env, ownerId, `task.${status}`, "task", id, { title: task.title });
+  if (decision === "approve" && typeof task.description === "string" && task.description.startsWith("WOLF_ACTION:")) {
+    try {
+      const action = JSON.parse(task.description.slice("WOLF_ACTION:".length));
+      const output = await executeApprovedAction(env, action);
+      await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(output).slice(0,20000), id).run();
+      await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: true });
+      return { task, status:"completed", execution:output };
+    } catch(error) {
+      const message = String(error.message || error);
+      await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
+      await log(env, ownerId, "task.execution_failed", "task", id, {error:message});
+      return { task, status:"execution_failed", execution_error:message };
+    }
+  }
   return { task, status };
 }
 
@@ -188,7 +236,10 @@ async function handleTelegramUpdate(request, env) {
     const label = result.error || (decision === "approve" ? "طرح وظیفه تأیید شد؛ اجرای خارجی هنوز فعال نیست." : "وظیفه رد شد.");
     await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: label });
     await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
-    await reply(env, callback.message.chat.id, label);
+    let detail = label;
+    if (result.execution) detail += "\n\nنتیجه اجرا:\n" + JSON.stringify(result.execution, null, 2).slice(0,3200);
+    if (result.execution_error) detail += "\n\nخطای اجرا: " + result.execution_error;
+    await reply(env, callback.message.chat.id, detail);
     return json({ ok: true });
   }
   if (!message?.text) return json({ ok: true });
@@ -207,7 +258,7 @@ async function handleTelegramUpdate(request, env) {
   if (command === "/start") {
     await reply(env, chatId, "🐺 به WOLF AI خوش آمدی.\n\nدستیار شخصی تو آماده دریافت وظیفه است. عملیات حساس فقط پس از تأیید تو انجام می‌شوند.\n\nبرای دیدن فرمان‌ها /help را بزن.");
   } else if (command === "/help") {
-    await reply(env, chatId, "📖 راهنمای WOLF AI\n\n/status - بررسی واقعی وضعیت سیستم، تلگرام، GitHub و پایگاه داده\n/newtask عنوان کار - ثبت وظیفه جدید\n/tasks - نمایش ۱۰ وظیفه اخیر\n/approve شناسه - تأیید طرح وظیفه\n/reject شناسه - رد وظیفه\n\n⚠️ تأیید فعلاً فقط طرح را تأیید می‌کند و هنوز هیچ ابزار خارجی اجرا نمی‌شود.");
+    await reply(env, chatId, "📖 راهنمای WOLF AI\n\n/status - بررسی واقعی وضعیت سیستم، تلگرام، GitHub و پایگاه داده\n/newtask عنوان کار - ثبت وظیفه برنامه‌ریزی\n/newaction نوع ابزار [پارامترها] - پیشنهاد عملیات مجاز\n/tasks - نمایش ۱۰ وظیفه اخیر\n/approve شناسه - تأیید طرح وظیفه\n/reject شناسه - رد وظیفه\n\n⚠️ تأیید فعلاً فقط طرح را تأیید می‌کند و هنوز هیچ ابزار خارجی اجرا نمی‌شود.");
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(); return {ok:t.n===6, text:t.n===6 ? "متصل؛ ۶ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
@@ -223,6 +274,18 @@ async function handleTelegramUpdate(request, env) {
     await reply(env, chatId, `وظیفه ثبت شد. شناسه: ${id}\nبرای تأیید طرح یا رد آن از دکمه‌ها استفاده کن.\n\nفعلاً هیچ تغییری در سرویس خارجی انجام نمی‌شود.`, {
       reply_markup: { inline_keyboard: [[{ text: "تأیید طرح", callback_data: `approve:${id}` }, { text: "رد", callback_data: `reject:${id}` }]] }
     });
+  } else if (command === "/newaction") {
+    const [type, ...parts] = arg.split(/\s+/);
+    if (!type) return reply(env, chatId, "نمونه‌ها:\n/newaction system.health\n/newaction github.list_repos\n/newaction github.workflow_runs WolfAI\n/newaction github.get_file WolfAI src/worker.js");
+    let action = null;
+    if (type === "system.health" || type === "github.list_repos") action = {type, args:{}};
+    else if (type === "github.workflow_runs" && parts.length === 1) action = {type, args:{repo:parts[0]}};
+    else if (type === "github.get_file" && parts.length >= 2) action = {type, args:{repo:parts[0], path:parts.slice(1).join(" ")}};
+    else return reply(env, chatId, "نوع ابزار یا پارامترها نامعتبر است. نمونه‌ها را با /help ببین.");
+    const id = await createTask(env, "اجرای ابزار: " + type, userId, action);
+    await reply(env, chatId, "عملیات فقط‌خواندنی آماده بررسی است.\nابزار: " + type + "\nشناسه: " + id + "\n\nبا تأیید تو اجرا می‌شود؛ تا پیش از تأیید هیچ درخواستی به ابزار ارسال نمی‌شود.", {
+      reply_markup: {inline_keyboard:[[ {text:"تأیید و اجرا",callback_data:"approve:"+id}, {text:"رد",callback_data:"reject:"+id} ]]}
+    });
   } else if (command === "/tasks") {
     const rows = await env.DB.prepare("SELECT id, title, status FROM tasks ORDER BY created_at DESC LIMIT 10").all();
     const lines = (rows.results || []).map(x => `• ${x.id} | ${x.status} | ${x.title}`);
@@ -230,7 +293,10 @@ async function handleTelegramUpdate(request, env) {
   } else if (command === "/approve" || command === "/reject") {
     if (!arg) return reply(env, chatId, "شناسه وظیفه را وارد کن.");
     const result = await decideTask(env, arg, userId, command === "/approve" ? "approve" : "reject");
-    await reply(env, chatId, result.error || (command === "/approve" ? "طرح تأیید شد؛ اجرای واقعی هنوز در دسترس نیست." : "وظیفه رد شد."));
+    let detail = result.error || (command === "/approve" ? "طرح تأیید شد؛ این وظیفه فقط برنامه‌ریزی بود و ابزار اجرایی نداشت." : "وظیفه رد شد.");
+    if (result.execution) detail += "\n\nنتیجه اجرا:\n" + JSON.stringify(result.execution, null, 2).slice(0,3200);
+    if (result.execution_error) detail += "\n\nخطای اجرا: " + result.execution_error;
+    await reply(env, chatId, detail);
   } else {
     await reply(env, chatId, "دستور شناخته نشد. /help را بزن.");
   }
