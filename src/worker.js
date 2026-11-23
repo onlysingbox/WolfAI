@@ -168,9 +168,6 @@ const WOLF_AI_DEFAULT_MODEL = "auto";
 function chooseWolfModel(mode, userText) {
   if (mode === "glm" || mode === "gemma") return mode;
   const text = String(userText || "");
-  const quickResearch = /(جست.?وجو|جستجو|تحقیق|آخرین قابلیت|خبرهای جدید|search|look up|latest features|recent updates|find sources)/i.test(text);
-  const deepResearch = /(تحقیق جامع|بررسی جامع|چند منبع|چندین منبع|تحلیل عمیق|comprehensive research|deep research|multiple sources)/i.test(text);
-  if (quickResearch && !deepResearch) return "glm";
   const complex = /(کدنویس|کد|برنامه|باگ|خطا|معمار|معماری|تحلیل عمیق|مقایسه|طراحی سیستم|پروژه|چندمرحله|مرحله به مرحله|تحقیق جامع|سند|فایل|گیت.?هاب|cloudflare|github|code|coding|debug|architecture|deep analysis|compare|system design|multi.?step|comprehensive research|document|repository|worker)/i.test(text);
   return complex ? "gemma" : "glm";
 }
@@ -338,7 +335,7 @@ function wolfSystemPrompt(language) {
     "For university admissions research, verify each university against its own official admissions or international-students pages. Separate university-wide rules from programme-specific requirements. Do not guess tuition, language scores, deadlines, diplomas, financial proof, visa rules, or scholarships. If a detail was not checked on the official page, label it clearly as not verified and do not imply that the whole admission profile is verified. For every research task, maintain an evidence ledger internally: each factual claim must be traceable to an opened source URL; prefer the institution's own page for its policies, and do not use a search snippet as proof. When several entities are requested, normalize official names and count distinct entities before drafting. For every requested item, include only fields supported by checked sources; write not verified for missing fields. Never fill a table cell with guesses, generic admissions folklore, unrelated source names, invented links, broken URLs, or placeholder text. If source access fails or the required count cannot be verified, clearly state the shortfall and stop instead of fabricating. Do not claim that research is complete unless the requested count, source checks, and required fields have all passed. Prefer fewer accurate facts over a full-looking but unsupported table.",
     "Do not use vague claims such as a full outsourced onboarding process is required when the next step is simply to inspect public official pages. Do not propose outsourcing unless the user explicitly asks for it or a genuine external service is necessary.",
     "For Persian answers, use natural, fluent Persian, correct نیم‌فاصله, Persian punctuation, and Persian numerals consistently when appropriate. Avoid machine-translated phrases and foreign fragments. Use English names only where they are official names, and explain abbreviations on first use.",
-    "You may call the declared tools only when the user clearly requests the corresponding task. For factual questions that depend on current information, and for requests to find, compare, investigate, or research any subject or country, use web_search even when the topic is not technical. The public-web search is general-purpose, not limited to Cloudflare or GitHub. When useful, run two distinct focused searches, compare independent providers, then use web_open to verify important claims on at least two strong source pages. Prefer primary, official, government, university, and peer-reviewed sources when relevant; use reputable independent sources for context. Search snippets are leads, not evidence. Include source titles, URLs, and dates when available. Separate verified facts from estimates or uncertainty, and never invent sources or facts. Web search and public HTTPS page reading are read-only research tools. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
+    "You may call the declared tools only when the user clearly requests the corresponding task. You are a general-purpose personal assistant, not a search-first engine. First understand the user's actual goal and choose the simplest suitable approach. Answer directly from reliable knowledge for stable explanations, calculations, writing, translation, brainstorming, coding help, and reasoning; do not call web_search merely because a topic is mentioned. Use web_search when the user asks to find or verify current/external information, discover real websites or services, compare current options, investigate a subject, or when freshness and source evidence materially matter. Search is one capability among many, not the default for every task. When research is needed, search broadly across relevant independent providers, then open authoritative pages to verify important claims. Prefer primary, official, government, university, and peer-reviewed sources when relevant; use reputable independent sources for context. Search snippets are leads, not evidence. Never invent sources or facts. For an explicit request for a list of websites, sources, or links where the user mainly wants destinations, return a clean numbered list containing only the site/source name linked to its direct URL, with no descriptions or introductory commentary; provide only distinct, usable results and state briefly if the requested count cannot be met. Do not apply this link-only format to ordinary explanations, comparisons, reports, or other tasks unless requested. Web search and public HTTPS page reading are read-only research tools. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are doing. The application stores a durable plan of up to five sequential steps. Read-only research and inspection may execute immediately and are logged; any write or external side effect must wait for the owner's explicit approval of the exact operation.",
     "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Treat entries categorized status_snapshot as historical snapshots only: they describe a past observation, are not live telemetry, and must never be presented as current status without a fresh health check. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data.",
     "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
@@ -411,8 +408,8 @@ async function polishWolfAnswer(env, draft, language, userRequest = "") {
   if (!original || !env.AI?.run) return original;
   try {
     const instruction = language === "fa"
-      ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
-      : "You are WOLF AI's final editor and quality gate. Check writing, coherence, completeness, tables, and lists. Remove or repair broken sentences, gibberish, unrelated-language fragments, raw HTML, broken links, and duplicates using only information already present. If a sentence cannot be repaired from the supplied text, remove that claim; never guess to fill gaps. If the user requested a specific count, count only items actually present; do not invent items and clearly disclose any shortfall. Add no facts, numbers, names, dates, sources, URLs, citations, or claims. Never turn uncertainty into certainty. For research, treat admissions rules or other claims as verified only when supported by an opened official source; otherwise label them unverified. Keep language consistent. Preserve code fences, commands, paths, identifiers, URLs, and quotations exactly. Return only the final text.";
+      ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. برای درخواست صریح فهرست سایت‌ها/منابع/لینک‌ها، قالب مینیمال نام لینک‌شده به URL مستقیم را حفظ کن و توضیح یا مقدمه اضافه نکن؛ این قالب را به پاسخ‌های عادی تحمیل نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
+      : "You are WOLF AI's final editor and quality gate. Check writing, coherence, completeness, tables, and lists. Remove or repair broken sentences, gibberish, unrelated-language fragments, raw HTML, broken links, and duplicates using only information already present. If a sentence cannot be repaired from the supplied text, remove that claim; never guess to fill gaps. If the user requested a specific count, count only items actually present; do not invent items and clearly disclose any shortfall. Add no facts, numbers, names, dates, sources, URLs, citations, or claims. For an explicit website/source/link directory request, preserve the minimal format of linked name plus direct URL and add no descriptions or introduction; do not impose this format on ordinary answers. Never turn uncertainty into certainty. For research, treat admissions rules or other claims as verified only when supported by an opened official source; otherwise label them unverified. Keep language consistent. Preserve code fences, commands, paths, identifiers, URLs, and quotations exactly. Return only the final text.";
     const { result } = await runWolfModel(env, {
       messages: [
         { role: "system", content: instruction },
@@ -445,6 +442,39 @@ async function polishWolfAnswer(env, draft, language, userRequest = "") {
     return original;
   }
 }
+function isWolfLinkDirectoryRequest(request) {
+  const text = String(request || "");
+  const destinationWords = /(?:سایت|وب.?سایت|منبع|لینک|website|websites|site|sites|sources|links)/i.test(text);
+  const listIntent = /(?:فهرست|لیست|معرفی|پیدا\s*کن|بده|بیار|ارائه|list|find|give|show|provide|recommend)/i.test(text);
+  const explicitMinimal = /(?:فقط|صرفاً|only|just)\s*(?:نام|لینک|اسم|name|links?)/i.test(text);
+  return destinationWords && (listIntent || explicitMinimal);
+}
+
+function formatWolfLinkDirectory(execution, request, language) {
+  const singleSearch = execution?.tool === "research.search";
+  const searchSequence = execution?.tool === "agent.sequence" && Array.isArray(execution.results) && execution.results.length > 0 && execution.results.every(x => x.result?.tool === "research.search");
+  if (!singleSearch && !searchSequence) return null;
+  const results = singleSearch ? (execution.results || []) : execution.results.flatMap(x => x.result?.results || []);
+  const seenHosts = new Set(), unique = [];
+  for (const item of results) {
+    let url;
+    try { url = new URL(String(item.url || "")); } catch { continue; }
+    if (url.protocol !== "https:" || !url.hostname) continue;
+    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    if (seenHosts.has(host)) continue;
+    seenHosts.add(host);
+    const title = String(item.title || host).replace(/[\[\]\r\n]/g, " ").trim().slice(0, 180) || host;
+    unique.push({ title, url: url.toString() });
+  }
+  const digits = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
+  const match = String(request || "").match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i);
+  const expected = match ? Number(match[1].replace(/[۰-۹]/g, d => digits[d])) : 10;
+  const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
+  const lines = selected.map((item, index) => (index + 1) + ". [" + item.title + "](" + item.url + ")");
+  if (selected.length < expected) lines.push(language === "fa" ? "لینک معتبر پیدا‌شده: " + selected.length + " از " + expected : "Valid links found: " + selected.length + " of " + expected);
+  return lines.join("\n") || (language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found.");
+}
+
 async function summarizeWolfExecution(env, execution, originalRequest) {
   const language = await responseLanguage(env, originalRequest);
   if (execution?.tool === "memory.save") {
@@ -595,11 +625,17 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')").bind(JSON.stringify(execution).slice(0, 20000), id).run();
           await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({tool:execution.tool,completed:true}).slice(0,20000), id).run();
           await log(env, userId, "task.auto_executed_read_only", "task", id, {tool:execution.tool,step_count:actionList.length});
-          const summary = await summarizeWolfExecution(env, execution, userText);
-          const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
-          const sourceText = sourceItems.length ? "\n\nمنابع:\n" + sourceItems.slice(0, 8).map((x,i) => (i+1) + ". " + String(x.title || "منبع") + "\n" + String(x.url || "")).join("\n") : execution.tool === "research.open" ? "\n\nمنبع: " + String(execution.title || "") + "\n" + String(execution.url || "") : "";
-          await saveConversation(env, chatId, history, userText, summary + sourceText);
-          await reply(env, chatId, summary + sourceText);
+          const linkDirectory = isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
+          if (linkDirectory) {
+            await saveConversation(env, chatId, history, userText, linkDirectory);
+            await reply(env, chatId, linkDirectory);
+          } else {
+            const summary = await summarizeWolfExecution(env, execution, userText);
+            const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
+            const sourceText = sourceItems.length ? "\n\nمنابع:\n" + sourceItems.slice(0, 8).map((x,i) => (i+1) + ". " + String(x.title || "منبع") + "\n" + String(x.url || "")).join("\n") : execution.tool === "research.open" ? "\n\nمنبع: " + String(execution.title || "") + "\n" + String(execution.url || "") : "";
+            await saveConversation(env, chatId, history, userText, summary + sourceText);
+            await reply(env, chatId, summary + sourceText);
+          }
         } catch (error) {
           const message = String(error.message || error);
           await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
