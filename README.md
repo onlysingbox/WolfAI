@@ -2,6 +2,8 @@
 
 Personal multilingual, single-owner AI agent. The intended product scope is a general-purpose assistant, not a language/book/research-only bot.
 
+Full scope, acceptance criteria, voice/messaging/calling requirements and delivery order: [docs/PRODUCT_SCOPE.md](docs/PRODUCT_SCOPE.md).
+
 ## Target capability domains
 
 1. Planning and personal operations: files, documents, email, calendars, tasks and follow-ups.
