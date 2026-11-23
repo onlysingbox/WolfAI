@@ -343,6 +343,10 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
     const assistant = output?.choices?.[0]?.message;
     const toolCalls = Array.isArray(assistant?.tool_calls) ? assistant.tool_calls : [];
     if (toolCalls.length) {
+      if (toolCalls.length > 5) {
+        await reply(env, chatId, language === "fa" ? "این مأموریت بیش از پنج مرحله دارد. آن را به چند درخواست کوچک‌تر تقسیم کن تا هر مرحله جداگانه بررسی شود." : "This request produced more than five steps. Please split it into smaller missions so each can be reviewed.");
+        return;
+      }
       let action;
       try {
         const actions = toolCalls.slice(0, 5).map(mapWolfToolCall);
@@ -470,7 +474,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
   }
   if (action.type === "system.health") {
     const [tables, tasks] = await Promise.all([
-      env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(),
+      env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(),
       env.DB.prepare("SELECT COUNT(*) AS n FROM tasks").first()
     ]);
     return { tool: action.type, read_only: true, tables: tables.n, tasks: tasks.n, worker: "active" };
@@ -711,7 +715,7 @@ async function handleTelegramUpdate(request, env) {
     await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
   } else if (command === "/status") {
     const checks = await Promise.all([
-      (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(); return {ok:t.n===6, text:t.n===6 ? "متصل؛ ۶ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
+      (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(); return {ok:t.n===14, text:t.n===14 ? "متصل؛ ۱۴ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
       (async () => { try { const me = await telegram(env,"getMe",{}); const wh = await telegram(env,"getWebhookInfo",{}); const expected = new URL("/telegram/webhook", new URL(request.url).origin).toString(); return {ok:!!me.is_bot && wh.url===expected, text:(me.username ? "@"+me.username : "ربات شناسایی شد")+"؛ وب‌هوک "+(wh.url===expected ? "فعال و صحیح" : "نیازمند بررسی")+(wh.pending_update_count ? "؛ پیام‌های در انتظار: "+wh.pending_update_count : "")+(wh.last_error_message ? "؛ خطای اخیر: "+wh.last_error_message : "")}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })(),
       (async () => { try { const u = await githubRequest(env,"/user"); return {ok:!!u.login,text:"متصل؛ حساب "+u.login}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })()
     ]);
@@ -770,8 +774,8 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
-        const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first();
-        return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: env.AI ? "auto (GLM-4.7-Flash + Gemma 4 26B)" : null, version: "0.3.0" });
+        const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first();
+        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: env.AI ? "auto (GLM-4.7-Flash + Gemma 4 26B)" : null, version: "0.4.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
