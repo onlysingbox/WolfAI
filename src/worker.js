@@ -102,16 +102,22 @@ async function createTask(env, title, ownerId, action = null) {
   const runId = id;
   const stepId = crypto.randomUUID();
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
-  const capability = action?.type?.startsWith("github.") ? "software_engineering" : "general";
-  const plan = [{ step: 1, capability, title: title.slice(0, 240), action: action?.type || "planning", approval_required: true }];
+  const actions = action?.type === "agent.sequence" && Array.isArray(action.args?.steps) ? action.args.steps : (action ? [action] : []);
+  const plan = actions.length
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : "general", title: item.type, action: item.type, approval_required: true }))
+    : [{ step: 1, capability: "general", title: title.slice(0, 240), action: "planning", approval_required: true }];
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
     .bind(id, title.slice(0, 240), description, String(ownerId)).run();
   await env.DB.prepare("INSERT INTO approvals (id, task_id, action_summary, risk_level, status) VALUES (?, ?, ?, 'low', 'pending')")
     .bind(crypto.randomUUID(), id, `بررسی و برنامه‌ریزی وظیفه: ${title.slice(0, 240)}`).run();
   await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, 'text', 'awaiting_approval', ?)")
     .bind(runId, String(ownerId), title.slice(0, 4000), JSON.stringify(plan)).run();
-  await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, 1, ?, ?, ?, 'awaiting_approval', 1)")
-    .bind(stepId, runId, capability, title.slice(0, 240), action ? JSON.stringify({ type: action.type, args: { repo: action.args?.repo, path: action.args?.path } }) : null).run();
+  for (let index = 0; index < plan.length; index++) {
+    const item = actions[index];
+    await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
+      .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
+        item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path } }) : null).run();
+  }
   await log(env, ownerId, "task.created", "task", id, { title, run_id: runId, step_count: 1, capability });
   return id;
 }
@@ -306,16 +312,19 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
     if (toolCalls.length) {
       let action;
       try {
-        action = mapWolfToolCall(toolCalls[0]);
-        if (action.type === "github.update_file") {
-          const current = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(action.args.repo) + "/contents/" + action.args.path.split("/").map(encodeURIComponent).join("/"));
-          if (Array.isArray(current) || current.type !== "file" || !current.sha || !current.content) throw new Error("فایل موجود یا متنی قابل ویرایش نیست.");
-          const decoded = atob(current.content.replace(/\s/g, ""));
-          const oldBytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
-          action.args.expected_sha = current.sha;
-          action.args.previous_content = new TextDecoder().decode(oldBytes).slice(0, 18000);
-          if (action.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
+        const actions = toolCalls.slice(0, 5).map(mapWolfToolCall);
+        for (const item of actions) {
+          if (item.type === "github.update_file") {
+            const current = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(item.args.repo) + "/contents/" + item.args.path.split("/").map(encodeURIComponent).join("/"));
+            if (Array.isArray(current) || current.type !== "file" || !current.sha || !current.content) throw new Error("فایل موجود یا متنی قابل ویرایش نیست.");
+            const decoded = atob(current.content.replace(/\s/g, ""));
+            const oldBytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
+            item.args.expected_sha = current.sha;
+            item.args.previous_content = new TextDecoder().decode(oldBytes).slice(0, 18000);
+            if (item.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
+          }
         }
+        action = actions.length === 1 ? actions[0] : { type: "agent.sequence", args: { steps: actions } };
       } catch (error) {
         const clarification = error.message || "برای انجام این بررسی به اطلاعات بیشتری نیاز دارم.";
         await saveConversation(env, chatId, history, userText, clarification);
@@ -323,12 +332,16 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
         return;
       }
       const id = await createTask(env, userText.slice(0, 220), userId, action);
-      const isWrite = action.type === "github.create_file" || action.type === "github.update_file";
+      const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
+      const isWrite = actionList.some(item => item.type === "github.create_file" || item.type === "github.update_file");
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
-      const preview = isWrite
-        ? "\nRepository: onlysingbox/" + action.args.repo + "\nPath: " + action.args.path + "\nCommit: " + action.args.commit_message + "\nOperation: " + (action.type === "github.create_file" ? "CREATE new file" : "UPDATE existing file; rollback snapshot stored") + "\nContent preview:\n" + action.args.content.slice(0, 1100) + (action.args.content.length > 1100 ? "\n… preview truncated" : "")
-        : "";
+      const preview = isWrite ? actionList.filter(item => item.type === "github.create_file" || item.type === "github.update_file").map((item, index) =>
+        "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
+        "\nRepository: onlysingbox/" + item.args.repo + "\nPath: " + item.args.path +
+        "\nCommit: " + item.args.commit_message + "\nContent preview:\n" + item.args.content.slice(0, 700) +
+        (item.args.content.length > 700 ? "\n… preview truncated" : "")
+      ).join("\n\n") : "";
       await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
       await reply(env, chatId, preface + "\n\n" + approvalText + preview + "\n\nTool: " + action.type + "\\nTask ID: " + id, {
         reply_markup: { inline_keyboard: [[
@@ -356,8 +369,28 @@ function encodeBase64Utf8(value) {
   return btoa(binary);
 }
 
-async function executeApprovedAction(env, action) {
+async function executeApprovedAction(env, action, runId = null, stepNo = 1) {
   if (!action || typeof action.type !== "string" || !action.args || typeof action.args !== "object") throw new Error("ساختار عملیات نامعتبر است.");
+  if (action.type === "agent.sequence") {
+    const steps = Array.isArray(action.args.steps) ? action.args.steps : [];
+    if (!steps.length || steps.length > 5) throw new Error("تعداد مراحل مأموریت نامعتبر است.");
+    const results = [];
+    for (let index = 0; index < steps.length; index++) {
+      try {
+        const result = await executeApprovedAction(env, steps[index], runId, index + 1);
+        results.push({ step: index + 1, result });
+        if (runId) await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND step_no=?")
+          .bind(JSON.stringify(result).slice(0, 12000), runId, index + 1).run();
+      } catch (error) {
+        if (runId) await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND step_no=?")
+          .bind(String(error.message || error).slice(0, 2000), runId, index + 1).run();
+        const wrapped = new Error("مرحله " + (index + 1) + " ناموفق شد: " + String(error.message || error));
+        wrapped.partial_results = results;
+        throw wrapped;
+      }
+    }
+    return { tool: "agent.sequence", read_only: results.every(x => x.result?.read_only !== false), results };
+  }
   if (action.type === "system.health") {
     const [tables, tasks] = await Promise.all([
       env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(),
@@ -428,7 +461,9 @@ async function decideTask(env, id, ownerId, decision) {
   if (decision === "approve" && typeof task.description === "string" && task.description.startsWith("WOLF_ACTION:")) {
     try {
       const action = JSON.parse(task.description.slice("WOLF_ACTION:".length));
-      const output = await executeApprovedAction(env, action);
+      await env.DB.prepare("UPDATE agent_runs SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run().catch(() => {});
+      await env.DB.prepare("UPDATE agent_steps SET status='running', started_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='approved'").bind(id).run().catch(() => {});
+      const output = await executeApprovedAction(env, action, id);
       await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(output).slice(0,20000), id).run();
       await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('approved','awaiting_approval')")
         .bind(JSON.stringify(output).slice(0,20000), id).run().catch(() => {});
@@ -438,8 +473,8 @@ async function decideTask(env, id, ownerId, decision) {
       return { task, status:"completed", execution:output };
     } catch(error) {
       const message = String(error.message || error);
-      await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
-      await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='awaiting_approval'")
+      await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message,partial_results:error.partial_results||[]}).slice(0,20000), id).run();
+      await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='running'")
         .bind(message.slice(0,2000), id).run().catch(() => {});
       await env.DB.prepare("UPDATE agent_runs SET status='failed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .bind(JSON.stringify({ error: message }).slice(0,20000), id).run().catch(() => {});
