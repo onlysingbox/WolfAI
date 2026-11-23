@@ -472,7 +472,7 @@ function formatWolfLinkDirectory(execution, request, language) {
   const wordCounts = {پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20};
   const expected = match ? (wordCounts[match[1]] || Number(match[1].replace(/[۰-۹]/g, d => digits[d]))) : 10;
   const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
-  const lines = selected.map((item, index) => (index + 1) + ". [" + item.title + "](" + item.url + ")");
+  const lines = selected.map((item, index) => (index + 1) + '. <a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title) + "</a>");
   if (selected.length < expected) lines.push(language === "fa" ? "لینک معتبر پیدا‌شده: " + selected.length + " از " + expected : "Valid links found: " + selected.length + " of " + expected);
   return lines.join("\n") || (language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found.");
 }
@@ -630,7 +630,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           const linkDirectory = isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
           if (linkDirectory) {
             await saveConversation(env, chatId, history, userText, linkDirectory);
-            await reply(env, chatId, linkDirectory);
+            await reply(env, chatId, linkDirectory, { parse_mode: "HTML", disable_web_page_preview: true });
           } else {
             const summary = await summarizeWolfExecution(env, execution, userText);
             const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
