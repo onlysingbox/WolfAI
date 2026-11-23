@@ -201,13 +201,22 @@ async function handleTelegramUpdate(request, env) {
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, role, last_seen_at) VALUES (?, ?, ?, 'owner', CURRENT_TIMESTAMP) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_seen_at=CURRENT_TIMESTAMP")
     .bind(userId, message.from.username || null, message.from.first_name || null).run();
   const text = message.text.trim();
-  const [command, ...rest] = text.split(/\s+/);
+  const [rawCommand, ...rest] = text.split(/\s+/);
+  const command = rawCommand.split("@")[0].toLowerCase();
   const arg = rest.join(" ");
-  if (command === "/start" || command === "/help") {
-    await reply(env, chatId, "🐺 WOLF AI آماده است.\n\n/status وضعیت سیستم\n/newtask عنوان کار\n/tasks فهرست وظایف\n/approve شناسه تأیید طرح\n/reject شناسه رد طرح\n\nتوجه: تأیید فعلاً فقط طرح را تأیید می‌کند؛ اجرای ابزارهای خارجی در مرحله بعد اضافه می‌شود.");
+  if (command === "/start") {
+    await reply(env, chatId, "🐺 به WOLF AI خوش آمدی.\n\nدستیار شخصی تو آماده دریافت وظیفه است. عملیات حساس فقط پس از تأیید تو انجام می‌شوند.\n\nبرای دیدن فرمان‌ها /help را بزن.");
+  } else if (command === "/help") {
+    await reply(env, chatId, "📖 راهنمای WOLF AI\n\n/status - بررسی واقعی وضعیت سیستم، تلگرام، GitHub و پایگاه داده\n/newtask عنوان کار - ثبت وظیفه جدید\n/tasks - نمایش ۱۰ وظیفه اخیر\n/approve شناسه - تأیید طرح وظیفه\n/reject شناسه - رد وظیفه\n\n⚠️ تأیید فعلاً فقط طرح را تأیید می‌کند و هنوز هیچ ابزار خارجی اجرا نمی‌شود.");
   } else if (command === "/status") {
-    const count = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first();
-    await reply(env, chatId, `WOLF AI فعال است.\nحافظه: متصل\nتعداد وظایف: ${count.total}\nحالت: تأییدمحور`);
+    const checks = await Promise.all([
+      (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(); return {ok:t.n===6, text:t.n===6 ? "متصل؛ ۶ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
+      (async () => { try { const me = await telegram(env,"getMe",{}); const wh = await telegram(env,"getWebhookInfo",{}); const expected = new URL("/telegram/webhook", new URL(request.url).origin).toString(); return {ok:!!me.is_bot && wh.url===expected, text:(me.username ? "@"+me.username : "ربات شناسایی شد")+"؛ وب‌هوک "+(wh.url===expected ? "فعال و صحیح" : "نیازمند بررسی")+(wh.pending_update_count ? "؛ پیام‌های در انتظار: "+wh.pending_update_count : "")+(wh.last_error_message ? "؛ خطای اخیر: "+wh.last_error_message : "")}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })(),
+      (async () => { try { const u = await githubRequest(env,"/user"); return {ok:!!u.login,text:"متصل؛ حساب "+u.login}; } catch(e) { return {ok:false,text:"خطا: "+e.message}; } })()
+    ]);
+    const [db, tg, gh] = checks;
+    const mark = x => x.ok ? "✅" : "⚠️";
+    await reply(env, chatId, "🐺 گزارش وضعیت WOLF AI\n\nWorker: ✅ فعال و در حال پاسخ‌گویی\nپایگاه داده D1: "+mark(db)+" "+db.text+"\nتلگرام: "+mark(tg)+" "+tg.text+"\nGitHub: "+mark(gh)+" "+gh.text+"\nتعداد وظایف ثبت‌شده: "+(db.tasks ?? "نامشخص")+"\nحالت امنیتی: تأیید مالک پیش از عملیات حساس\n\nتوجه: اجرای خودکار ابزارهای خارجی هنوز فعال نشده است.");
   } else if (command === "/newtask") {
     if (!arg) return reply(env, chatId, "عنوان را بنویس: /newtask بررسی وضعیت سرور");
     const id = await createTask(env, arg, userId);
