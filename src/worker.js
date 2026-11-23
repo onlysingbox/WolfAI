@@ -315,7 +315,7 @@ function wolfSystemPrompt(language) {
     "GLOBAL OUTPUT STANDARD (applies to EVERY capability and every message, not only research): Produce clean, professional, well-structured output for conversation, planning, research, tool summaries, code explanations, troubleshooting, finance, documents, schedules, and all other tasks. Start directly with the useful answer; use a concise descriptive heading when the answer is substantial. Organize with meaningful headings, short paragraphs, consistent bullets/numbering, and valid Markdown tables only when they improve clarity. Keep terminology, units, dates, punctuation, and language consistent. Never emit malformed Markdown, broken table rows, duplicate entities or paragraphs, unfinished sentences, random symbols, corrupted text, accidental script/language mixing, irrelevant sources, or unexplained placeholders. In Persian, write fluent natural Persian with correct نیم‌فاصله and punctuation; in English, use fluent standard English. Preserve exact code, commands, file paths, identifiers, URLs, and quoted user-provided data. Do not translate or alter code blocks. Do not invent facts to make an answer look complete. Before every response, run a silent final editorial check: relevance, factual consistency, structure, spelling, grammar, duplicates, completeness, and whether each claim is supported. If a fact is uncertain, say so plainly instead of disguising uncertainty. This standard applies equally to all agent capabilities and all response paths.",
     "For research reports, use this fixed structure whenever applicable: (1) title and date of research, (2) scope and method, (3) findings in a numbered list or readable table, (4) a clear status for each claim such as verified / partially verified / not verified, (5) limitations and missing information, and (6) numbered sources with direct URLs and the publisher or institution name. Put citations immediately beside the claims they support. Never invent a source, citation, institution, date, admission requirement, or URL. Never present a search result snippet as if the page itself was checked.",
     "For lists of institutions, products, people, or places, normalize official names and deduplicate entities before answering. Do not list the same institution twice under an abbreviation and its full name. If the requested count cannot be supported by distinct verified entities, state the actual count instead of padding the list. Prefer the entity own official website and relevant official department page. Do not treat unrelated consulting firms, generic directories, broken links, or unrelated PDFs as authoritative evidence.",
-    "For university admissions research, verify each university against its own official admissions or international-students pages. Separate university-wide rules from programme-specific requirements. Do not guess tuition, language scores, deadlines, diplomas, financial proof, visa rules, or scholarships. If a detail was not checked on the official page, label it clearly as not verified and do not imply that the whole admission profile is verified.",
+    "For university admissions research, verify each university against its own official admissions or international-students pages. Separate university-wide rules from programme-specific requirements. Do not guess tuition, language scores, deadlines, diplomas, financial proof, visa rules, or scholarships. If a detail was not checked on the official page, label it clearly as not verified and do not imply that the whole admission profile is verified. For every research task, maintain an evidence ledger internally: each factual claim must be traceable to an opened source URL; prefer the institution's own page for its policies, and do not use a search snippet as proof. When several entities are requested, normalize official names and count distinct entities before drafting. For every requested item, include only fields supported by checked sources; write "not verified" for missing fields. Never fill a table cell with guesses, generic admissions folklore, unrelated source names, invented links, broken URLs, or placeholder text. If source access fails or the required count cannot be verified, clearly state the shortfall and stop instead of fabricating. Do not claim that research is complete unless the requested count, source checks, and required fields have all passed. Prefer fewer accurate facts over a full-looking but unsupported table.",
     "Do not use vague claims such as a full outsourced onboarding process is required when the next step is simply to inspect public official pages. Do not propose outsourcing unless the user explicitly asks for it or a genuine external service is necessary.",
     "For Persian answers, use natural, fluent Persian, correct نیم‌فاصله, Persian punctuation, and Persian numerals consistently when appropriate. Avoid machine-translated phrases and foreign fragments. Use English names only where they are official names, and explain abbreviations on first use.",
     "You may call the declared tools only when the user clearly requests the corresponding task. For factual questions that depend on current information, and for requests to find, compare, investigate, or research any subject or country, use web_search even when the topic is not technical. The public-web search is general-purpose, not limited to Cloudflare or GitHub. When useful, run two distinct focused searches, compare independent providers, then use web_open to verify important claims on at least two strong source pages. Prefer primary, official, government, university, and peer-reviewed sources when relevant; use reputable independent sources for context. Search snippets are leads, not evidence. Include source titles, URLs, and dates when available. Separate verified facts from estimates or uncertainty, and never invent sources or facts. Web search and public HTTPS page reading are read-only research tools. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
@@ -352,26 +352,76 @@ function cleanupWolfMarkdown(value) {
   return output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function inspectWolfAnswer(value, language, userRequest = "") {
+  const text = String(value || "").trim();
+  const issues = [];
+  if (!text || text.length < 18) issues.push("empty_or_too_short");
+  if ((text.match(/\uFFFD/g) || []).length) issues.push("replacement_character");
+  if ((text.match(/\u0000|[\u0001-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length) issues.push("control_character");
+  const fence = String.fromCharCode(96, 96, 96);
+  if ((text.split(fence).length - 1) % 2 !== 0) issues.push("unclosed_code_fence");
+  if (language === "fa" && /[\u3040-\u30ff\u3400-\u9fff]/.test(text)) issues.push("unexpected_cjk_script");
+  if (/<\/?(?:a|div|span|table|tr|td|th)\b[^>]*>/i.test(text)) issues.push("raw_html_markup");
+  const lines = text.split("\n");
+  const separatorIndex = lines.findIndex(line => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line));
+  if (separatorIndex > 0) {
+    const headerPipes = (lines[separatorIndex - 1].match(/\|/g) || []).length;
+    for (const line of lines.slice(separatorIndex + 1)) {
+      if (!line.trim().startsWith("|")) continue;
+      if ((line.match(/\|/g) || []).length !== headerPipes) { issues.push("malformed_markdown_table"); break; }
+    }
+  }
+  const numeralMap = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
+  const request = String(userRequest || "");
+  const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|universit(?:y|ies)|items|options|sources)\b?/i);
+  if (countMatch) {
+    const expected = Number(countMatch[1].replace(/[۰-۹]/g, d => numeralMap[d]));
+    const numbered = (text.match(/^\s*(?:\|\s*)?(?:\*\*)?\d{1,2}[.)،-]\s+/gm) || []).length;
+    const tableRows = separatorIndex > 0 ? lines.slice(separatorIndex + 1).filter(line => line.trim().startsWith("|") && !/^\s*\|?\s*:?-{3,}/.test(line)).length : 0;
+    if (expected > 1 && Math.max(numbered, tableRows) < expected) issues.push("requested_item_count_not_met");
+  }
+  const lastLine = lines.filter(line => line.trim() && !line.trim().startsWith("```")).at(-1)?.trim() || "";
+  if (language === "fa" && /(?:\b(?:و|یا|برای|از|با|به|که|اما|اگر|تا)|[،:؛])$/u.test(lastLine)) issues.push("unfinished_final_line");
+  if (language !== "fa" && /(?:\b(?:and|or|for|with|to|of|because|which)|[:,;])$/i.test(lastLine)) issues.push("unfinished_final_line");
+  return [...new Set(issues)];
+}
+
 async function polishWolfAnswer(env, draft, language, userRequest = "") {
   const original = cleanupWolfMarkdown(draft);
   if (!original || !env.AI?.run) return original;
   try {
     const instruction = language === "fa"
-      ? "تو ویراستار نهایی WOLF AI هستی. متن پیش‌نویس را فقط از نظر نظم، وضوح، دستور زبان، نشانه‌گذاری، نیم‌فاصله، تیترها، فهرست‌ها و جدول‌ها اصلاح کن. هیچ واقعیت، عدد، نام، تاریخ، نتیجه، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. هیچ ادعایی را قوی‌تر از متن اصلی نکن. اگر چیزی در پیش‌نویس نامطمئن است، همان عدم‌قطعیت را حفظ کن و آن را تأییدشده جلوه نده. موارد تکراری را حذف کن. متن فارسی باید روان و یکدست باشد و عبارت‌های بی‌معنی یا حروف متعلق به زبان‌های نامرتبط را وارد نکن. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و متن نقل‌قول‌شده را دقیقاً بدون هیچ تغییری حفظ کن. فقط نسخه نهایی متن را برگردان؛ درباره ویرایش توضیح نده."
-      : "You are WOLF AI's final editor. Edit the draft only for organization, clarity, grammar, punctuation, headings, lists, and tables. Do not add any fact, number, name, date, conclusion, source, URL, citation, or claim. Do not strengthen claims. Preserve uncertainty exactly; never make an unverified statement sound verified. Remove duplicates. Keep the language consistent and do not introduce gibberish or unrelated scripts. Preserve code fences, commands, file paths, identifiers, URLs, and quoted user data exactly, character for character. Return only the final edited text, with no commentary.";
+      ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
+      : "You are WOLF AI's final editor and quality gate. Check writing, coherence, completeness, tables, and lists. Remove or repair broken sentences, gibberish, unrelated-language fragments, raw HTML, broken links, and duplicates using only information already present. If a sentence cannot be repaired from the supplied text, remove that claim; never guess to fill gaps. If the user requested a specific count, count only items actually present; do not invent items and clearly disclose any shortfall. Add no facts, numbers, names, dates, sources, URLs, citations, or claims. Never turn uncertainty into certainty. For research, treat admissions rules or other claims as verified only when supported by an opened official source; otherwise label them unverified. Keep language consistent. Preserve code fences, commands, paths, identifiers, URLs, and quotations exactly. Return only the final text.";
     const { result } = await runWolfModel(env, {
       messages: [
         { role: "system", content: instruction },
-        { role: "user", content: "Original request (context only): " + String(userRequest || "").slice(0, 1800) + "\n\nDraft to edit (source of truth; do not add facts):\n" + original.slice(0, 12500) }
+        { role: "user", content: "Original request (context only): " + String(userRequest || "").slice(0, 1800) + "\n\nDraft to check (the only factual source; do not add facts):\n" + original.slice(0, 15000) }
       ],
-      max_tokens: 1500,
+      max_tokens: 3000,
       chat_template_kwargs: { enable_thinking: false }
     }, "glm");
     const edited = String(result?.choices?.[0]?.message?.content || "").trim();
-    if (!edited || edited.length < Math.min(24, Math.floor(original.length * 0.25))) return original;
-    return cleanupWolfMarkdown(edited);
+    const candidate = edited && edited.length >= Math.min(24, Math.floor(original.length * 0.25))
+      ? cleanupWolfMarkdown(edited)
+      : original;
+    const issues = inspectWolfAnswer(candidate, language, userRequest);
+    if (issues.length) {
+      console.warn("WOLF AI answer blocked by quality gate", { issues, language, chars: candidate.length });
+      return language === "fa"
+        ? "برای جلوگیری از ارسال اطلاعات ناقص یا متن نامفهوم، نتوانستم این پیش‌نویس را با کنترل کیفیت نهایی تأیید کنم. پاسخ ارسال نشد؛ لازم است جست‌وجو یا دامنه درخواست دقیق‌تر و دوباره بررسی شود."
+        : "I could not approve this draft through the final quality checks, so I withheld it rather than send incomplete or corrupted information. The research scope or source checks need to be refined before retrying.";
+    }
+    return candidate;
   } catch (error) {
-    console.warn("WOLF AI editorial pass failed; keeping original draft", error);
+    console.warn("WOLF AI editorial pass failed; validating original draft", error);
+    const issues = inspectWolfAnswer(original, language, userRequest);
+    if (issues.length) {
+      console.warn("WOLF AI original answer blocked by quality gate", { issues, language, chars: original.length });
+      return language === "fa"
+        ? "کنترل کیفیت نهایی در دسترس نبود و پیش‌نویس نیز بررسی قابل‌اعتمادی را پشت سر نگذاشت؛ برای جلوگیری از ارسال متن ناقص یا نامفهوم، پاسخ ارسال نشد."
+        : "The final quality check was unavailable and the draft did not pass validation, so it was withheld to avoid sending incomplete or corrupted information.";
+    }
     return original;
   }
 }
@@ -473,7 +523,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       messages,
       tools: wolfFunctionTools(),
       tool_choice: "auto",
-      max_tokens: 1200,
+      max_tokens: 2200,
       chat_template_kwargs: { enable_thinking: false }
     }, modelKey);
     await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
