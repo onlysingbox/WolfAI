@@ -801,7 +801,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
   if (action.type === "research.search") {
     const query = String(action.args.query || "").trim();
     if (!query || query.length > 300) throw new Error("عبارت جست‌وجو نامعتبر است.");
-    return await executeResearchSearch(query);
+    return await executeResearchSearch(query, env);
   }
   if (action.type === "research.open") return await executeResearchOpen(action.args.url);
   if (action.type === "memory.save") {
