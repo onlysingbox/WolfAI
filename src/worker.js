@@ -453,7 +453,7 @@ async function decideTask(env, id, ownerId, decision) {
   await env.DB.prepare("UPDATE approvals SET status = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP WHERE task_id = ? AND status = 'pending'")
     .bind(status, String(ownerId), id).run();
   await log(env, ownerId, `task.${status}`, "task", id, { title: task.title });
-  await env.DB.prepare("UPDATE agent_steps SET status=?, approved_by=?, approved_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('approved','awaiting_approval')")
+  await env.DB.prepare("UPDATE agent_steps SET status=?, approved_by=?, approved_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('running','approved','awaiting_approval')")
     .bind(decision === "approve" ? "approved" : "rejected", String(ownerId), id).run().catch(() => {});
   if (decision === "reject") {
     await env.DB.prepare("UPDATE agent_runs SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run().catch(() => {});
