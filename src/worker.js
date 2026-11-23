@@ -102,6 +102,8 @@ async function createTask(env, title, ownerId, action = null) {
   const runId = id;
   const actions = action?.type === "agent.sequence" && Array.isArray(action.args?.steps) ? action.args.steps : (action ? [action] : []);
   const describe = item => {
+    if (item?.type === "memory.save") return "ذخیره در حافظه: " + String(item.args?.key || "مورد جدید");
+    if (item?.type === "memory.search") return "جست‌وجوی حافظه: " + String(item.args?.query || "");
     if (item?.type === "artifact.create") return "ذخیره سند: " + String(item.args?.title || "سند جدید");
     if (item?.type === "artifact.search") return "جست‌وجوی اسناد: " + String(item.args?.query || "");
     if (item?.type === "github.get_file") return "خواندن فایل GitHub: " + String(item.args?.repo || "") + "/" + String(item.args?.path || "");
@@ -204,6 +206,8 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "github_get_file", description: "Read a text file from an owned repository. Ask for repository or file path if unclear.", parameters: { type: "object", properties: { repo: { type: "string" }, path: { type: "string" } }, required: ["repo", "path"] } } },
     { type: "function", function: { name: "github_create_file", description: "Create a new text file in an owned GitHub repository when the user explicitly asks to create or add a file. This is a write operation and will require owner approval.", parameters: { type: "object", properties: { repo: { type: "string" }, path: { type: "string" }, content: { type: "string" }, commit_message: { type: "string" } }, required: ["repo", "path", "content", "commit_message"] } } },
     { type: "function", function: { name: "github_update_file", description: "Replace the contents of an existing text file in an owned GitHub repository when the user explicitly asks to edit or update it. This is a write operation and will require owner approval. Do not use for vague requests.", parameters: { type: "object", properties: { repo: { type: "string" }, path: { type: "string" }, content: { type: "string" }, commit_message: { type: "string" } }, required: ["repo", "path", "content", "commit_message"] } } },
+    { type: "function", function: { name: "memory_save", description: "Save a durable owner-approved preference, project fact, or instruction to private WOLF AI memory. Never save passwords, tokens, or highly sensitive information. Requires owner approval.", parameters: { type: "object", properties: { key: { type: "string" }, value: { type: "string" }, category: { type: "string" } }, required: ["key", "value"] } } },
+    { type: "function", function: { name: "memory_search", description: "Search private long-term memory for previously saved preferences, project facts, or instructions. Read-only.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
     { type: "function", function: { name: "artifact_create", description: "Save a text document, note, or report into the owner's private WOLF AI document library. This writes to D1 and requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, kind: { type: "string" }, content: { type: "string" }, mime_type: { type: "string" } }, required: ["title", "content"] } } },
     { type: "function", function: { name: "artifact_search", description: "Search the owner's private WOLF AI document library by title or content. Read-only.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
     { type: "function", function: { name: "finance_add_entry", description: "Record an income or expense in the owner's private WOLF AI ledger. This records information only and does not move money. amount_minor is the smallest currency unit (for example USD cents; whole rials for IRR). Requires owner approval.", parameters: { type: "object", properties: { entry_type: { type: "string", enum: ["income","expense"] }, category: { type: "string" }, amount_minor: { type: "integer", description: "Amount in the smallest currency unit, e.g. 2500 for USD 25.00 or whole rials for IRR" }, currency: { type: "string" }, occurred_at: { type: "string" }, description: { type: "string" } }, required: ["entry_type","category","amount_minor","currency","occurred_at"] } } },
@@ -224,6 +228,18 @@ function mapWolfToolCall(call) {
     const repo = String(args.repo || "").trim();
     if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) throw new Error("نام مخزن مشخص یا معتبر نیست. نام مخزن را بپرس.");
     return { type: "github.workflow_runs", args: { repo } };
+  }
+  if (name === "memory_save") {
+    const key = String(args.key || "").trim();
+    const value = String(args.value || "").trim();
+    const category = String(args.category || "general").trim();
+    if (!key || key.length > 80 || !value || value.length > 1500 || !category || category.length > 40) throw new Error("اطلاعات حافظه معتبر نیست.");
+    return { type: "memory.save", args: { key, value, category } };
+  }
+  if (name === "memory_search") {
+    const query = String(args.query || "").trim();
+    if (!query || query.length > 120) throw new Error("عبارت جست‌وجوی حافظه معتبر نیست.");
+    return { type: "memory.search", args: { query } };
   }
   if (name === "artifact_create") {
     const title = String(args.title || "").trim();
@@ -279,6 +295,7 @@ function wolfSystemPrompt(language) {
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
     "You may call the declared tools only when the user clearly requests the corresponding task. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are preparing. The application stores a durable plan of up to five sequential steps and asks the owner to approve the complete plan before execution.",
+    "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data."
     "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
     "Never claim an action ran before it is approved and confirmed by the connected service. Do not use GitHub write tools for vague requests, deletes, deployments, branch protection, secrets or production changes. Finance ledger tools only record user-provided data and never move money.",
     "For repository writes, include the complete intended file content and a concise commit message. Prefer editing only the exact file requested. Do not invent a repository or path.",
@@ -289,6 +306,9 @@ function wolfSystemPrompt(language) {
 
 async function summarizeWolfExecution(env, execution, originalRequest) {
   const language = await responseLanguage(env, originalRequest);
+  if (execution?.tool === "memory.save") {
+    return language === "fa" ? "این مورد با موفقیت در حافظه خصوصی WOLF AI ذخیره شد: " + String(execution.key || "") + " = " + String(execution.value || "") : "Saved to private WOLF AI memory: " + String(execution.key || "") + " = " + String(execution.value || "");
+  }
   if (execution?.tool === "artifact.create") {
     return language === "fa"
       ? "سند «" + String(execution.title || "بدون عنوان") + "» با موفقیت در کتابخانه خصوصی WOLF AI ذخیره شد. شناسه سند: " + String(execution.artifact_id || "ثبت نشده")
@@ -319,8 +339,11 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
+  let ownerMemory = [];
+  try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-50) : []; } catch { ownerMemory = []; }
+  const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "")).join("\n") : "";
   const messages = [
-    { role: "system", content: wolfSystemPrompt(language) },
+    { role: "system", content: wolfSystemPrompt(language) + memoryContext },
     ...history,
     { role: "user", content: userText.slice(0, 4000) }
   ];
@@ -379,7 +402,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
             if (item.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
           }
         }
-        const totalWriteChars = actions.filter(item => ["github.create_file","github.update_file","artifact.create"].includes(item.type)).reduce((sum, item) => sum + String(item.args.content || "").length, 0);
+        const totalWriteChars = actions.filter(item => ["github.create_file","github.update_file","artifact.create","memory.save"].includes(item.type)).reduce((sum, item) => sum + String(item.args.content || item.args.value || "").length, 0);
         if (totalWriteChars > 18000) throw new Error("مجموع محتوای تغییرات این مأموریت از سقف امن ۱۸۰۰۰ نویسه بیشتر است؛ آن را به چند مأموریت جدا تقسیم کن.");
         action = actions.length === 1 ? actions[0] : { type: "agent.sequence", args: { steps: actions } };
       } catch (error) {
@@ -390,7 +413,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       }
       const id = await createTask(env, userText.slice(0, 220), userId, action);
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
-      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry"].includes(item.type));
+      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
       const stepsPreview = actionList.map((item, index) => {
@@ -401,7 +424,8 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
         if (item.type === "finance.add_entry") detail += " | " + item.args.entry_type + " | " + item.args.category + " | " + item.args.amount_minor + " " + item.args.currency + " | " + item.args.occurred_at;
         return detail;
       }).join("\n");
-      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry"].includes(item.type)).map((item, index) => {
+      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type)).map((item, index) => {
+        if (item.type === "memory.save") return "\nWrite step " + (index + 1) + ": SAVE TO PRIVATE MEMORY\nCategory: " + item.args.category + "\nKey: " + item.args.key + "\nExact value to save:\n" + item.args.value;
         if (item.type === "artifact.create") return "\nWrite step " + (index + 1) + ": SAVE DOCUMENT\nTitle: " + item.args.title + "\nKind: " + item.args.kind + "\nExact document content:\n" + item.args.content;
         if (item.type === "finance.add_entry") return "\nWrite step " + (index + 1) + ": RECORD LEDGER ENTRY\nType: " + item.args.entry_type + "\nCategory: " + item.args.category + "\nAmount: " + item.args.amount_minor + " " + item.args.currency + "\nDate: " + item.args.occurred_at + "\nDescription: " + (item.args.description || "-") + "\nThis records information only; no money is moved.";
         return "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
@@ -461,6 +485,26 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
       }
     }
     return { tool: "agent.sequence", read_only: results.every(x => x.result?.read_only !== false), results };
+  }
+  if (action.type === "memory.save") {
+    if (!ownerId) throw new Error("مالک حافظه مشخص نیست.");
+    const settingKey = "owner_memory:" + String(ownerId);
+    let entries = [];
+    try { const parsed = JSON.parse(await getSetting(env, settingKey, "[]")); entries = Array.isArray(parsed) ? parsed : []; } catch { entries = []; }
+    const item = { key: String(action.args.key).trim(), value: String(action.args.value).trim(), category: String(action.args.category || "general").trim(), updated_at: new Date().toISOString() };
+    entries = entries.filter(x => String(x.key || "").toLowerCase() !== item.key.toLowerCase());
+    entries.push(item);
+    entries = entries.slice(-50);
+    await putSetting(env, settingKey, JSON.stringify(entries));
+    return { tool: action.type, read_only: false, saved: true, key: item.key, category: item.category, value: item.value };
+  }
+  if (action.type === "memory.search") {
+    if (!ownerId) throw new Error("مالک حافظه مشخص نیست.");
+    let entries = [];
+    try { const parsed = JSON.parse(await getSetting(env, "owner_memory:" + String(ownerId), "[]")); entries = Array.isArray(parsed) ? parsed : []; } catch { entries = []; }
+    const q = String(action.args.query || "").toLowerCase();
+    const results = entries.filter(x => [x.key,x.value,x.category].some(v => String(v || "").toLowerCase().includes(q))).slice(-15);
+    return { tool: action.type, read_only: true, results };
   }
   if (action.type === "artifact.create") {
     if (!ownerId) throw new Error("مالک مأموریت برای ذخیره سند مشخص نیست.");
