@@ -254,8 +254,8 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   // Resolve an explicitly named, known project and file before asking the model.
   // This prevents unnecessary clarification when the current message already contains both.
   const explicitWolfAiFileRead =
-    /\\bWolfAI\\b/i.test(userText) &&
-    /src\\/worker\\.js/i.test(userText) &&
+    /\bWolfAI\b/i.test(userText) &&
+    /src\/worker\.js/i.test(userText) &&
     /(بررسی|بخوان|خواندن|بازبینی|باز کن|inspect|read|review|open)/i.test(userText);
   if (explicitWolfAiFileRead) {
     const action = { type: "github.get_file", args: { repo: "WolfAI", path: "src/worker.js" } };
@@ -264,7 +264,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       ? "مخزن و مسیر فایل را از پیام خودت تشخیص دادم؛ نیازی به تکرار نام مخزن نیست. برای خواندن فایل، تأییدت لازم است."
       : "I resolved the repository and file path from your message. No need to repeat them. Please approve reading the file.";
     await saveConversation(env, chatId, history, userText, notice);
-    await reply(env, chatId, notice + "\\n\\nRepository: onlysingbox/WolfAI\\nFile: src/worker.js\\nTask ID: " + id, {
+    await reply(env, chatId, notice + "\n\nRepository: onlysingbox/WolfAI\nFile: src/worker.js\nTask ID: " + id, {
       reply_markup: { inline_keyboard: [[
         { text: language === "fa" ? "تأیید و خواندن فایل" : "Approve & read file", callback_data: "approve:" + id },
         { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }
