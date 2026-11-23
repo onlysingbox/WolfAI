@@ -770,8 +770,17 @@ async function executeResearchSearch(query, env = {}) {
     if (/who\.int$|un\.org$|oecd\.org$|worldbank\.org$|europa\.eu$/.test(host)) score += 6;
     if (/wikipedia\.org$/.test(host)) score += 1;
     if (/facebook\.com$|instagram\.com$|pinterest\.com$|tiktok\.com$|login|sign.?in|cookie.?policy|privacy.?policy/.test(host + " " + body)) score -= 8;
-    if (/cloudflare/i.test(original) && /cloudflare\.com$/.test(host)) score += 5;
-    if (/university|universiteit|universidade|universität|college|admission|study/i.test(original) && /\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/.test(host)) score += 5;
+    const educationQuery = /university|universiteit|universidade|universität|college|admission|study|دانشگاه|پذیرش|تحصیل|دانشجویان/i.test(original);
+    const netherlandsQuery = /netherlands|holland|dutch|هلند|هلندی/i.test(original);
+    if (educationQuery) {
+      if (/\\.(edu|ac\\.[a-z]{2}|edu\\.[a-z]{2})$/.test(host) || host.includes(".edu.")) score += 6;
+      if (netherlandsQuery && host.endsWith(".nl")) score += 4;
+      if (/admission|admissions|international|study|students|bachelor|master|opleiding|toelating/i.test(item.title + " " + item.url)) score += 3;
+      if (/consult|consultant|agency|agent|kirby|directory|ranking-list|top-universities-list/i.test(host + " " + item.title)) score -= 7;
+      const hostTokens = tokenSet(host);
+      for (const token of queryTokens) if (token.length >= 5 && hostTokens.has(token)) score += 2;
+    }
+    if (/cloudflare/i.test(original) && /cloudflare\\.com$/.test(host)) score += 5;
     return { ...item, relevance: score };
   };
 
