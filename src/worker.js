@@ -119,7 +119,7 @@ async function createTask(env, title, ownerId, action = null) {
   const taskTitle = actions.length === 1 ? describe(actions[0]) : actions.length > 1 ? "مأموریت چندمرحله‌ای: " + actions.map(describe).join("؛ ").slice(0, 180) : String(title || "مأموریت جدید").slice(0, 240);
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const plan = actions.length
-    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : "general", title: item.type, action: item.type, approval_required: true }))
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : item.type?.startsWith("research.") ? "research" : "general", title: item.type, action: item.type, approval_required: true }))
     : [{ step: 1, capability: "general", title: taskTitle, action: "planning", approval_required: true }];
   const approvalSummary = actions.length ? "نیازمند تأیید مالک: " + taskTitle : "بررسی و برنامه‌ریزی وظیفه: " + taskTitle;
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
@@ -234,7 +234,7 @@ function mapWolfToolCall(call) {
   if (name === "web_open") {
     const rawUrl = String(args.url || "").trim(); let parsed;
     try { parsed = new URL(rawUrl); } catch { throw new Error("نشانی صفحه وب معتبر نیست."); }
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname || parsed.hostname === "localhost" || parsed.hostname.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname) || (parsed.port && parsed.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی و بدون اطلاعات ورود قابل خواندن است.");
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname || parsed.hostname === "localhost" || (parsed.hostname.endsWith(".local") || parsed.hostname.endsWith(".localhost") || parsed.hostname.endsWith(".internal")) || /^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname) || /^\[[0-9a-f:]+\]$/i.test(parsed.hostname) || (parsed.port && parsed.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی و بدون اطلاعات ورود قابل خواندن است.");
     return { type: "research.open", args: { url: parsed.toString() } };
   }
   if (name === "system_health") return { type: "system.health", args: {} };
@@ -543,7 +543,7 @@ async function executeResearchSearch(query) {
 
 async function executeResearchOpen(rawUrl) {
   const url = new URL(String(rawUrl || ""));
-  if (url.protocol !== "https:" || url.username || url.password || !url.hostname || url.hostname === "localhost" || url.hostname.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) || (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی قابل خواندن است.");
+  if (url.protocol !== "https:" || url.username || url.password || !url.hostname || url.hostname === "localhost" || (url.hostname.endsWith(".local") || url.hostname.endsWith(".localhost") || url.hostname.endsWith(".internal")) || /^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) || /^\[[0-9a-f:]+\]$/i.test(url.hostname) || (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی قابل خواندن است.");
   const response = await fetch(url.toString(), { redirect: "manual", headers: { "accept": "text/html,text/plain,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" } });
   if (response.status >= 300 && response.status < 400) throw new Error("صفحه به نشانی دیگری هدایت می‌شود؛ نشانی نهایی را از منبع باز کن.");
   if (!response.ok) throw new Error("صفحه وب باز نشد: HTTP " + response.status);
