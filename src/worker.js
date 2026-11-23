@@ -165,10 +165,19 @@ const WOLF_AI_MODELS = {
 };
 const WOLF_AI_DEFAULT_MODEL = "auto";
 
+function isAmbiguousTopCountriesRequest(value) {
+  const text = String(value || "").trim();
+  const asksCountries = /(?:کشور(?:ها)?|countries?)/i.test(text);
+  const asksTop = /(?:برتر|بهترین|تاپ|رتبه.?بندی|top|best|leading)/i.test(text);
+  const asksCount = /(?:ده|۱۰|10|پنج|۵|5|بیست|۲۰|20)\s*(?:کشور|countries?)/i.test(text);
+  const hasCriterion = /(?:از نظر|از لحاظ|بر اساس|معیار|شاخص|اقتصاد|درآمد|تولید ناخالص|امنیت|آموزش|سلامت|کیفیت زندگی|گردشگری|جمعیت|قدرت نظامی|پاسپورت|hdi|gdp|econom|safest|education|health|quality of life|tourism|population|military|passport|by\s+(?:gdp|income|safety|education|health|quality))/i.test(text);
+  return asksCountries && asksTop && asksCount && !hasCriterion;
+}
+
 function chooseWolfModel(mode, userText) {
   if (mode === "glm" || mode === "gemma") return mode;
   const text = String(userText || "");
-  const complex = /(کدنویس|کد|برنامه|باگ|خطا|معمار|معماری|تحلیل عمیق|مقایسه|طراحی سیستم|پروژه|چندمرحله|مرحله به مرحله|تحقیق جامع|سند|فایل|گیت.?هاب|cloudflare|github|code|coding|debug|architecture|deep analysis|compare|system design|multi.?step|comprehensive research|document|repository|worker)/i.test(text);
+  const complex = /(کدنویس|کد|برنامه|باگ|خطا|معمار|معماری|تحلیل عمیق|مقایسه|طراحی سیستم|پروژه|چندمرحله|مرحله به مرحله|تحقیق|بررسی|دانشگاه|پذیرش|کشور|رتبه|برتر|منابع|منبع|شرایط|رشته‌های شاخص|آمار|گزارش|سند|فایل|گیت.?هاب|cloudflare|github|research|universit|admission|country|countries|ranking|top \\d+|sources|compare|statistics|report|code|coding|debug|architecture|deep analysis|system design|multi.?step|document|repository|worker)/i.test(text);
   return complex ? "gemma" : "glm";
 }
 
@@ -411,6 +420,15 @@ function inspectWolfAnswer(value, language, userRequest = "") {
 async function polishWolfAnswer(env, draft, language, userRequest = "") {
   const original = cleanupWolfMarkdown(draft);
   if (!original || !env.AI?.run) return original;
+  const researchHeavy = /(?:تحقیق|بررسی|دانشگاه|پذیرش|کشور|رتبه|منابع|منبع|آمار|گزارش|research|university|universit|admission|country|countries|ranking|sources|statistics|report)/i.test(String(userRequest || ""));
+  if (researchHeavy) {
+    const issues = inspectWolfAnswer(original, language, userRequest);
+    if (!issues.length) return original;
+    console.warn("WOLF AI research draft failed deterministic validation", {issues,language,chars:original.length});
+    return language === "fa"
+      ? "پیش‌نویس تحقیق از کنترل‌های ساختاری عبور نکرد. پاسخ ناقص یا نامعتبر ارسال نشد. علت‌های تشخیص‌داده‌شده: " + issues.join("، ")
+      : "The research draft failed deterministic structural checks and was withheld. Detected issues: " + issues.join(", ");
+  }
   try {
     const instruction = language === "fa"
       ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. برای درخواست صریح فهرست سایت‌ها/منابع/لینک‌ها، قالب مینیمال نام لینک‌شده به URL مستقیم را حفظ کن و توضیح یا مقدمه اضافه نکن؛ این قالب را به پاسخ‌های عادی تحمیل نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
@@ -522,6 +540,14 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
+  if (isAmbiguousTopCountriesRequest(userText)) {
+    const clarification = language === "fa"
+      ? "منظورت از «کشورهای برتر» کدام معیار است؟ اقتصاد و تولید ناخالص داخلی، کیفیت زندگی، امنیت، آموزش، قدرت نظامی یا شاخص توسعه انسانی؟ بدون معیار، رتبه‌بندی معتبر و واحدی وجود ندارد."
+      : "What should “top countries” mean here: economy/GDP, quality of life, safety, education, military strength, or human development? There is no single meaningful ranking without a criterion.";
+    await saveConversation(env, chatId, history, userText, clarification);
+    await reply(env, chatId, clarification);
+    return;
+  }
   let ownerMemory = [];
   try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-25) : []; } catch { ownerMemory = []; }
   const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "").slice(0,500)).join("\n") : "";
