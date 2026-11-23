@@ -111,6 +111,8 @@ async function createTask(env, title, ownerId, action = null) {
     if (item?.type === "github.workflow_runs") return "بررسی اجرای گردش‌کار: " + String(item.args?.repo || "");
     if (item?.type === "finance.add_entry") return "ثبت رکورد مالی: " + String(item.args?.category || "");
     if (item?.type === "finance.summary") return "گزارش مالی";
+    if (item?.type === "research.search") return "جست‌وجوی وب: " + String(item.args?.query || "");
+    if (item?.type === "research.open") return "خواندن صفحه وب: " + String(item.args?.url || "");
     if (item?.type === "system.health") return "بررسی سلامت WOLF AI";
     return String(title || "مأموریت جدید").slice(0, 240);
   };
@@ -130,7 +132,7 @@ async function createTask(env, title, ownerId, action = null) {
     const item = actions[index];
     await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
       .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
-        item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path, title: item.args?.title, category: item.args?.category } }) : null).run();
+        item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path, title: item.args?.title, category: item.args?.category, query: item.args?.query, url: item.args?.url } }) : null).run();
   }
   await log(env, ownerId, "task.created", "task", id, { title: taskTitle, run_id: runId, step_count: plan.length, capabilities: [...new Set(plan.map(item => item.capability))] });
   return id;
@@ -200,6 +202,8 @@ async function saveConversation(env, chatId, history, userText, assistantText) {
 
 function wolfFunctionTools() {
   return [
+    { type: "function", function: { name: "web_search", description: "Search the public web for current information and return source titles, URLs and snippets. Use for research and questions requiring up-to-date sources.", parameters: { type: "object", properties: { query: { type: "string", description: "A focused web search query" } }, required: ["query"] } } },
+    { type: "function", function: { name: "web_open", description: "Open and extract readable text from a public HTTPS webpage. Use a URL supplied by the user or a trusted search result.", parameters: { type: "object", properties: { url: { type: "string", description: "A public HTTPS webpage URL" } }, required: ["url"] } } },
     { type: "function", function: { name: "system_health", description: "Read-only check of WOLF AI Worker and D1 health. Use only when the user asks to check system health or status.", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "github_list_repos", description: "Read-only list of repositories owned by onlysingbox. Use when the user asks to list or inspect their GitHub repositories.", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "github_workflow_runs", description: "Read-only latest GitHub Actions workflow runs for one repository. Ask which repository if unclear.", parameters: { type: "object", properties: { repo: { type: "string", description: "Repository name, without owner" } }, required: ["repo"] } } },
@@ -222,6 +226,17 @@ function mapWolfToolCall(call) {
     try { args = JSON.parse(args || "{}"); } catch { throw new Error("پارامتر ابزار قابل‌خواندن نیست."); }
   }
   if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("پارامتر ابزار نامعتبر است.");
+  if (name === "web_search") {
+    const query = String(args.query || "").trim();
+    if (!query || query.length > 300) throw new Error("عبارت جست‌وجوی وب خالی یا بیش از حد طولانی است.");
+    return { type: "research.search", args: { query } };
+  }
+  if (name === "web_open") {
+    const rawUrl = String(args.url || "").trim(); let parsed;
+    try { parsed = new URL(rawUrl); } catch { throw new Error("نشانی صفحه وب معتبر نیست."); }
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname || parsed.hostname === "localhost" || parsed.hostname.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(parsed.hostname) || (parsed.port && parsed.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی و بدون اطلاعات ورود قابل خواندن است.");
+    return { type: "research.open", args: { url: parsed.toString() } };
+  }
   if (name === "system_health") return { type: "system.health", args: {} };
   if (name === "github_list_repos") return { type: "github.list_repos", args: {} };
   if (name === "github_workflow_runs") {
@@ -293,7 +308,7 @@ function wolfSystemPrompt(language) {
     "You are WOLF AI, a capable, practical personal AI assistant. Speak naturally and warmly, like a real conversational assistant. Be concise but useful.",
     languageRule,
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
-    "You may call the declared tools only when the user clearly requests the corresponding task. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
+    "You may call the declared tools only when the user clearly requests the corresponding task. Web search and public HTTPS page reading are read-only research tools; include source titles and URLs in research summaries. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are preparing. The application stores a durable plan of up to five sequential steps and asks the owner to approve the complete plan before execution.",
     "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Treat entries categorized status_snapshot as historical snapshots only: they describe a past observation, are not live telemetry, and must never be presented as current status without a fresh health check. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data.",
     "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
@@ -443,6 +458,8 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const stepsPreview = actionList.map((item, index) => {
         let detail = (index + 1) + ". " + item.type;
         if (item.args?.repo) detail += " | onlysingbox/" + item.args.repo;
+        if (item.args?.query) detail += " | " + item.args.query;
+        if (item.args?.url) detail += " | " + item.args.url;
         if (item.args?.path) detail += " | " + item.args.path;
         if (item.type === "artifact.create") detail += " | " + item.args.title;
         if (item.type === "finance.add_entry") detail += " | " + item.args.entry_type + " | " + item.args.category + " | " + item.args.amount_minor + " " + item.args.currency + " | " + item.args.occurred_at;
@@ -481,6 +498,66 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
 }
 
+function decodeResearchHtml(value) {
+  return String(value || "")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/\s+/g, " ").trim();
+}
+
+async function executeResearchSearch(query) {
+  const endpoint = new URL("https://html.duckduckgo.com/html/");
+  endpoint.searchParams.set("q", query);
+  const response = await fetch(endpoint.toString(), { headers: { "accept": "text/html", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" } });
+  if (!response.ok) throw new Error("سرویس جست‌وجوی وب پاسخ نداد: HTTP " + response.status);
+  const html = (await response.text()).slice(0, 1200000);
+  const results = [];
+  const anchors = [...html.matchAll(/<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
+  for (const match of anchors) {
+    let url;
+    try {
+      url = new URL(match[1].replace(/&amp;/g, "&"), "https://html.duckduckgo.com");
+      if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") {
+        const target = url.searchParams.get("uddg");
+        if (target) url = new URL(target);
+      }
+    } catch { continue; }
+    if (url.protocol !== "https:" || !url.hostname || url.hostname.endsWith(".local")) continue;
+    const nearby = html.slice(match.index + match[0].length, match.index + match[0].length + 1800);
+    const snippetMatch = nearby.match(/class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\//i);
+    const title = decodeResearchHtml(match[2]).slice(0, 240);
+    if (!title || results.some(item => item.url === url.toString())) continue;
+    results.push({ title, url: url.toString(), snippet: decodeResearchHtml(snippetMatch?.[1] || "").slice(0, 500) });
+    if (results.length >= 8) break;
+  }
+  if (!results.length) throw new Error("نتیجه قابل‌خواندن از جست‌وجوی وب دریافت نشد؛ سرویس جست‌وجو ممکن است دسترسی را محدود کرده باشد.");
+  return { tool: "research.search", read_only: true, query, results };
+}
+
+async function executeResearchOpen(rawUrl) {
+  const url = new URL(String(rawUrl || ""));
+  if (url.protocol !== "https:" || url.username || url.password || !url.hostname || url.hostname === "localhost" || url.hostname.endsWith(".local") || /^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) || (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی قابل خواندن است.");
+  const response = await fetch(url.toString(), { redirect: "manual", headers: { "accept": "text/html,text/plain,application/xhtml+xml", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.0)" } });
+  if (response.status >= 300 && response.status < 400) throw new Error("صفحه به نشانی دیگری هدایت می‌شود؛ نشانی نهایی را از منبع باز کن.");
+  if (!response.ok) throw new Error("صفحه وب باز نشد: HTTP " + response.status);
+  const contentType = response.headers.get("content-type") || "";
+  if (!/text\/html|text\/plain|application\/xhtml\+xml/i.test(contentType)) throw new Error("این ابزار فقط متن و HTML را می‌خواند.");
+  if (Number(response.headers.get("content-length") || 0) > 1500000) throw new Error("حجم صفحه برای خواندن بیش از حد مجاز است.");
+  const raw = (await response.text()).slice(0, 1500000);
+  const title = decodeResearchHtml(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || url.hostname).slice(0, 240);
+  const main = raw.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || raw.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || raw;
+  const content = decodeResearchHtml(main).slice(0, 9000);
+  if (!content) throw new Error("متن قابل‌خواندن در صفحه پیدا نشد.");
+  return { tool: "research.open", read_only: true, title, url: url.toString(), content, truncated: content.length >= 9000 || raw.length >= 1500000 };
+}
+
 function encodeBase64Utf8(value) {
   const bytes = new TextEncoder().encode(String(value));
   let binary = "";
@@ -510,6 +587,12 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     }
     return { tool: "agent.sequence", read_only: results.every(x => x.result?.read_only !== false), results };
   }
+  if (action.type === "research.search") {
+    const query = String(action.args.query || "").trim();
+    if (!query || query.length > 300) throw new Error("عبارت جست‌وجو نامعتبر است.");
+    return await executeResearchSearch(query);
+  }
+  if (action.type === "research.open") return await executeResearchOpen(action.args.url);
   if (action.type === "memory.save") {
     if (!ownerId) throw new Error("مالک حافظه مشخص نیست.");
     const settingKey = "owner_memory:" + String(ownerId);
