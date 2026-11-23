@@ -331,7 +331,7 @@ function wolfSystemPrompt(language) {
 
 
 function cleanupWolfMarkdown(value) {
-  const lines = String(value || "").replace(/\\r\\n?/g, "\\n").split("\\n");
+  const lines = String(value || "").replace(/\r\n?/g, "\n").split("\n");
   const output = [];
   let inFence = false;
   const seen = new Set();
@@ -343,13 +343,13 @@ function cleanupWolfMarkdown(value) {
       continue;
     }
     if (!inFence) {
-      const key = line.trim().replace(/\\s+/g, " ");
+      const key = line.trim().replace(/\s+/g, " ");
       if (key && seen.has(key)) continue;
       if (key) seen.add(key);
     }
     output.push(line);
   }
-  return output.join("\\n").replace(/\\n{3,}/g, "\\n\\n").trim();
+  return output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function polishWolfAnswer(env, draft, language, userRequest = "") {
@@ -362,7 +362,7 @@ async function polishWolfAnswer(env, draft, language, userRequest = "") {
     const { result } = await runWolfModel(env, {
       messages: [
         { role: "system", content: instruction },
-        { role: "user", content: "Original request (context only): " + String(userRequest || "").slice(0, 1800) + "\\n\\nDraft to edit (source of truth; do not add facts):\\n" + original.slice(0, 12500) }
+        { role: "user", content: "Original request (context only): " + String(userRequest || "").slice(0, 1800) + "\n\nDraft to edit (source of truth; do not add facts):\n" + original.slice(0, 12500) }
       ],
       max_tokens: 1500,
       chat_template_kwargs: { enable_thinking: false }
@@ -375,7 +375,6 @@ async function polishWolfAnswer(env, draft, language, userRequest = "") {
     return original;
   }
 }
-
 async function summarizeWolfExecution(env, execution, originalRequest) {
   const language = await responseLanguage(env, originalRequest);
   if (execution?.tool === "memory.save") {
