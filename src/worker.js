@@ -342,6 +342,29 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   let ownerMemory = [];
   try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-25) : []; } catch { ownerMemory = []; }
   const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "").slice(0,500)).join("\n") : "";
+
+  // Deterministic handling for "remember this" prevents the language model from inventing a referent.
+  const rememberThis = /(?:این\s*(?:موضوع|مورد|را|رو)?\s*(?:را\s*)?(?:به\s*خاطر\s*بسپار|یادت\s*بماند|ذخیره\s*کن)|یادت\s*بماند|به\s*خاطر\s*بسپار|remember\s+this|save\s+this\s+to\s+memory)/i.test(userText);
+  if (rememberThis) {
+    const explicit = userText.match(/(?:به\s*خاطر\s*بسپار|یادت\s*بماند|ذخیره\s*کن|remember\s+this|save\s+this\s+to\s+memory)\s*[:：-]?\s*([\s\S]{8,1500})$/i);
+    const previousAssistant = [...history].reverse().find(item => item.role === "assistant" && String(item.content || "").trim());
+    const previousUser = [...history].reverse().find(item => item.role === "user" && String(item.content || "").trim() && !String(item.content).trim().startsWith("/"));
+    const value = String(explicit?.[1] || previousAssistant?.content || previousUser?.content || "").trim().slice(0,1500);
+    if (!value) {
+      const ask = language === "fa" ? "مشخص کن دقیقاً چه چیزی را ذخیره کنم؛ متن یا موضوع را بعد از «به خاطر بسپار» بنویس." : "Please specify what I should remember by adding the text after “remember this.”";
+      await saveConversation(env, chatId, history, userText, ask);
+      await reply(env, chatId, ask);
+      return;
+    }
+    const key = /گزارش\s*وضعیت\s*WOLF\s*AI|WOLF AI\s*(?:status|health)\s*report/i.test(value) ? "گزارش وضعیت WOLF AI" : "یادداشت " + new Date().toISOString().slice(0,10);
+    const action = { type: "memory.save", args: { key, value, category: "user_note" } };
+    const id = await createTask(env, "ذخیره در حافظه: " + key, userId, action);
+    const notice = language === "fa" ? "موضوع قبلی را پیدا کردم. برای جلوگیری از ذخیره اشتباه، متن دقیق زیر را آماده کرده‌ام. پس از تأیید در حافظه خصوصی ذخیره می‌شود." : "I found the previous topic. Review the exact text below; it will be saved to private memory after approval.";
+    await saveConversation(env, chatId, history, userText, notice);
+    await reply(env, chatId, notice + "\n\nعنوان: " + key + "\n\nمتن دقیق:\n" + value + "\n\nشناسه: " + id, { reply_markup: { inline_keyboard: [[{ text: language === "fa" ? "تأیید و ذخیره در حافظه" : "Approve & save to memory", callback_data: "approve:" + id }, { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }]] } });
+    return;
+  }
+
   const messages = [
     { role: "system", content: wolfSystemPrompt(language) + memoryContext },
     ...history,
@@ -785,7 +808,10 @@ async function handleTelegramUpdate(request, env) {
     ]);
     const [db, tg, gh] = checks;
     const mark = x => x.ok ? "✅" : "⚠️";
-    await reply(env, chatId, "🐺 گزارش وضعیت WOLF AI\n\nWorker: ✅ فعال و در حال پاسخ‌گویی\nپایگاه داده D1: "+mark(db)+" "+db.text+"\nتلگرام: "+mark(tg)+" "+tg.text+"\nGitHub: "+mark(gh)+" "+gh.text+"\nتعداد وظایف ثبت‌شده: "+(db.tasks ?? "نامشخص")+"\nحالت امنیتی: تأیید مالک پیش از عملیات حساس\n\nتوجه: فقط ابزارهای متصل و تأییدشده فعال‌اند؛ سایر اتصال‌ها هنوز در حال توسعه‌اند.");
+    const statusReport = "🐺 گزارش وضعیت WOLF AI\n\nWorker: ✅ فعال و در حال پاسخ‌گویی\nپایگاه داده D1: "+mark(db)+" "+db.text+"\nتلگرام: "+mark(tg)+" "+tg.text+"\nGitHub: "+mark(gh)+" "+gh.text+"\nتعداد وظایف ثبت‌شده: "+(db.tasks ?? "نامشخص")+"\nحالت امنیتی: تأیید مالک پیش از عملیات حساس\n\nتوجه: فقط ابزارهای متصل و تأییدشده فعال‌اند؛ سایر اتصال‌ها هنوز در حال توسعه‌اند.";
+    const statusHistory = await loadConversation(env, chatId);
+    await saveConversation(env, chatId, statusHistory, text, statusReport);
+    await reply(env, chatId, statusReport);
   } else if (command === "/newtask") {
     if (!arg) return reply(env, chatId, "عنوان را بنویس: /newtask بررسی وضعیت سرور");
     const id = await createTask(env, arg, userId);
