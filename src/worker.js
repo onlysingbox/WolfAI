@@ -19,7 +19,6 @@ input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10p
 .result{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.9;margin-top:12px;color:#c8d8ee}.hint{font-size:13px;color:#9fb2cc;line-height:1.8}
 </style></head><body><main>
 <section class="hero"><h1>🐺 WOLF AI</h1><div class="muted">مرکز فرماندهی دستیار شخصی</div><p>هسته اولیه فعال است. همه عملیات حساس با تأیید مالک انجام می‌شوند.</p></section>
-<div id="scriptStatus" class="hint" style="margin-top:14px">در حال راه‌اندازی کد صفحه...</div>
 <section class="grid">
 <div class="card">وضعیت Worker<div class="value">فعال</div></div>
 <div class="card">حافظه D1<div class="value">متصل</div></div>
@@ -29,57 +28,55 @@ input{display:block;width:100%;margin:10px 0 12px;padding:13px;border-radius:10p
 <section class="panel">
 <h3>اتصال ربات تلگرام</h3>
 <p class="hint">کلید وب‌هوک را در این قسمت وارد کن. این کلید همان Secret با نام TELEGRAM_WEBHOOK_SECRET است. آن را در چت یا GitHub ارسال نکن.</p>
-<input id="telegramKey" type="password" autocomplete="off" placeholder="کلید اتصال تلگرام">
-<button id="connect" class="blue" type="button" onclick="connectTelegram()">اتصال ربات تلگرام</button>
-<div id="telegramResult" class="result" role="status"></div>
+<form method="POST" action="/dashboard/connect">
+<input name="key" type="password" autocomplete="off" required placeholder="کلید اتصال تلگرام">
+<button class="blue" type="submit">اتصال ربات تلگرام</button>
+</form>
 </section>
 <section class="panel">
 <h3>اتصال فقط‌خواندنی GitHub</h3>
 <p class="hint">فهرست مخازن و آخرین اجرای GitHub Actions. دسترسی فقط‌خواندنی است.</p>
-<input id="githubKey" type="password" autocomplete="off" placeholder="کلید دسترسی پنل (DASHBOARD_ACCESS_KEY)">
-<button id="github" class="green" type="button" onclick="checkGithub()">بررسی مخازن GitHub</button>
-<div id="githubResult" class="result" role="status"></div>
+<form method="POST" action="/dashboard/github">
+<input name="key" type="password" autocomplete="off" required placeholder="کلید دسترسی پنل (DASHBOARD_ACCESS_KEY)">
+<button class="green" type="submit">بررسی مخازن GitHub</button>
+</form>
 </section>
-<script>
-window.connectTelegram = async function () {
- const button = document.getElementById("connect");
- const out = document.getElementById("telegramResult");
- const key = document.getElementById("telegramKey").value.trim();
- if (!out || !button) { alert("اجزای صفحه پیدا نشدند؛ صفحه را دوباره بارگذاری کن."); return; }
- if (!key) { out.textContent = "ابتدا کلید اتصال تلگرام را وارد کن."; return; }
- button.disabled = true;
- out.textContent = "در حال اتصال به تلگرام...";
- try {
-   const response = await fetch("/api/setup-webhook", { method: "POST", headers: { "x-wolf-setup-key": key } });
-   const data = await response.json();
-   out.textContent = response.ok && data.ok ? "وب‌هوک با موفقیت ثبت شد." : "خطا (" + response.status + "): " + (data.error || "پاسخ نامشخص سرور");
- } catch (error) {
-   out.textContent = "خطای ارتباط: " + (error && error.message ? error.message : "اتصال برقرار نشد");
- } finally { button.disabled = false; }
-};
-window.checkGithub = async function () {
- const button = document.getElementById("github");
- const out = document.getElementById("githubResult");
- const key = document.getElementById("githubKey").value.trim();
- if (!out || !button) { alert("اجزای صفحه پیدا نشدند؛ صفحه را دوباره بارگذاری کن."); return; }
- if (!key) { out.textContent = "ابتدا کلید دسترسی پنل را وارد کن."; return; }
- button.disabled = true;
- out.textContent = "در حال دریافت فهرست مخازن...";
- try {
-   const response = await fetch("/api/github/overview", { headers: { "x-wolf-dashboard-key": key } });
-   const data = await response.json();
-   if (!response.ok || !data.ok) { out.textContent = "خطا (" + response.status + "): " + (data.error || "پاسخ نامشخص سرور"); return; }
-   out.textContent = (data.repositories || []).map(item => (item.private ? "🔒 " : "🌐 ") + item.name + " | شاخه: " + item.default_branch + " | " + item.updated_at + "\n" + item.html_url).join("\n\n") || "مخزنی پیدا نشد.";
- } catch (error) {
-   out.textContent = "خطای ارتباط: " + (error && error.message ? error.message : "اتصال برقرار نشد");
- } finally { button.disabled = false; }
-};
-document.addEventListener("DOMContentLoaded", function () {
- const status = document.getElementById("scriptStatus");
- if (status) status.textContent = "کد صفحه فعال است؛ دکمه‌ها آماده‌اند.";
-});
-</script>
+
 </main></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+function resultPage(message, success = false, extra = "") {
+  return new Response(`<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WOLF AI</title><body style="margin:0;padding:28px;background:#0b1220;color:#edf3ff;font:16px Tahoma,Arial;line-height:2"><main style="max-width:760px;margin:auto;background:#111d30;border:1px solid #263b5b;border-radius:18px;padding:24px"><h2>${success ? "✅ نتیجه عملیات" : "⚠️ نتیجه عملیات"}</h2><p>${escapeHtml(message)}</p>${extra}<p><a style="color:#8bd7b1" href="/">بازگشت به داشبورد WOLF AI</a></p></main></body></html>`, {headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
+}
+async function handleDashboardPost(request, env, path) {
+  let form;
+  try { form = await request.formData(); } catch { return resultPage("اطلاعات فرم خوانده نشد."); }
+  const key = String(form.get("key") || "");
+  if (!key) return resultPage("کلید وارد نشده است.");
+  if (path === "/dashboard/connect") {
+    if (!env.TELEGRAM_WEBHOOK_SECRET || key !== env.TELEGRAM_WEBHOOK_SECRET) return resultPage("کلید اتصال تلگرام معتبر نیست.");
+    if (!env.BOT_TOKEN || !env.ADMIN_TELEGRAM_ID) return resultPage("تنظیمات Worker ناقص است. باید BOT_TOKEN و ADMIN_TELEGRAM_ID در بخش Variables and Secrets ثبت شوند.");
+    try {
+      const webhookUrl = new URL("/telegram/webhook", new URL(request.url).origin).toString();
+      const result = await telegram(env, "setWebhook", {url:webhookUrl,secret_token:env.TELEGRAM_WEBHOOK_SECRET,allowed_updates:["message","callback_query"],drop_pending_updates:false});
+      return resultPage("اتصال وب‌هوک تلگرام با موفقیت ثبت شد. نتیجه تلگرام: " + result, true);
+    } catch (e) { return resultPage("تلگرام اتصال را نپذیرفت: " + e.message); }
+  }
+  if (path === "/dashboard/github") {
+    const expected = env.DASHBOARD_ACCESS_KEY || "";
+    if (!expected || key.length !== expected.length || [...key].reduce((n,c,i)=>n|(c.charCodeAt(0)^expected.charCodeAt(i)),0)!==0) return resultPage("کلید دسترسی پنل معتبر نیست.");
+    try {
+      const repos = await githubRequest(env, "/user/repos?visibility=all&affiliation=owner&sort=updated&per_page=100");
+      const items = repos.filter(x=>x.owner && x.owner.login.toLowerCase()==="onlysingbox").slice(0,50);
+      const list = items.map(x=>"<li><a style='color:#8bd7b1' href='"+escapeHtml(x.html_url)+"'>"+escapeHtml(x.name)+"</a> | "+(x.private?"خصوصی":"عمومی")+" | "+escapeHtml(x.default_branch)+"</li>").join("");
+      return resultPage("اتصال GitHub موفق بود. تعداد مخازن پیدا شده: "+items.length, true, "<ul>"+list+"</ul>");
+    } catch(e) { return resultPage("خطا در دریافت مخازن GitHub: "+e.message); }
+  }
+  return resultPage("مسیر درخواست ناشناخته است.");
+}
 
 async function log(env, actor, action, targetType = null, targetId = null, details = null) {
   await env.DB.prepare("INSERT INTO activity_logs (actor, action, target_type, target_id, details) VALUES (?, ?, ?, ?, ?)")
@@ -234,6 +231,9 @@ async function handleTelegramUpdate(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (request.method === "POST" && (url.pathname === "/dashboard/connect" || url.pathname === "/dashboard/github")) {
+      return await handleDashboardPost(request, env, url.pathname);
+    }
     if (request.method === "GET" && url.pathname === "/api/github/overview") {
       return await githubOverview(request, env, url);
     }
