@@ -111,7 +111,7 @@ async function createTask(env, title, ownerId, action = null) {
   await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, 'text', 'awaiting_approval', ?)")
     .bind(runId, String(ownerId), title.slice(0, 4000), JSON.stringify(plan)).run();
   await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, 1, ?, ?, ?, 'awaiting_approval', 1)")
-    .bind(stepId, runId, capability, title.slice(0, 240), action ? JSON.stringify(action).slice(0, 20000) : null).run();
+    .bind(stepId, runId, capability, title.slice(0, 240), action ? JSON.stringify({ type: action.type, args: { repo: action.args?.repo, path: action.args?.path } }) : null).run();
   await log(env, ownerId, "task.created", "task", id, { title, run_id: runId, step_count: 1, capability });
   return id;
 }
@@ -239,9 +239,10 @@ async function summarizeWolfExecution(env, execution, originalRequest) {
   if (!env.AI?.run) return "نتیجه فنی در پیام زیر آمده است.";
   try {
     const language = await responseLanguage(env, originalRequest);
+    const isWrite = execution?.read_only === false;
     const prompt = language === "fa"
-      ? "نتیجه ابزار فقط‌خواندنی WOLF AI را برای کاربر به فارسی ساده خلاصه کن. فقط بر اساس داده‌های داده‌شده حرف بزن. اگر خطایی وجود دارد واضح بگو. ادعا نکن تغییری انجام شده است."
-      : "Summarize this WOLF AI read-only tool result in clear English. Use only the supplied data. Clearly mention errors. Do not claim any changes were made.";
+      ? (isWrite ? "نتیجه عملیات نوشتن WOLF AI را به فارسی ساده گزارش کن. فقط بر اساس داده‌ها بگو چه تغییری تأیید و انجام شده، مسیر فایل و لینک commit را ذکر کن و اگر نسخه بازگشت موجود است توضیح بده. خطا را پنهان نکن." : "نتیجه ابزار فقط‌خواندنی WOLF AI را به فارسی ساده خلاصه کن. فقط بر اساس داده‌ها حرف بزن و خطا را واضح بگو.")
+      : (isWrite ? "Report this WOLF AI write operation in clear English. State exactly what was changed, include file path and commit link, and mention rollback availability if present. Do not hide errors." : "Summarize this WOLF AI read-only tool result in clear English. Use only supplied data and clearly mention errors.");
     const { result: out } = await runWolfModel(env, {
       messages: [{ role: "system", content: prompt }, { role: "user", content: "User request: " + String(originalRequest || "") + "\nTool result: " + JSON.stringify(execution) }],
       max_tokens: 350,
@@ -403,7 +404,6 @@ async function executeApprovedAction(env, action) {
       commit_url: result.commit?.html_url || null,
       file_url: result.content?.html_url || null,
       rollback_available: action.type === "github.update_file",
-      previous_content: action.type === "github.update_file" ? action.args.previous_content : null,
       previous_sha: action.args.expected_sha || null
     };
   }
@@ -576,7 +576,7 @@ async function handleTelegramUpdate(request, env) {
   const command = rawCommand.split("@")[0].toLowerCase();
   const arg = rest.join(" ");
   if (command === "/start") {
-    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nفعلاً می‌توانم گفتگو کنم و ابزارهای فقط‌خواندنی را با تأیید تو اجرا کنم.\nبرای انتخاب زبان پاسخ /language و مدل هوش مصنوعی /model را بزن.");
+    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nمی‌توانم گفتگو کنم، مأموریت‌ها را ثبت کنم و ابزارهای متصل را با تأیید تو اجرا کنم. خواندن و ایجاد/ویرایش فایل متنی در GitHub پس از تأیید فعال است.\nبرای انتخاب زبان پاسخ /language و مدل هوش مصنوعی /model را بزن.");
   } else if (command === "/language") {
     const current = await getSetting(env, "response_language", "auto");
     const currentLabel = current === "fa" ? "همیشه فارسی" : current === "en" ? "همیشه انگلیسی" : "خودکار";
@@ -605,7 +605,7 @@ async function handleTelegramUpdate(request, env) {
     ]);
     const [db, tg, gh] = checks;
     const mark = x => x.ok ? "✅" : "⚠️";
-    await reply(env, chatId, "🐺 گزارش وضعیت WOLF AI\n\nWorker: ✅ فعال و در حال پاسخ‌گویی\nپایگاه داده D1: "+mark(db)+" "+db.text+"\nتلگرام: "+mark(tg)+" "+tg.text+"\nGitHub: "+mark(gh)+" "+gh.text+"\nتعداد وظایف ثبت‌شده: "+(db.tasks ?? "نامشخص")+"\nحالت امنیتی: تأیید مالک پیش از عملیات حساس\n\nتوجه: اجرای خودکار ابزارهای خارجی هنوز فعال نشده است.");
+    await reply(env, chatId, "🐺 گزارش وضعیت WOLF AI\n\nWorker: ✅ فعال و در حال پاسخ‌گویی\nپایگاه داده D1: "+mark(db)+" "+db.text+"\nتلگرام: "+mark(tg)+" "+tg.text+"\nGitHub: "+mark(gh)+" "+gh.text+"\nتعداد وظایف ثبت‌شده: "+(db.tasks ?? "نامشخص")+"\nحالت امنیتی: تأیید مالک پیش از عملیات حساس\n\nتوجه: فقط ابزارهای متصل و تأییدشده فعال‌اند؛ سایر اتصال‌ها هنوز در حال توسعه‌اند.");
   } else if (command === "/newtask") {
     if (!arg) return reply(env, chatId, "عنوان را بنویس: /newtask بررسی وضعیت سرور");
     const id = await createTask(env, arg, userId);
