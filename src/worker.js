@@ -94,7 +94,27 @@ async function telegram(env, method, payload) {
 }
 
 async function reply(env, chatId, text, extra = {}) {
-  return telegram(env, "sendMessage", { chat_id: chatId, text, ...extra });
+  const body = String(text ?? "");
+  const limit = 3800;
+  if (body.length <= limit) return telegram(env, "sendMessage", { chat_id: chatId, text: body, ...extra });
+  const chunks = [];
+  let remaining = body;
+  while (remaining.length > limit) {
+    let cut = remaining.lastIndexOf("\n", limit);
+    if (cut < Math.floor(limit * 0.55)) cut = limit;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).replace(/^\n+/, "");
+  }
+  if (remaining) chunks.push(remaining);
+  let result = null;
+  for (let index = 0; index < chunks.length; index++) {
+    result = await telegram(env, "sendMessage", {
+      chat_id: chatId,
+      text: chunks[index],
+      ...(index === chunks.length - 1 ? extra : {})
+    });
+  }
+  return result;
 }
 
 async function createTask(env, title, ownerId, action = null) {
@@ -376,7 +396,7 @@ function inspectWolfAnswer(value, language, userRequest = "") {
   const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|universit(?:y|ies)|items|options|sources)(?=\s|$)/i);
   if (countMatch) {
     const expected = Number(countMatch[1].replace(/[۰-۹]/g, d => numeralMap[d]));
-    const numbered = (text.match(/^\s*(?:\|\s*)?(?:\*\*)?\d{1,2}[.)،-]\s+/gm) || []).length;
+    const numbered = (text.match(/^\s*(?:\|\s*)?(?:\*\*)?[0-9۰-۹]{1,2}[.)،-]\s+/gm) || []).length;
     const tableRows = separatorIndex > 0 ? lines.slice(separatorIndex + 1).filter(line => line.trim().startsWith("|") && !/^\s*\|?\s*:?-{3,}/.test(line)).length : 0;
     if (expected > 1 && Math.max(numbered, tableRows) < expected) issues.push("requested_item_count_not_met");
   }
