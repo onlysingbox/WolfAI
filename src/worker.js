@@ -414,8 +414,8 @@ async function handleTelegramUpdate(request, env) {
   const callback = update.callback_query;
   if (callback) {
     const userId = String(callback.from?.id || "");
-    if (userId !== String(env.ADMIN_TELEGRAM_ID)) {
-      await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "دسترسی غیرمجاز" });
+    if (userId !== String(env.ADMIN_TELEGRAM_ID) || callback.message?.chat?.type !== "private") {
+      await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "این دستیار فقط در گفت‌وگوی خصوصی مالک فعال است." });
       return json({ ok: true });
     }
     if (String(callback.data || "").startsWith("model:")) {
@@ -464,8 +464,7 @@ async function handleTelegramUpdate(request, env) {
   if (!message?.text) return json({ ok: true });
   const userId = String(message.from?.id || "");
   const chatId = message.chat.id;
-  if (userId !== String(env.ADMIN_TELEGRAM_ID)) {
-    await reply(env, chatId, "این ربات خصوصی است و فقط مالک تعیین‌شده اجازه استفاده دارد.");
+  if (userId !== String(env.ADMIN_TELEGRAM_ID) || message.chat?.type !== "private") {
     return json({ ok: true });
   }
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, role, last_seen_at) VALUES (?, ?, ?, 'owner', CURRENT_TIMESTAMP) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_seen_at=CURRENT_TIMESTAMP")
