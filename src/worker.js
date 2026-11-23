@@ -99,7 +99,7 @@ async function reply(env, chatId, text, extra = {}) {
 
 async function createTask(env, title, ownerId, action = null) {
   const id = crypto.randomUUID().slice(0, 8);
-  const runId = crypto.randomUUID();
+  const runId = id;
   const stepId = crypto.randomUUID();
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const capability = action?.type?.startsWith("github.") ? "software_engineering" : "general";
@@ -420,29 +420,29 @@ async function decideTask(env, id, ownerId, decision) {
   await env.DB.prepare("UPDATE approvals SET status = ?, decided_by = ?, decided_at = CURRENT_TIMESTAMP WHERE task_id = ? AND status = 'pending'")
     .bind(status, String(ownerId), id).run();
   await log(env, ownerId, `task.${status}`, "task", id, { title: task.title });
-  await env.DB.prepare("UPDATE agent_steps SET status=?, approved_by=?, approved_at=CURRENT_TIMESTAMP WHERE run_id IN (SELECT run_id FROM agent_steps WHERE input_json LIKE ?) AND status='awaiting_approval'")
-    .bind(decision === "approve" ? "approved" : "rejected", String(ownerId), "%" + (task.description || "").slice(0, 80) + "%").run().catch(() => {});
+  await env.DB.prepare("UPDATE agent_steps SET status=?, approved_by=?, approved_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('approved','awaiting_approval')")
+    .bind(decision === "approve" ? "approved" : "rejected", String(ownerId), id).run().catch(() => {});
   if (decision === "reject") {
-    await env.DB.prepare("UPDATE agent_runs SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id IN (SELECT run_id FROM agent_steps WHERE status='rejected')").run().catch(() => {});
+    await env.DB.prepare("UPDATE agent_runs SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run().catch(() => {});
   }
   if (decision === "approve" && typeof task.description === "string" && task.description.startsWith("WOLF_ACTION:")) {
     try {
       const action = JSON.parse(task.description.slice("WOLF_ACTION:".length));
       const output = await executeApprovedAction(env, action);
       await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(output).slice(0,20000), id).run();
-      await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=CURRENT_TIMESTAMP WHERE run_id IN (SELECT run_id FROM agent_steps WHERE input_json LIKE ?) AND status='awaiting_approval'")
-        .bind(JSON.stringify(output).slice(0,20000), "%" + action.type + "%").run().catch(() => {});
-      await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (SELECT run_id FROM agent_steps WHERE status='completed' AND input_json LIKE ?)")
-        .bind(JSON.stringify({ tool: output.tool, completed: true }).slice(0,20000), "%" + action.type + "%").run().catch(() => {});
+      await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status IN ('approved','awaiting_approval')")
+        .bind(JSON.stringify(output).slice(0,20000), id).run().catch(() => {});
+      await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .bind(JSON.stringify({ tool: output.tool, completed: true }).slice(0,20000), id).run().catch(() => {});
       await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: !!output.read_only, rollback_available: !!output.rollback_available });
       return { task, status:"completed", execution:output };
     } catch(error) {
       const message = String(error.message || error);
       await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
-      await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id IN (SELECT run_id FROM agent_steps WHERE input_json LIKE ?) AND status='awaiting_approval'")
-        .bind(message.slice(0,2000), "%" + action.type + "%").run().catch(() => {});
-      await env.DB.prepare("UPDATE agent_runs SET status='failed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id IN (SELECT run_id FROM agent_steps WHERE status='failed' AND error_text=?)")
-        .bind(JSON.stringify({ error: message }).slice(0,20000), message.slice(0,2000)).run().catch(() => {});
+      await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='awaiting_approval'")
+        .bind(message.slice(0,2000), id).run().catch(() => {});
+      await env.DB.prepare("UPDATE agent_runs SET status='failed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .bind(JSON.stringify({ error: message }).slice(0,20000), id).run().catch(() => {});
       await log(env, ownerId, "task.execution_failed", "task", id, {error:message});
       return { task, status:"execution_failed", execution_error:message };
     }
