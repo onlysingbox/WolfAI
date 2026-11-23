@@ -327,10 +327,10 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
       const preview = isWrite
-        ? "\\nRepository: onlysingbox/" + action.args.repo + "\\nPath: " + action.args.path + "\\nCommit: " + action.args.commit_message + "\\nOperation: " + (action.type === "github.create_file" ? "CREATE new file" : "UPDATE existing file; rollback snapshot stored") + "\\nContent preview:\\n" + action.args.content.slice(0, 1100) + (action.args.content.length > 1100 ? "\\n… preview truncated" : "")
+        ? "\nRepository: onlysingbox/" + action.args.repo + "\nPath: " + action.args.path + "\nCommit: " + action.args.commit_message + "\nOperation: " + (action.type === "github.create_file" ? "CREATE new file" : "UPDATE existing file; rollback snapshot stored") + "\nContent preview:\n" + action.args.content.slice(0, 1100) + (action.args.content.length > 1100 ? "\n… preview truncated" : "")
         : "";
       await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
-      await reply(env, chatId, preface + "\\n\\n" + approvalText + preview + "\\n\\nTool: " + action.type + "\\nTask ID: " + id, {
+      await reply(env, chatId, preface + "\n\n" + approvalText + preview + "\n\nTool: " + action.type + "\\nTask ID: " + id, {
         reply_markup: { inline_keyboard: [[
           { text: language === "fa" ? "تأیید و اجرا" : "Approve & run", callback_data: "approve:" + id },
           { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }
@@ -403,7 +403,7 @@ async function executeApprovedAction(env, action) {
       commit_sha: result.commit?.sha || null,
       commit_url: result.commit?.html_url || null,
       file_url: result.content?.html_url || null,
-      rollback_available: action.type === "github.update_file",
+      rollback_snapshot_stored: action.type === "github.update_file",
       previous_sha: action.args.expected_sha || null
     };
   }
@@ -434,7 +434,7 @@ async function decideTask(env, id, ownerId, decision) {
         .bind(JSON.stringify(output).slice(0,20000), id).run().catch(() => {});
       await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .bind(JSON.stringify({ tool: output.tool, completed: true }).slice(0,20000), id).run().catch(() => {});
-      await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: !!output.read_only, rollback_available: !!output.rollback_available });
+      await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: !!output.read_only, rollback_available: !!output.rollback_snapshot_stored });
       return { task, status:"completed", execution:output };
     } catch(error) {
       const message = String(error.message || error);
