@@ -26,6 +26,7 @@ These are product targets, not a claim that every connector or action is already
 - Private single-owner mode: only `ADMIN_TELEGRAM_ID` can use the bot, and only in a private Telegram chat
 - Natural-language Telegram chat; slash commands are optional for normal conversation
 - Conversation history stored in D1
+- Owner-approved private long-term memory stored in D1, injected into relevant future conversations, searchable through natural language and `/memory`
 - Response language setting: automatic, always English, or always Persian
 - Approval-first operation model for external actions
 - Health endpoint: `/api/health`
@@ -65,7 +66,7 @@ Do not commit secrets to GitHub or send them in chat.
 
 ## Current execution limits
 
-The active tools include GitHub repository listing, recent Actions runs, text-file reading, approval-gated creation/replacement of repository text files, private document creation/search in D1, and owner-scoped finance ledger recording/reporting. GitHub writes are limited to one explicit repository/path per tool call, require an owner approval showing the intended content preview, and use the GitHub Contents API. Updates capture the previous file contents and SHA before approval and use the expected SHA during the write to prevent overwriting concurrent changes. The stored snapshot is not yet an automated rollback button. The agent can persist an approved run and execute up to five model-selected tool steps sequentially; each step and run status is stored in D1. Other repository operations such as deletion, branch protection, secrets, and deployment are not enabled. Email, messaging delivery, DNS/security changes, server administration and financial transactions are not yet enabled in the Worker.
+The active tools include GitHub repository listing, recent Actions runs, text-file reading, approval-gated creation/replacement of repository text files, private document creation/search in D1, explicit owner-approved long-term memory save/search, and owner-scoped finance ledger recording/reporting. GitHub writes are limited to one explicit repository/path per tool call, require an owner approval showing the intended content preview, and use the GitHub Contents API. Updates capture the previous file contents and SHA before approval and use the expected SHA during the write to prevent overwriting concurrent changes. The stored snapshot is not yet an automated rollback button. The agent can persist an approved run and execute up to five model-selected tool steps sequentially; each step and run status is stored in D1. Other repository operations such as deletion, branch protection, secrets, and deployment are not enabled. Email, messaging delivery, DNS/security changes, server administration and financial transactions are not yet enabled in the Worker.
 
 Voice input, speech output and voice conversations are not yet enabled. The planned messaging flow is: transcribe the owner's voice, identify a verified recipient, prepare a draft, show the exact recipient and message, wait for explicit approval, send through a connected service, and report the delivery result.
 
