@@ -109,7 +109,31 @@ async function createTask(env, title, ownerId, action = null) {
 }
 
 
-const WOLF_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
+const WOLF_AI_MODELS = {
+  glm: "@cf/zai-org/glm-4.7-flash",
+  gemma: "@cf/google/gemma-4-26b-a4b-it"
+};
+const WOLF_AI_DEFAULT_MODEL = "auto";
+
+function chooseWolfModel(mode, userText) {
+  if (mode === "glm" || mode === "gemma") return mode;
+  const text = String(userText || "");
+  const complex = /(کدنویس|کد|برنامه|باگ|خطا|معمار|معماری|تحلیل عمیق|مقایسه|طراحی سیستم|پروژه|چندمرحله|مرحله به مرحله|تحقیق جامع|سند|فایل|گیت.?هاب|cloudflare|github|code|coding|debug|architecture|deep analysis|compare|system design|multi.?step|comprehensive research|document|repository|worker)/i.test(text);
+  return complex ? "gemma" : "glm";
+}
+
+async function runWolfModel(env, payload, modelKey = "glm") {
+  const selected = WOLF_AI_MODELS[modelKey] ? modelKey : "glm";
+  try {
+    return { result: await env.AI.run(WOLF_AI_MODELS[selected], payload), modelKey: selected };
+  } catch (error) {
+    if (selected === "gemma") {
+      console.error("WOLF AI primary model failed; falling back to GLM", error);
+      return { result: await env.AI.run(WOLF_AI_MODELS.glm, payload), modelKey: "glm", fallback: true };
+    }
+    throw error;
+  }
+}
 
 async function getSetting(env, key, fallback = null) {
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = ?").bind(key).first();
@@ -202,7 +226,7 @@ async function summarizeWolfExecution(env, execution, originalRequest) {
     const prompt = language === "fa"
       ? "نتیجه ابزار فقط‌خواندنی WOLF AI را برای کاربر به فارسی ساده خلاصه کن. فقط بر اساس داده‌های داده‌شده حرف بزن. اگر خطایی وجود دارد واضح بگو. ادعا نکن تغییری انجام شده است."
       : "Summarize this WOLF AI read-only tool result in clear English. Use only the supplied data. Clearly mention errors. Do not claim any changes were made.";
-    const out = await env.AI.run(WOLF_AI_MODEL, {
+    const { result: out } = await runWolfModel(env, {
       messages: [{ role: "system", content: prompt }, { role: "user", content: "User request: " + String(originalRequest || "") + "\nTool result: " + JSON.stringify(execution) }],
       max_tokens: 350,
       chat_template_kwargs: { enable_thinking: false }
@@ -227,13 +251,16 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
     { role: "user", content: userText.slice(0, 4000) }
   ];
   try {
-    const output = await env.AI.run(WOLF_AI_MODEL, {
+    const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+    const modelKey = chooseWolfModel(preferredMode, userText);
+    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
       messages,
       tools: wolfFunctionTools(),
       tool_choice: "auto",
       max_tokens: 700,
       chat_template_kwargs: { enable_thinking: false }
-    });
+    }, modelKey);
+    await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
     const assistant = output?.choices?.[0]?.message;
     const toolCalls = Array.isArray(assistant?.tool_calls) ? assistant.tool_calls : [];
     if (toolCalls.length) {
@@ -391,6 +418,19 @@ async function handleTelegramUpdate(request, env) {
       await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "دسترسی غیرمجاز" });
       return json({ ok: true });
     }
+    if (String(callback.data || "").startsWith("model:")) {
+      const selected = String(callback.data).slice(6);
+      if (!["auto", "glm", "gemma"].includes(selected)) {
+        await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "تنظیم مدل نامعتبر است." });
+        return json({ ok: true });
+      }
+      await putSetting(env, "ai_model", selected);
+      await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "مدل هوش مصنوعی ذخیره شد." });
+      await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      const labels = { auto: "خودکار: GLM برای کارهای معمولی و Gemma برای کارهای پیچیده", glm: "فقط GLM-4.7-Flash", gemma: "فقط Gemma 4 26B" };
+      await reply(env, callback.message.chat.id, "تنظیم مدل ذخیره شد: " + labels[selected]);
+      return json({ ok: true });
+    }
     if (String(callback.data || "").startsWith("lang:")) {
       const selected = String(callback.data).slice(5);
       if (!["auto", "en", "fa"].includes(selected)) {
@@ -435,7 +475,7 @@ async function handleTelegramUpdate(request, env) {
   const command = rawCommand.split("@")[0].toLowerCase();
   const arg = rest.join(" ");
   if (command === "/start") {
-    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nفعلاً می‌توانم گفتگو کنم و ابزارهای فقط‌خواندنی را با تأیید تو اجرا کنم.\nبرای انتخاب زبان پاسخ /language را بزن.");
+    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nفعلاً می‌توانم گفتگو کنم و ابزارهای فقط‌خواندنی را با تأیید تو اجرا کنم.\nبرای انتخاب زبان پاسخ /language و مدل هوش مصنوعی /model را بزن.");
   } else if (command === "/language") {
     const current = await getSetting(env, "response_language", "auto");
     const currentLabel = current === "fa" ? "همیشه فارسی" : current === "en" ? "همیشه انگلیسی" : "خودکار";
@@ -445,8 +485,17 @@ async function handleTelegramUpdate(request, env) {
         [{ text: "همیشه English", callback_data: "lang:en" }, { text: "همیشه فارسی", callback_data: "lang:fa" }]
       ] }
     });
+  } else if (command === "/model") {
+    const current = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+    const labels = { auto: "خودکار", glm: "فقط GLM-4.7-Flash", gemma: "فقط Gemma 4 26B" };
+    await reply(env, chatId, "مدل فعلی: " + (labels[current] || labels.auto) + "\n\nمدل موردنظر را انتخاب کن:", {
+      reply_markup: { inline_keyboard: [
+        [{ text: "خودکار و هوشمند", callback_data: "model:auto" }],
+        [{ text: "GLM-4.7-Flash", callback_data: "model:glm" }, { text: "Gemma 4 26B", callback_data: "model:gemma" }]
+      ] }
+    });
   } else if (command === "/help") {
-    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/help - راهنما\n\nدستورهای فنی قبلی هم همچنان کار می‌کنند. ابزارهای فعلی فقط‌خواندنی‌اند و با تأیید تو اجرا می‌شوند. ویرایش، حذف و انتشار هنوز فعال نیست.");
+    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/help - راهنما\n\nدستورهای فنی قبلی هم همچنان کار می‌کنند. ابزارهای فعلی فقط‌خواندنی‌اند و با تأیید تو اجرا می‌شوند. ویرایش، حذف و انتشار هنوز فعال نیست.");
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first(); return {ok:t.n===6, text:t.n===6 ? "متصل؛ ۶ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
@@ -505,7 +554,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings')").first();
-        return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: env.AI ? WOLF_AI_MODEL : null, version: "0.3.0" });
+        return json({ ok: row.tables_ok === 6, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 6 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: env.AI ? "auto (GLM-4.7-Flash + Gemma 4 26B)" : null, version: "0.3.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
