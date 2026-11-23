@@ -100,7 +100,6 @@ async function reply(env, chatId, text, extra = {}) {
 async function createTask(env, title, ownerId, action = null) {
   const id = crypto.randomUUID().slice(0, 8);
   const runId = id;
-  const stepId = crypto.randomUUID();
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
   const actions = action?.type === "agent.sequence" && Array.isArray(action.args?.steps) ? action.args.steps : (action ? [action] : []);
   const plan = actions.length
@@ -233,7 +232,7 @@ function wolfSystemPrompt(language) {
     languageRule,
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
     "You may call the declared tools only when the user clearly requests the corresponding task. Read tools inspect data; GitHub create/update tools change repository contents and always require explicit owner approval.",
-    "When you call a tool, explain briefly what you are preparing. The application will store the plan and ask the owner to approve it. Only one tool call per message.",
+    "When you call tools, explain briefly what you are preparing. The application stores a durable plan of up to five sequential steps and asks the owner to approve the complete plan before execution.",
     "Never claim an external action ran before it is approved and confirmed by the connected service. Do not use GitHub write tools for vague requests, deletes, deployments, branch protection, secrets or production changes.",
     "For repository writes, include the complete intended file content and a concise commit message. Prefer editing only the exact file requested. Do not invent a repository or path.",
     "Ask one short clarification only when a required repository or file path is genuinely missing from both the current message and recent conversation. Resolve explicit aliases: \\u0022WolfAI\\u0022 means repository onlysingbox/WolfAI. If the user says to inspect/read src/worker.js in WolfAI, call github_get_file with repo WolfAI and path src/worker.js; do not ask them to repeat either value. Do not guess other repositories.",
@@ -324,6 +323,8 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
             if (item.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
           }
         }
+        const totalWriteChars = actions.filter(item => item.type === "github.create_file" || item.type === "github.update_file").reduce((sum, item) => sum + item.args.content.length, 0);
+        if (totalWriteChars > 18000) throw new Error("مجموع محتوای تغییرات این مأموریت از سقف امن ۱۸۰۰۰ نویسه بیشتر است؛ آن را به چند مأموریت جدا تقسیم کن.");
         action = actions.length === 1 ? actions[0] : { type: "agent.sequence", args: { steps: actions } };
       } catch (error) {
         const clarification = error.message || "برای انجام این بررسی به اطلاعات بیشتری نیاز دارم.";
@@ -336,14 +337,21 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const isWrite = actionList.some(item => item.type === "github.create_file" || item.type === "github.update_file");
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
+      const stepsPreview = actionList.map((item, index) => (index + 1) + ". " + item.type +
+        (item.args?.repo ? " | onlysingbox/" + item.args.repo : "") +
+        (item.args?.path ? " | " + item.args.path : "")).join("\n");
       const preview = isWrite ? actionList.filter(item => item.type === "github.create_file" || item.type === "github.update_file").map((item, index) =>
         "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
         "\nRepository: onlysingbox/" + item.args.repo + "\nPath: " + item.args.path +
-        "\nCommit: " + item.args.commit_message + "\nContent preview:\n" + item.args.content.slice(0, 700) +
-        (item.args.content.length > 700 ? "\n… preview truncated" : "")
+        "\nCommit: " + item.args.commit_message + "\nExact content to be committed:\n" + item.args.content
       ).join("\n\n") : "";
       await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
-      await reply(env, chatId, preface + "\n\n" + approvalText + preview + "\n\nTool: " + action.type + "\\nTask ID: " + id, {
+      const previewChunks = [];
+      for (let offset = 0; offset < preview.length; offset += 3200) previewChunks.push(preview.slice(offset, offset + 3200));
+      for (let index = 0; index < previewChunks.length; index++) {
+        await reply(env, chatId, "جزئیات دقیق تغییرات (" + (index + 1) + "/" + previewChunks.length + "):\n" + previewChunks[index]);
+      }
+      await reply(env, chatId, preface + "\n\n" + approvalText + "\n\nمراحل مأموریت:\n" + stepsPreview + "\n\nTool: " + action.type + "\nTask ID: " + id, {
         reply_markup: { inline_keyboard: [[
           { text: language === "fa" ? "تأیید و اجرا" : "Approve & run", callback_data: "approve:" + id },
           { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }
@@ -469,7 +477,7 @@ async function decideTask(env, id, ownerId, decision) {
         .bind(JSON.stringify(output).slice(0,20000), id).run().catch(() => {});
       await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .bind(JSON.stringify({ tool: output.tool, completed: true }).slice(0,20000), id).run().catch(() => {});
-      await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: !!output.read_only, rollback_available: !!output.rollback_snapshot_stored });
+      await log(env, ownerId, "task.executed", "task", id, { tool: output.tool, read_only: !!output.read_only, rollback_snapshot_stored: !!output.rollback_snapshot_stored });
       return { task, status:"completed", execution:output };
     } catch(error) {
       const message = String(error.message || error);
