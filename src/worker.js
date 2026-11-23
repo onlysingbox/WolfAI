@@ -545,100 +545,213 @@ function decodeResearchHtml(value) {
     .replace(/\s+/g, " ").trim();
 }
 
-async function executeResearchSearch(query) {
+async function executeResearchSearch(query, env = {}) {
   const original = String(query || "").trim().slice(0, 300);
   if (!original) throw new Error("عبارت جست‌وجو خالی است.");
-  const isWorkers = /cloudflare/i.test(original) && /workers?/i.test(original);
-  const headers = { "accept": "text/html,application/rss+xml,application/xml;q=0.9,*/*;q=0.8", "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/1.2)" };
-  const failures = [];
-  const officialSeeds = isWorkers ? [
-    { title: "Cloudflare Workers changelog", url: "https://developers.cloudflare.com/changelog/product/workers/", snippet: "فهرست رسمی تغییرات و قابلیت‌های Cloudflare Workers، همراه با تاریخ انتشار" },
-    { title: "Cloudflare Workers documentation changelog", url: "https://developers.cloudflare.com/workers/platform/changelog/", snippet: "تغییرات runtime، API، Wrangler و پلتفرم Workers" },
-    { title: "Cloudflare Blog: Workers", url: "https://blog.cloudflare.com/tag/workers/", snippet: "مقاله‌ها و اعلامیه‌های رسمی Cloudflare درباره Workers" }
-  ] : [];
-  const queries = isWorkers ? [
-    original + " site:developers.cloudflare.com/changelog/product/workers/",
-    original + " site:blog.cloudflare.com/tag/workers/",
-    original + " site:developers.cloudflare.com/workers/"
-  ] : [original];
-  const scoreResult = item => {
-    const host = (() => { try { return new URL(item.url).hostname.toLowerCase(); } catch { return ""; } })();
-    const body = (item.title + " " + item.snippet).toLowerCase();
-    let score = 0;
-    if (host === "developers.cloudflare.com" || host.endsWith(".developers.cloudflare.com")) score += 20;
-    if (host === "blog.cloudflare.com") score += 16;
-    if (/workers|workerd|durable objects|queues|wrangler|workers ai/.test(body)) score += 5;
-    if (/dashboard|login|speed test|one client|wikipedia|investor relations/.test(body)) score -= 20;
-    return { ...item, relevance: score };
+
+  const headers = {
+    "accept": "text/html,application/rss+xml,application/xml,application/json;q=0.9,*/*;q=0.8",
+    "user-agent": "Mozilla/5.0 (compatible; WOLF-AI/2.0)"
   };
-  const providers = [
-    { name: "DuckDuckGo", url: q => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", q); return u; }, parse: async response => {
-      const html = (await response.text()).slice(0, 850000);
-      const found = [];
-      const anchors = [...html.matchAll(/<a\b[^>]*>/gi)];
-      for (const match of anchors) {
-        const tag = match[0];
-        if (!/result__a/.test(tag)) continue;
-        const href = tag.match(/href=["']([^"']+)["']/i)?.[1];
-        const end = html.indexOf("</a>", match.index);
-        if (!href || end < 0) continue;
-        let url; try { url = new URL(href.replace(/&amp;/g, "&"), "https://html.duckduckgo.com"); if (url.hostname.endsWith("duckduckgo.com") && url.pathname === "/l/") { const target = url.searchParams.get("uddg"); if (target) url = new URL(target); } } catch { continue; }
-        if (url.protocol !== "https:" || !url.hostname) continue;
-        const title = decodeResearchHtml(html.slice(match.index + tag.length, end)).slice(0, 240);
-        const near = html.slice(end, end + 1200);
-        const sn = near.match(/result__snippet[^>]*>([\s\S]*?)<\//i);
-        if (title) found.push({ title, url: url.toString(), snippet: decodeResearchHtml(sn?.[1] || "").slice(0, 420) });
-        if (found.length >= 8) break;
-      }
-      return found;
-    }},
-    { name: "Bing RSS", url: q => { const u = new URL("https://www.bing.com/search"); u.searchParams.set("format", "rss"); u.searchParams.set("q", q); return u; }, parse: async response => {
-      const xml = (await response.text()).slice(0, 850000);
-      const found = [];
-      for (const item of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
-        const block = item[1];
-        const titleRaw = block.match(/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i)?.[1] || "";
-        const linkRaw = block.match(/<link(?:\s[^>]*)?>([\s\S]*?)<\/link>/i)?.[1] || "";
-        const descRaw = block.match(/<description(?:\s[^>]*)?>([\s\S]*?)<\/description>/i)?.[1] || "";
-        const title = decodeResearchHtml(titleRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 240);
-        const link = decodeResearchHtml(linkRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).trim();
-        let url; try { url = new URL(link); } catch { continue; }
-        if (title && url.protocol === "https:" && url.hostname) found.push({ title, url: url.toString(), snippet: decodeResearchHtml(descRaw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 420) });
-        if (found.length >= 8) break;
-      }
-      return found;
-    }}
-  ];
-  const jobs = providers.flatMap(provider => queries.map(async q => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+  const failures = [];
+  const normalizeUrl = raw => {
     try {
-      const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
-      if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
-      const results = await provider.parse(response);
-      if (!results.length) throw new Error(provider.name + " returned no parseable results");
-      return results;
-    } finally { clearTimeout(timeout); }
-  }));
+      const url = new URL(raw);
+      if (url.protocol !== "https:" || !url.hostname || url.username || url.password) return null;
+      url.hash = "";
+      for (const key of [...url.searchParams.keys()]) {
+        if (/^(utm_|fbclid|gclid|ref_src|source)$/.test(key)) url.searchParams.delete(key);
+      }
+      return url.toString();
+    } catch { return null; }
+  };
+  const hostOf = raw => { try { return new URL(raw).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
+  const decodeLink = raw => {
+    let value = String(raw || "").replace(/&amp;/g, "&");
+    try {
+      const parsed = new URL(value, "https://www.google.com");
+      if (parsed.hostname.endsWith("google.com") && parsed.pathname === "/url") value = parsed.searchParams.get("q") || parsed.searchParams.get("url") || value;
+      else if (parsed.hostname.endsWith("duckduckgo.com") && parsed.pathname === "/l/") value = parsed.searchParams.get("uddg") || value;
+    } catch {}
+    return normalizeUrl(value);
+  };
+  const tokenSet = value => new Set(String(value || "").toLowerCase().normalize("NFKD").match(/[a-z0-9\u0600-\u06ff]{3,}/g) || []);
+  const queryTokens = tokenSet(original);
+  const currentOrRecent = /(latest|current|today|this year|recent|2026|آخرین|جدیدترین|امروز|امسال|به.?روز|فعلی)/i.test(original);
+  const queryVariants = [original];
+  if (/(official|رسمی|وب.?سایت|سایت اصلی)/i.test(original)) queryVariants.push(original + " official website");
+  if (currentOrRecent && !/\b2026\b/.test(original)) queryVariants.push(original + " 2026");
+
+  const parseHtmlLinks = async (response, mode) => {
+    const html = (await response.text()).slice(0, 900000);
+    const found = [];
+    const anchors = [...html.matchAll(/<a\b[^>]*>/gi)];
+    for (const match of anchors) {
+      const tag = match[0];
+      const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1];
+      if (!href) continue;
+      if (mode === "ddg" && !/result__a/.test(tag)) continue;
+      if (mode === "google" && !/(?:href=["']https:\/\/|href=["']\/url\?)/i.test(tag)) continue;
+      if (mode === "yahoo" && !/(?:href=["']https:\/\/|href=["']\/RU=)/i.test(tag)) continue;
+      const url = decodeLink(href);
+      if (!url) continue;
+      const end = html.indexOf("</a>", match.index);
+      if (end < 0) continue;
+      const title = decodeResearchHtml(html.slice(match.index + tag.length, end)).slice(0, 240);
+      if (!title || title.length < 3) continue;
+      const near = html.slice(end, end + 1800);
+      const snippetMatch = near.match(/(?:result__snippet|VwiC3b|compText|dd\s+algo[^>]*).*?>([\s\S]*?)<\//i);
+      const snippet = decodeResearchHtml(snippetMatch?.[1] || "").slice(0, 420);
+      if (!found.some(x => x.url === url)) found.push({ title, url, snippet });
+      if (found.length >= 10) break;
+    }
+    return found;
+  };
+
+  const providers = [
+    {
+      name: "DuckDuckGo",
+      url: q => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", q); return u; },
+      parse: response => parseHtmlLinks(response, "ddg")
+    },
+    {
+      name: "Bing RSS",
+      url: q => { const u = new URL("https://www.bing.com/search"); u.searchParams.set("format", "rss"); u.searchParams.set("q", q); return u; },
+      parse: async response => {
+        const xml = (await response.text()).slice(0, 900000);
+        const found = [];
+        for (const match of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
+          const block = match[1];
+          const value = name => block.match(new RegExp("<" + name + "(?:\\\\s[^>]*)?>([\\\\s\\\\S]*?)<\\\\/" + name + ">", "i"))?.[1] || "";
+          const title = decodeResearchHtml(value("title").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 240);
+          const url = normalizeUrl(decodeResearchHtml(value("link").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).trim());
+          const snippet = decodeResearchHtml(value("description").replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")).slice(0, 420);
+          if (title && url) found.push({ title, url, snippet });
+          if (found.length >= 10) break;
+        }
+        return found;
+      }
+    },
+    {
+      name: "Google",
+      url: q => { const u = new URL("https://www.google.com/search"); u.searchParams.set("q", q); u.searchParams.set("num", "10"); return u; },
+      parse: response => parseHtmlLinks(response, "google")
+    },
+    {
+      name: "Yahoo",
+      url: q => { const u = new URL("https://search.yahoo.com/search"); u.searchParams.set("p", q); return u; },
+      parse: response => parseHtmlLinks(response, "yahoo")
+    }
+  ];
+
+  const apiProviders = [];
+  if (env.TAVILY_API_KEY) apiProviders.push({
+    name: "Tavily",
+    run: async q => {
+      const response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + env.TAVILY_API_KEY },
+        body: JSON.stringify({ query: q, search_depth: "basic", max_results: 8, include_answer: false })
+      });
+      if (!response.ok) throw new Error("Tavily HTTP " + response.status);
+      const data = await response.json();
+      return (data.results || []).map(x => ({ title: x.title, url: normalizeUrl(x.url), snippet: String(x.content || "").slice(0, 420) })).filter(x => x.title && x.url);
+    }
+  });
+  if (env.SERPER_API_KEY) apiProviders.push({
+    name: "Serper",
+    run: async q => {
+      const response = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-API-KEY": env.SERPER_API_KEY },
+        body: JSON.stringify({ q, num: 8 })
+      });
+      if (!response.ok) throw new Error("Serper HTTP " + response.status);
+      const data = await response.json();
+      return (data.organic || []).map(x => ({ title: x.title, url: normalizeUrl(x.link), snippet: String(x.snippet || "").slice(0, 420) })).filter(x => x.title && x.url);
+    }
+  });
+
+  const jobs = [
+    ...providers.flatMap(provider => queryVariants.map(async q => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5600);
+      try {
+        const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
+        if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
+        const results = await provider.parse(response);
+        if (!results.length) throw new Error(provider.name + " returned no parseable results");
+        return results.map(item => ({ ...item, provider: provider.name }));
+      } finally { clearTimeout(timeout); }
+    })),
+    ...apiProviders.flatMap(provider => queryVariants.map(async q => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5600);
+      try {
+        const results = await Promise.race([
+          provider.run(q),
+          new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error(provider.name + " timeout")), { once: true }))
+        ]);
+        if (!results.length) throw new Error(provider.name + " returned no results");
+        return results.map(item => ({ ...item, provider: provider.name }));
+      } finally { clearTimeout(timeout); }
+    }))
+  ];
+
   const settled = await Promise.allSettled(jobs);
-  const all = [...officialSeeds];
+  const all = [];
   for (const item of settled) {
     if (item.status === "fulfilled") all.push(...item.value);
     else failures.push(String(item.reason?.message || item.reason).slice(0, 120));
   }
-  const unique = [];
-  for (const raw of all) {
-    const item = scoreResult(raw);
-    const host = (() => { try { return new URL(item.url).hostname.toLowerCase(); } catch { return ""; } })();
-    if (isWorkers && !(host === "developers.cloudflare.com" || host === "blog.cloudflare.com")) continue;
-    if (!unique.some(x => x.url === item.url)) unique.push(item);
-  }
-  unique.sort((x, y) => y.relevance - x.relevance);
-  const results = unique.slice(0, 8).map(({ relevance, ...item }) => item);
-  if (!results.length) throw new Error("جست‌وجوی وب منبع رسمی قابل‌استفاده نداد. " + failures.join("; "));
-  return { tool: "research.search", read_only: true, provider: "official-seeds+parallel-search", query: original, results, search_warnings: failures.length ? failures : undefined };
-}
 
+  const stopWords = new Set(["the","and","for","with","from","what","where","when","how","find","best","latest","current","about","into","that","this","در","از","به","برای","با","را","چیست","کدام","چطور","چه","های","یک","و"]);
+  const scoreResult = item => {
+    const host = hostOf(item.url);
+    const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
+    const tokens = tokenSet(body);
+    let score = 0;
+    for (const token of queryTokens) if (!stopWords.has(token) && tokens.has(token)) score += 3;
+    if (/\.(gov|gov\.[a-z]{2}|gouv\.[a-z]{2})$/.test(host) || host.includes(".gov.")) score += 8;
+    if (/\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/.test(host) || host.includes(".edu.")) score += 7;
+    if (/who\.int$|un\.org$|oecd\.org$|worldbank\.org$|europa\.eu$/.test(host)) score += 6;
+    if (/wikipedia\.org$/.test(host)) score += 1;
+    if (/facebook\.com$|instagram\.com$|pinterest\.com$|tiktok\.com$|login|sign.?in|cookie.?policy|privacy.?policy/.test(host + " " + body)) score -= 8;
+    if (/cloudflare/i.test(original) && /cloudflare\.com$/.test(host)) score += 5;
+    if (/university|universiteit|universidade|universität|college|admission|study/i.test(original) && /\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/.test(host)) score += 5;
+    return { ...item, relevance: score };
+  };
+
+  const uniqueByUrl = new Map();
+  for (const raw of all) {
+    const url = normalizeUrl(raw.url);
+    if (!url) continue;
+    const host = hostOf(url);
+    if (!host || /^(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)) continue;
+    const key = url.replace(/\/$/, "");
+    const candidate = scoreResult({ ...raw, url });
+    const previous = uniqueByUrl.get(key);
+    if (!previous || candidate.relevance > previous.relevance || (candidate.snippet.length > previous.snippet.length)) uniqueByUrl.set(key, candidate);
+  }
+
+  const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
+  const results = ranked.slice(0, 12).map(({ relevance, ...item }) => item);
+  if (!results.length) {
+    const providerSummary = failures.length ? failures.join("; ") : "All configured search providers returned no usable results.";
+    throw new Error("هیچ نتیجه قابل‌استفاده‌ای از موتورهای جست‌وجوی عمومی دریافت نشد. " + providerSummary);
+  }
+  const successfulProviders = [...new Set(results.map(x => x.provider))];
+  return {
+    tool: "research.search",
+    read_only: true,
+    provider: "parallel-multi-engine",
+    providers_used: successfulProviders,
+    providers_configured: providers.map(x => x.name).concat(apiProviders.map(x => x.name)),
+    query: original,
+    results,
+    search_warnings: failures.length ? failures : undefined
+  };
+}
 async function executeResearchOpen(rawUrl) {
   const url = new URL(String(rawUrl || ""));
   if (url.protocol !== "https:" || url.username || url.password || !url.hostname || url.hostname === "localhost" || (url.hostname.endsWith(".local") || url.hostname.endsWith(".localhost") || url.hostname.endsWith(".internal")) || /^\d{1,3}(\.\d{1,3}){3}$/.test(url.hostname) || /^\[[0-9a-f:]+\]$/i.test(url.hostname) || (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی قابل خواندن است.");
