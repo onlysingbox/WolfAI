@@ -24,7 +24,7 @@ The Worker supports two optional, server-side API integrations. They are not req
 
 Add these only as Cloudflare Worker Secrets, never as source-code values or ordinary public variables. The engine automatically uses a provider only when its secret exists. Do not paste keys into Telegram or GitHub.
 
-These integrations can improve reliability when public HTML search pages throttle or change their markup. Their free allowances and prices can change; check the provider's own pricing page before adding a paid key. The current Worker does not require either key.
+These integrations can improve reliability when public HTML search pages throttle, block Worker traffic, or change their markup. As of November 2026, Tavily's free Researcher plan includes 1,000 credits/month without a credit card; a basic search uses one credit. Serper advertises 2,500 free queries without a credit card. These free allowances can change, so verify the provider's terms before signup. Do not enable pay-as-you-go or add a paid balance. The current Worker does not require either key, but API-backed results are recommended for more dependable production research.
 
 ## Reliability and limitations
 
