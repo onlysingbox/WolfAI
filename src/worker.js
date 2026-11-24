@@ -2005,12 +2005,76 @@ async function summarizeWolfExecution(env, execution, originalRequest) {
     const runs = execution.agent_run_status || {};
     const steps = execution.agent_step_status || {};
     const sum = values => Object.values(values).reduce((total, value) => total + Number(value || 0), 0);
-    const taskLine = Object.entries(tasks).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
-    const runLine = Object.entries(runs).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
-    const stepLine = Object.entries(steps).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
-    return language === "fa"
-      ? "گزارش سلامت WOLF AI:\\n• Worker: فعال\\n• جدول‌های اصلی: " + execution.tables + "\\n• ابزارهای تعریف‌شده: " + execution.tool_count + "\\n• کل وظایف ثبت‌شده: " + sum(tasks) + " (در انتظار تأیید: " + (tasks.pending_approval || 0) + "، تکمیل‌شده: " + (tasks.completed || 0) + "، ناموفق: " + (tasks.execution_failed || 0) + ")\\n• وضعیت مأموریت‌ها: " + runLine + "\\n• وضعیت مراحل: " + stepLine + "\\nتوجه: تعداد وظایف ثبت‌شده به معنی تعداد وظایف در حال اجرا نیست."
-      : "WOLF AI health report:\\n• Worker: active\\n• Main tables: " + execution.tables + "\\n• Defined tools: " + execution.tool_count + "\\n• Total recorded tasks: " + sum(tasks) + " (pending approval: " + (tasks.pending_approval || 0) + ", completed: " + (tasks.completed || 0) + ", failed: " + (tasks.execution_failed || 0) + ")\\n• Agent runs: " + runLine + "\\n• Steps: " + stepLine + "\\nRecorded task count does not mean currently running tasks.";
+    const labelsFa = {
+      pending_approval: "در انتظار تأیید",
+      awaiting_approval: "در انتظار تأیید",
+      approved: "تأییدشده",
+      running: "در حال اجرا",
+      completed: "تکمیل‌شده",
+      execution_failed: "ناموفق",
+      failed: "ناموفق",
+      cancelled: "لغوشده",
+      rejected: "ردشده"
+    };
+    const labelsEn = {
+      pending_approval: "Pending approval",
+      awaiting_approval: "Awaiting approval",
+      approved: "Approved",
+      running: "Running",
+      completed: "Completed",
+      execution_failed: "Failed",
+      failed: "Failed",
+      cancelled: "Cancelled",
+      rejected: "Rejected"
+    };
+    const formatCounts = (values, labels) => {
+      const entries = Object.entries(values).filter(([, count]) => Number(count) > 0);
+      return entries.length
+        ? entries.map(([status, count]) => "• " + (labels[status] || status) + ": " + count).join("\\n")
+        : (language === "fa" ? "• سابقه‌ای ثبت نشده" : "• No records");
+    };
+    if (language === "fa") {
+      return [
+        "🐺 گزارش سلامت WOLF AI",
+        "",
+        "🟢 وضعیت سرویس: فعال",
+        "",
+        "⚙️ ساختار سیستم",
+        "• جدول‌های اصلی: " + Number(execution.tables || 0),
+        "• ابزارهای تعریف‌شده: " + Number(execution.tool_count || 0),
+        "",
+        "📋 وظایف ثبت‌شده: " + sum(tasks),
+        formatCounts(tasks, labelsFa),
+        "",
+        "🤖 مأموریت‌ها",
+        formatCounts(runs, labelsFa),
+        "",
+        "🔹 مراحل اجرا",
+        formatCounts(steps, labelsFa),
+        "",
+        "ℹ️ «وظایف ثبت‌شده» مجموع سوابق است و به معنی اجرای هم‌زمان آن‌ها نیست."
+      ].join("\\n");
+    }
+    return [
+      "🐺 WOLF AI Health Report",
+      "",
+      "🟢 Service: Active",
+      "",
+      "⚙️ System",
+      "• Main tables: " + Number(execution.tables || 0),
+      "• Defined tools: " + Number(execution.tool_count || 0),
+      "",
+      "📋 Recorded tasks: " + sum(tasks),
+      formatCounts(tasks, labelsEn),
+      "",
+      "🤖 Agent runs",
+      formatCounts(runs, labelsEn),
+      "",
+      "🔹 Execution steps",
+      formatCounts(steps, labelsEn),
+      "",
+      "ℹ️ Recorded tasks are historical records, not simultaneous running tasks."
+    ].join("\\n");
   }
   if (execution?.tool === "memory.save") {
     return language === "fa" ? "این مورد با موفقیت در حافظه خصوصی WOLF AI ذخیره شد: " + String(execution.key || "") + " = " + String(execution.value || "") : "Saved to private WOLF AI memory: " + String(execution.key || "") + " = " + String(execution.value || "");
