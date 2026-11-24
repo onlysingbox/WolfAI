@@ -1544,37 +1544,42 @@ async function executeResearchSearch(query, env = {}) {
     }
   });
 
-  // Keep outbound subrequests bounded inside a single Worker invocation.
-  // Prefer one configured search API; otherwise try Bing RSS and then Yahoo,
-  // sequentially, with one query. Do not fan out across every engine at once.
+  // Query every available provider concurrently. A blocked or rate-limited
+  // engine must not prevent the other engines from returning usable results.
   const all = [];
   const searchQuery = original;
-  const preferredApi = apiProviders[0];
-  const searchPlan = preferredApi
-    ? [{ name: preferredApi.name, run: (q, signal) => preferredApi.run(q, signal) }]
-    : [providers[1], providers[3]].map(provider => ({
-        name: provider.name,
-        run: async (q, signal) => {
-          const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal });
-          if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
-          const results = await provider.parse(response);
-          if (!results.length) throw new Error(provider.name + " returned no parseable results");
-          return results;
-        }
-      }));
-  for (const provider of searchPlan) {
+  const searchPlan = [
+    ...apiProviders.map(provider => ({
+      name: provider.name,
+      run: (q, signal) => provider.run(q, signal)
+    })),
+    ...providers.map(provider => ({
+      name: provider.name,
+      run: async (q, signal) => {
+        const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal });
+        if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
+        const results = await provider.parse(response);
+        if (!results.length) throw new Error(provider.name + " returned no parseable results");
+        return results;
+      }
+    }))
+  ];
+  const settled = await Promise.allSettled(searchPlan.map(async provider => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4500);
     try {
       const results = await provider.run(searchQuery, controller.signal);
-      if (results.length) {
-        all.push(...results.map(item => ({ ...item, provider: provider.name })));
-        break;
-      }
-    } catch (error) {
-      failures.push(String(error?.message || error).slice(0, 120));
+      return { name: provider.name, results };
     } finally {
       clearTimeout(timeout);
+    }
+  }));
+  for (let index = 0; index < settled.length; index++) {
+    const result = settled[index];
+    if (result.status === "fulfilled" && result.value.results.length) {
+      all.push(...result.value.results.map(item => ({ ...item, provider: result.value.name })));
+    } else if (result.status === "rejected") {
+      failures.push(String(result.reason?.message || result.reason).slice(0, 120));
     }
   }
 
@@ -2114,6 +2119,34 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   return json({ ok: true });
 }
 
+async function processQueuedDirectSearch(env, update) {
+  const message = update?.message;
+  const chatId = message?.chat?.id;
+  const text = String(message?.text || "").trim();
+  if (!chatId || !text || String(message?.from?.id || "") !== String(env.ADMIN_TELEGRAM_ID) || message?.chat?.type !== "private") return;
+  try {
+    const query = directSearchQuery(text) || text;
+    const search = await executeResearchSearch(query, env);
+    const countText = text.match(/[0-9۰-۹]+/);
+    const requestedCount = countText ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))) : 5;
+    const limit = Math.max(1, Math.min(10, requestedCount || 5));
+    const seen = new Set();
+    const links = (search.results || []).filter(item => {
+      if (!item?.url || seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    }).slice(0, limit);
+    if (!links.length) throw new Error("هیچ نتیجه مرتبط و قابل‌استفاده‌ای از موتورهای جست‌وجو دریافت نشد.");
+    await reply(env, chatId, links.map(item => item.url).join("\\n"));
+  } catch (error) {
+    console.error("WOLF AI queued direct search failed", {
+      updateId: update?.update_id,
+      error: error?.stack || String(error)
+    });
+    await reply(env, chatId, "جست‌وجوی وب کامل نشد: " + String(error?.message || error).slice(0, 600));
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -2221,6 +2254,15 @@ export default {
           method: "POST",
           headers: { "X-Telegram-Bot-Api-Secret-Token": env.TELEGRAM_WEBHOOK_SECRET }
         });
+        const queuedText = String(message.body?.message?.text || "").trim();
+        // Search jobs do not need conversation history, D1 user writes, or the
+        // archive path. Process them directly so a database quota/error cannot
+        // strand a valid search request in the dead-letter queue.
+        if (isDirectSearchRequest(queuedText)) {
+          await processQueuedDirectSearch(env, message.body);
+          message.ack();
+          continue;
+        }
         if (await isOlderThanLatestStart(env, message.body)) {
           console.log("Skipping Telegram update queued before the latest /start", {
             updateId: message.body?.update_id,
