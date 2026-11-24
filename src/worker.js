@@ -208,6 +208,10 @@ function detectMessageLanguage(value) {
   return /[\u0600-\u06FF]/.test(String(value || "")) ? "fa" : "en";
 }
 
+function isSimpleGreeting(value) {
+  return /^(?:سلام(?:\\s+علیک(?:م)?)?|درود|صبح\\s+بخیر|عصر\\s+بخیر|شب\\s+بخیر|hi|hello|hey|good\\s+(?:morning|afternoon|evening))[\\s!.،,؟?]*$/i.test(String(value || "").trim());
+}
+
 async function responseLanguage(env, inputText = "") {
   const preference = await getSetting(env, "response_language", "auto");
   if (preference === "fa" || preference === "en") return preference;
@@ -571,12 +575,20 @@ async function summarizeWolfExecution(env, execution, originalRequest) {
 }
 
 async function handleNaturalMessage(env, chatId, userId, userText) {
+  const language = await responseLanguage(env, userText);
+
+  // Greetings are deterministic, immediate conversational replies. They must
+  // not wait for the AI model or enter the background queue.
+  if (isSimpleGreeting(userText)) {
+    await reply(env, chatId, language === "fa" ? "سلام! چطور می‌توانم کمکت کنم؟" : "Hi! How can I help?");
+    return;
+  }
+
   if (!env.AI?.run) {
     await reply(env, chatId, "موتور مکالمه هوشمند هنوز در دسترس نیست. تنظیم اتصال Workers AI را بررسی کن.");
     return;
   }
   const history = await loadConversation(env, chatId);
-  const language = await responseLanguage(env, userText);
 
   // Resolve short replies to the immediately preceding clarification instead of
   // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
@@ -1479,7 +1491,8 @@ export default {
       // They are short and must never depend on background queue delivery.
       const incomingText = String(update.message?.text || "").trim();
       const isCommand = incomingText.startsWith("/");
-      if (isCommand || update.callback_query) {
+      const isGreeting = isSimpleGreeting(incomingText);
+      if (isCommand || isGreeting || update.callback_query) {
         try {
           const result = await handleTelegramUpdate(request, env, update);
           return result instanceof Response ? result : json({ ok: true });
