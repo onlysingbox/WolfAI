@@ -2177,10 +2177,11 @@ export default {
       const isCommand = incomingText.startsWith("/");
       const isGreeting = isSimpleGreeting(incomingText);
       const isDirectSearch = isDirectSearchRequest(incomingText);
-      const isCasualChat = isCasualChatMessage(incomingText);
-      // Explicit website searches are short, bounded operations: handle them
-      // in the webhook request instead of waiting behind the background queue.
-      if (isCommand || isGreeting || isDirectSearch || isCasualChat || update.callback_query) {
+      const isCasualChat = isCasualChatMessage(incomingText) && !isDirectSearch;
+      // Website research can take several seconds and must not hold Telegram's
+      // webhook open. Acknowledge immediately, then let the queue worker search
+      // and send the final result asynchronously.
+      if (isCommand || isGreeting || (isCasualChat && !isDirectSearch) || update.callback_query) {
         try {
           const result = await handleTelegramUpdate(request, env, update);
           return result instanceof Response ? result : json({ ok: true });
@@ -2194,6 +2195,12 @@ export default {
       }
 
       try {
+        if (isDirectSearch) {
+          await telegram(env, "sendMessage", {
+            chat_id: update.message.chat.id,
+            text: "درخواست جست‌وجو دریافت شد؛ نتیجه را پس از پایان بررسی می‌فرستم."
+          });
+        }
         await env.TELEGRAM_UPDATES.send(update);
         return json({ ok: true, accepted: true, queued: true });
       } catch (error) {
