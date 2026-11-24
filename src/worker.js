@@ -1516,16 +1516,32 @@ async function executeResearchSearch(query, env = {}) {
 
   const apiProviders = [];
   if (env.TAVILY_API_KEY) apiProviders.push({
-    name: "Tavily",
+    name: "Tavily API",
     run: async (q, signal) => {
       const response = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "content-type": "application/json", "authorization": "Bearer " + env.TAVILY_API_KEY },
         signal,
-        body: JSON.stringify({ query: q, search_depth: "basic", max_results: 8, include_answer: false })
+        body: JSON.stringify({ query: q, search_depth: "basic", max_results: 10, include_answer: false })
       });
-      if (!response.ok) throw new Error("Tavily HTTP " + response.status);
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error("Tavily API HTTP " + response.status + ": " + String(data?.detail || data?.error?.message || response.statusText).slice(0, 140));
+      return (data.results || []).map(x => ({ title: x.title, url: normalizeUrl(x.url), snippet: String(x.content || "").slice(0, 420) })).filter(x => x.title && x.url);
+    }
+  });
+  // Tavily officially supports anonymous Search requests. Keep this independent
+  // keyless route as a free fallback even when an optional account key is set.
+  apiProviders.push({
+    name: "Tavily free keyless",
+    run: async (q, signal) => {
+      const response = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Tavily-Access-Mode": "keyless", "X-Client-Source": "wolf-ai" },
+        signal,
+        body: JSON.stringify({ query: q, search_depth: "basic", max_results: 10, include_answer: false })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error("Tavily keyless HTTP " + response.status + ": " + String(data?.error?.message || data?.detail || response.statusText).slice(0, 140));
       return (data.results || []).map(x => ({ title: x.title, url: normalizeUrl(x.url), snippet: String(x.content || "").slice(0, 420) })).filter(x => x.title && x.url);
     }
   });
@@ -1548,7 +1564,7 @@ async function executeResearchSearch(query, env = {}) {
   // engine must not prevent the other engines from returning usable results.
   const all = [];
   const searchQuery = original;
-  const searchPlan = [
+  const baseSearchPlan = [
     ...apiProviders.map(provider => ({
       name: provider.name,
       run: (q, signal) => provider.run(q, signal)
@@ -1564,9 +1580,17 @@ async function executeResearchSearch(query, env = {}) {
       }
     }))
   ];
+  // Search both the user's wording and a focused English variant for Persian
+  // music queries. Previously queryVariants was built but never actually used.
+  const searchPlan = queryVariants.flatMap((variant, variantIndex) =>
+    baseSearchPlan.map(provider => ({
+      name: provider.name + (variantIndex ? " (expanded query)" : ""),
+      run: (q, signal) => provider.run(variant, signal)
+    }))
+  );
   const settled = await Promise.allSettled(searchPlan.map(async provider => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4500);
+    const timeout = setTimeout(() => controller.abort(), 9000);
     try {
       const results = await provider.run(searchQuery, controller.signal);
       return { name: provider.name, results };
@@ -1629,7 +1653,7 @@ async function executeResearchSearch(query, env = {}) {
   }
 
   const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
-  const relevant = musicQuery ? ranked.filter(item => {
+  let relevant = musicQuery ? ranked.filter(item => {
     const host = hostOf(item.url);
     const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
     const hasMusic = /(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body);
@@ -1638,6 +1662,22 @@ async function executeResearchSearch(query, env = {}) {
     const unrelated = /(netflix|maroon.?5|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(body);
     return item.relevance >= 8 && hasMusic && hasDownload && hasIranianContext && !unrelated;
   }) : ranked;
+  // Avoid throwing away legitimate Iranian music services merely because their
+  // snippets omit the literal word "download". Relax the filter in two safe
+  // stages, while still requiring Iranian context and music relevance.
+  if (musicQuery && relevant.length < 5) {
+    const strictUrls = new Set(relevant.map(item => item.url));
+    const relaxed = ranked.filter(item => {
+      if (strictUrls.has(item.url)) return false;
+      const host = hostOf(item.url);
+      const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
+      const hasMusic = /(music|song|mp3|موسیقی|موزیک|آهنگ|دانلود|download)/i.test(body);
+      const hasIranianContext = /(iran|iranian|ایران|ایرانی|persian|فارسی)/i.test(body) || host.endsWith(".ir");
+      const unrelated = /(netflix|maroon.?5|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(body);
+      return item.relevance >= 4 && hasMusic && hasIranianContext && !unrelated;
+    });
+    relevant = [...relevant, ...relaxed];
+  }
   const selected = [];
   const selectedHosts = new Set();
   for (const item of relevant) {
