@@ -1082,24 +1082,27 @@ function formatWolfSearchResults(execution, request, language) {
     if (url.protocol !== "https:" || seen.has(url.toString())) continue;
     seen.add(url.toString());
     selected.push({
-      title: String(item.title || url.hostname).replace(/[\r\n<>]/g, " ").trim().slice(0, 180),
+      title: String(item.title || url.hostname).replace(/[\\r\\n<>]/g, " ").trim().slice(0, 180),
       url: url.toString(),
-      host: url.hostname.replace(/^www\./, ""),
-      snippet: String(item.snippet || "").replace(/[\r\n]+/g, " ").trim().slice(0, 240)
+      host: url.hostname.replace(/^www\\./, ""),
+      snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 240)
     });
     if (selected.length >= 8) break;
   }
   const heading = language === "fa" ? "🔎 نتایج جست‌وجو" : "🔎 Search results";
-  const lines = selected.map((item, index) =>
-    "✨ <b>" + (index + 1) + ". " + escapeHtml(item.title || item.host) + "</b>" +
-    "\n<code>🌐 " + escapeHtml(item.host) + "</code>" +
-    (item.snippet ? "\n" + escapeHtml(item.snippet) : "")
-  );
-  const keyboard = selected.map((item, index) => [{ text: (language === "fa" ? "🔗 باز کردن نتیجه " : "🔗 Open result ") + (index + 1), url: item.url }]);
-  return {
-    text: "<b>" + heading + "</b>" + (lines.length ? "\n\n" + lines.join("\n\n") : (language === "fa" ? "\nنتیجه معتبری پیدا نشد." : "\nNo usable results found.")),
-    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined
-  };
+  const messages = [{ text: "<b>" + heading + "</b>" }];
+  selected.forEach((item, index) => {
+    const number = index + 1;
+    const title = escapeHtml(item.title || item.host);
+    const host = escapeHtml(item.host);
+    const snippet = item.snippet ? "\\n" + escapeHtml(item.snippet) : "";
+    messages.push({
+      text: "✨ <b>" + number + ". " + title + "</b>\\n<code>🌐 " + host + "</code>" + snippet,
+      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
+    });
+  });
+  if (!selected.length) messages.push({ text: language === "fa" ? "نتیجه معتبری پیدا نشد." : "No usable results found." });
+  return { messages };
 }
 
 function formatWolfLinkDirectory(execution, request, language) {
@@ -1112,332 +1115,29 @@ function formatWolfLinkDirectory(execution, request, language) {
     let url;
     try { url = new URL(String(item.url || "")); } catch { continue; }
     if (url.protocol !== "https:" || !url.hostname) continue;
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
+    const host = url.hostname.toLowerCase().replace(/^www\\./, "");
     if (seenHosts.has(host)) continue;
     seenHosts.add(host);
-    const title = String(item.title || host).replace(/[\[\]\r\n]/g, " ").trim().slice(0, 180) || host;
-    unique.push({ title, url: url.toString(), snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 220) });
+    const title = String(item.title || host).replace(/[\\[\\]\\r\\n<>]/g, " ").trim().slice(0, 180) || host;
+    unique.push({ title, url: url.toString(), host: url.hostname.replace(/^www\\./, ""), snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 220) });
   }
   const digits = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
-  const match = String(request || "").match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2}|ده|پنج|شش|هفت|هشت|نه|یازده|دوازده|پانزده|بیست)(?:\s*تا)?\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i);
+  const match = String(request || "").match(/(?:^|\\s)(\\d{1,2}|[۰-۹]{1,2}|ده|پنج|شش|هفت|هشت|نه|یازده|دوازده|پانزده|بیست)(?:\\s*تا)?\\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\\s|$)/i);
   const wordCounts = {پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20};
   const expected = match ? (wordCounts[match[1]] || Number(match[1].replace(/[۰-۹]/g, d => digits[d]))) : 10;
   const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
-  const lines = selected.map((item, index) => {
-    const host = new URL(item.url).hostname.replace(/^www\\./, "");
-    const snippet = String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 220);
-    return "✨ <b>" + (index + 1) + ". " + escapeHtml(item.title) + "</b>" +
-      "\\n<code>🌐 " + escapeHtml(host) + "</code>" +
-      (snippet ? "\\n" + escapeHtml(snippet) : "");
+  const messages = [{ text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>" }];
+  selected.forEach((item, index) => {
+    const number = index + 1;
+    const snippet = item.snippet ? "\\n" + escapeHtml(item.snippet) : "";
+    messages.push({
+      text: "✨ <b>" + number + ". " + escapeHtml(item.title) + "</b>\\n<code>🌐 " + escapeHtml(item.host) + "</code>" + snippet,
+      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
+    });
   });
-  if (selected.length < expected) lines.push(language === "fa" ? "📌 نتیجه معتبر: " + selected.length + " از " + expected : "📌 Valid results: " + selected.length + " of " + expected);
-  const keyboard = selected.map((item, index) => [{ text: (language === "fa" ? "🔗 باز کردن سایت " : "🔗 Open website ") + (index + 1), url: item.url }]);
-  return {
-    text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>\\n\\n" + (lines.join("\\n\\n") || (language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found.")),
-    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined
-  };
-}
-
-async function summarizeWolfExecution(env, execution, originalRequest) {
-  const language = await responseLanguage(env, originalRequest);
-  if (execution?.tool === "memory.save") {
-    return language === "fa" ? "این مورد با موفقیت در حافظه خصوصی WOLF AI ذخیره شد: " + String(execution.key || "") + " = " + String(execution.value || "") : "Saved to private WOLF AI memory: " + String(execution.key || "") + " = " + String(execution.value || "");
-  }
-  if (execution?.tool === "artifact.create") {
-    return language === "fa"
-      ? "سند «" + String(execution.title || "بدون عنوان") + "» با موفقیت در کتابخانه خصوصی WOLF AI ذخیره شد. شناسه سند: " + String(execution.artifact_id || "ثبت نشده")
-      : "The document “" + String(execution.title || "Untitled") + "” was saved successfully in your private WOLF AI library. Artifact ID: " + String(execution.artifact_id || "not provided");
-  }
-  if (!env.AI?.run) return "نتیجه فنی در پیام زیر آمده است.";
-  try {
-    const isWrite = execution?.read_only === false;
-    const prompt = language === "fa"
-      ? (isWrite ? "نتیجه عملیات ثبت یا تغییر داده را به فارسی ساده گزارش کن. فقط بر اساس داده‌ها نوع عملیات، عنوان یا شناسه، و لینک commit در صورت وجود را ذکر کن. برای ثبت مالی روشن بگو که فقط رکورد ثبت شده و پولی جابه‌جا نشده است. خطا را پنهان نکن." : "نتیجه ابزار فقط‌خواندنی WOLF AI را به فارسی ساده خلاصه کن. فقط بر اساس داده‌ها حرف بزن و خطا را واضح بگو.")
-      : (isWrite ? "Report this WOLF AI data write in clear English. State the exact operation and identifier or title, and include a commit link only if present. For finance ledger entries, say that only a record was saved and no money was moved. Do not hide errors." : "Summarize this WOLF AI read-only tool result in clear English. Use only supplied data and clearly mention errors.");
-    const { result: out } = await runWolfModel(env, {
-      messages: [{ role: "system", content: prompt }, { role: "user", content: "User request: " + String(originalRequest || "") + "\nTool result: " + JSON.stringify(execution) }],
-      max_tokens: 350,
-      chat_template_kwargs: { enable_thinking: false }
-    });
-    const draft = out?.choices?.[0]?.message?.content || "نتیجه فنی آماده است.";
-    return await polishWolfAnswer(env, draft, language, originalRequest);
-  } catch (error) {
-    console.error("WOLF AI result summary failed", error);
-    return "نتیجه فنی آماده است؛ جزئیات خام در ادامه آمده است.";
-  }
-}
-
-async function handleNaturalMessage(env, chatId, userId, userText) {
-  const language = await responseLanguage(env, userText);
-
-  // Greetings are deterministic, immediate conversational replies. They must
-  // not wait for the AI model or enter the background queue.
-  if (isSimpleGreeting(userText)) {
-    await reply(env, chatId, language === "fa" ? "سلام! چطور می‌توانم کمکت کنم؟" : "Hi! How can I help?");
-    return;
-  }
-
-  // Common small-talk questions get one short, deterministic answer.
-  // This avoids model boilerplate, language mixing, and repeated self-introductions.
-  const casualReply = deterministicCasualReply(userText, language);
-  if (casualReply) {
-    const history = await loadConversation(env, chatId);
-    await saveConversation(env, chatId, history, userText, casualReply);
-    await reply(env, chatId, casualReply);
-    return;
-  }
-
-  const history = await loadConversation(env, chatId);
-
-  // Explicit website/source discovery must call search directly, not depend on model tool selection.
-  if (isDirectSearchRequest(userText)) {
-    try {
-      const query = directSearchQuery(userText) || userText;
-      const search = await executeResearchSearch(query, env);
-      const countText = String(userText).match(/[0-9۰-۹]+/);
-      const requestedCount = countText ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))) : 5;
-      const limit = Math.max(1, Math.min(10, requestedCount || 5));
-      const links = (search.results || []).filter(item => item?.url).slice(0, limit);
-      if (!links.length) throw new Error("جست‌وجو نتیجه قابل‌استفاده‌ای برنگرداند.");
-      const answer = links.map((item, index) => (index + 1) + ". " + item.url).join("\n");
-      await saveConversation(env, chatId, history, userText, answer);
-      await reply(env, chatId, answer);
-      return;
-    } catch (error) {
-      console.error("WOLF AI direct search failed", error);
-      const message = "جست‌وجوی وب انجام نشد: " + String(error?.message || error).slice(0, 700);
-      await saveConversation(env, chatId, history, userText, message);
-      await reply(env, chatId, message);
-      return;
-    }
-  }
-
-  if (!env.AI?.run) {
-    await reply(env, chatId, "موتور مکالمه هوشمند هنوز در دسترس نیست. تنظیم اتصال Workers AI را بررسی کن.");
-    return;
-  }
-
-  // Resolve short replies to the immediately preceding clarification instead of
-  // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
-  let contextualUserText = userText;
-  const shortAllCriteriaReply = /^(?:همه\s*چیز|همه\s*موارد|تمام\s*معیارها|همه\s*معیارها|از\s*همه\s*نظرها|all\s+(?:criteria|of\s+them|aspects)|everything)$/i.test(String(userText || "").trim());
-  const previousAssistantMessage = [...history].reverse().find(item => item.role === "assistant" && String(item.content || "").trim());
-  const previousUserMessage = [...history].reverse().find(item => item.role === "user" && String(item.content || "").trim() && !String(item.content).trim().startsWith("/"));
-  const previousAssistantAskedCountryCriterion = /کشورهای برتر|top countries/i.test(String(previousAssistantMessage?.content || "")) &&
-    /کدام معیار|کدام\s*معیار|which\s+(?:criterion|criteria)/i.test(String(previousAssistantMessage?.content || ""));
-  const previousUserAskedTopCountries = isAmbiguousTopCountriesRequest(previousUserMessage?.content || "");
-  if (shortAllCriteriaReply && previousAssistantAskedCountryCriterion && previousUserAskedTopCountries) {
-    const researchDate = new Date().toISOString().slice(0,10);
-    contextualUserText = "تاریخ امروز برای این تحقیق " + researchDate + " است؛ تاریخ تهیه پاسخ را همین تاریخ اعلام کن و هرگز تاریخ قدیمی را به‌عنوان تاریخ بررسی ننویس. در پاسخ به درخواست قبلی «" + String(previousUserMessage.content).slice(0,240) + "»، منظورم رتبه‌بندی ترکیبی ۱۰ کشور برتر با درنظرگرفتن همه ابعاد مهم است: اقتصاد و درآمد، کیفیت زندگی، امنیت، آموزش، سلامت، شاخص توسعه انسانی، زیرساخت، محیط زیست، ثبات و رفاه اجتماعی. همه ابعاد را واقعاً پوشش بده، از جمله قدرت نظامی و هزینه/توان دفاعی، آموزش، سلامت، اقتصاد کلان و درآمد سرانه، کیفیت زندگی، امنیت و صلح، توسعه انسانی، زیرساخت، محیط زیست، حکمرانی و ثبات سیاسی و رفاه اجتماعی. برای هر بُعد حداقل یک شاخص مشخص، سال داده، یافته واقعی و لینک مستقیم صفحه گزارش یا داده‌ای که باز و بررسی کرده‌ای ارائه کن. صفحه اصلی سازمان یا پایگاه داده، بدون لینک به گزارش/جدول مشخص، منبع کافی نیست. اگر صفحه‌ای را باز نکرده‌ای یا داده‌ای را ندیده‌ای، آن را منبع استفاده‌شده معرفی نکن. جدول باید برای تک‌تک ابعاد نظامی، آموزش، سلامت، اقتصاد، کیفیت زندگی، امنیت، HDI، زیرساخت، محیط زیست و حکمرانی پوشش یا صریحاً «داده بررسی‌شده در دسترس نیست» داشته باشد؛ حذف خاموش هیچ بُعدی ممنوع است. نام منبع به‌تنهایی کافی نیست: لینک مستقیم گزارش یا صفحه داده‌ای را که واقعاً بررسی شده درج کن. وزن عددی نساز و ادعا نکن محاسبه آماری انجام شده مگر اینکه داده‌های قابل‌مقایسه همه کشورها را گردآوری کرده، روش نرمال‌سازی و فرمول را توضیح داده و امتیازها را واقعاً محاسبه کرده باشی. اگر چنین محاسبه‌ای ممکن نیست، رتبه‌بندی را صریحاً «تحلیل تقریبی و قضاوتی، نه رتبه‌بندی آماری» بنام و دلیل هر رتبه را با شواهد واقعی توضیح بده؛ وزن‌های دلخواه را به‌عنوان داده علمی معرفی نکن. اگر شواهد کافی برای ترتیب دقیق ۱ تا ۱۰ وجود ندارد، به‌جای قطعیت کاذب، کشورها را در گروه‌های هم‌سطح معرفی کن یا محدودیت رتبه‌بندی را روشن بنویس. برای هر کشور وضعیت شواهد را دقیق بنویس؛ برچسب «تأیید شده» کلی و بی‌مدرک ممنوع است. محدودیت‌ها، داده‌های ناهم‌سال و شاخص‌های پوشش‌نداده‌شده را ذکر کن. کشورها را تکرار نکن و اگر داده کافی برای رتبه دقیق وجود ندارد، این محدودیت را صادقانه اعلام کن. پاسخ کامل و روان فارسی ارائه بده.";
-  }
-  if (isAmbiguousTopCountriesRequest(userText)) {
-    const clarification = language === "fa"
-      ? "منظورت از «کشورهای برتر» کدام معیار است؟ اقتصاد و تولید ناخالص داخلی، کیفیت زندگی، امنیت، آموزش، قدرت نظامی یا شاخص توسعه انسانی؟ بدون معیار، رتبه‌بندی معتبر و واحدی وجود ندارد."
-      : "What should “top countries” mean here: economy/GDP, quality of life, safety, education, military strength, or human development? There is no single meaningful ranking without a criterion.";
-    await saveConversation(env, chatId, history, userText, clarification);
-    await reply(env, chatId, clarification);
-    return;
-  }
-  let ownerMemory = [];
-  try { const rawMemory = JSON.parse(await getSetting(env, "owner_memory:" + String(userId), "[]")); ownerMemory = Array.isArray(rawMemory) ? rawMemory.slice(-25) : []; } catch { ownerMemory = []; }
-  const memoryContext = ownerMemory.length ? "\n\nOwner-approved long-term memory (use only when relevant):\n" + ownerMemory.map(item => "- [" + String(item.category || "general") + "] " + String(item.key || "") + ": " + String(item.value || "").slice(0,500)).join("\n") : "";
-
-  // Deterministic handling for "remember this" prevents the language model from inventing a referent.
-  const rememberThis = /(?:این\s*(?:موضوع|مورد|را|رو)?\s*(?:را\s*)?(?:به\s*خاطر\s*بسپار|یادت\s*بماند|ذخیره\s*کن)|یادت\s*بماند|به\s*خاطر\s*بسپار|remember\s+this|save\s+this\s+to\s+memory)/i.test(userText);
-  if (rememberThis) {
-    const explicit = userText.match(/(?:به\s*خاطر\s*بسپار|یادت\s*بماند|ذخیره\s*کن|remember\s+this|save\s+this\s+to\s+memory)\s*[:：-]?\s*([\s\S]{8,1500})$/i);
-    const previousAssistant = [...history].reverse().find(item => item.role === "assistant" && String(item.content || "").trim());
-    const previousUser = [...history].reverse().find(item => item.role === "user" && String(item.content || "").trim() && !String(item.content).trim().startsWith("/"));
-    const value = String(explicit?.[1] || previousAssistant?.content || previousUser?.content || "").trim().slice(0,1500);
-    if (!value) {
-      const ask = language === "fa" ? "مشخص کن دقیقاً چه چیزی را ذخیره کنم؛ متن یا موضوع را بعد از «به خاطر بسپار» بنویس." : "Please specify what I should remember by adding the text after “remember this.”";
-      await saveConversation(env, chatId, history, userText, ask);
-      await reply(env, chatId, ask);
-      return;
-    }
-    const isStatusSnapshot = /گزارش\s*وضعیت\s*WOLF\s*AI|WOLF AI\s*(?:status|health)\s*report/i.test(value);
-    const key = isStatusSnapshot ? "گزارش وضعیت WOLF AI" : "یادداشت " + new Date().toISOString().slice(0,10);
-    const action = { type: "memory.save", args: { key, value, category: isStatusSnapshot ? "status_snapshot" : "user_note" } };
-    const id = await createTask(env, "ذخیره در حافظه: " + key, userId, action);
-    const notice = language === "fa" ? "موضوع قبلی را پیدا کردم. برای جلوگیری از ذخیره اشتباه، متن دقیق زیر را آماده کرده‌ام. پس از تأیید در حافظه خصوصی ذخیره می‌شود." : "I found the previous topic. Review the exact text below; it will be saved to private memory after approval.";
-    await saveConversation(env, chatId, history, userText, notice);
-    await reply(env, chatId, notice + "\n\nعنوان: " + key + "\n\nمتن دقیق:\n" + value + "\n\nشناسه: " + id, { reply_markup: { inline_keyboard: [[{ text: language === "fa" ? "تأیید و ذخیره در حافظه" : "Approve & save to memory", callback_data: "approve:" + id }, { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }]] } });
-    return;
-  }
-
-  const casualChat = isCasualChatMessage(userText) && !isResearchFollowUp(history, userText);
-  const conversationGuidance = (casualChat
-    ? (language === "fa"
-      ? "\n\nدستورهای ویژه مکالمه طبیعی (بسیار مهم): پیام آخر کاربر را دقیق بخوان و فقط به همان منظور پاسخ بده؛ پاسخ باید مستقیماً به سؤال یا حرف آخر او مربوط باشد. تاریخچه را برای فهم مرجع ضمیرها، اصلاح‌ها و ادامه موضوع به کار ببر، اما موضوع قبلی را بی‌دلیل وارد پاسخ نکن. اگر کاربر می‌پرسد «امروز چه کار کردی؟» یا درباره زندگی شخصی‌ات می‌پرسد، صادقانه و کوتاه بگو انسان نیستی و روز یا تجربه شخصی نداری؛ هرگز فعالیت، خاطره، احساس، رابطه، اتفاق دیروز یا تجربه‌ای را جعل نکن. می‌توانی بگویی در همین گفتگو چه کمکی می‌توانی بکنی. به کاربر نسبت عاطفی نده و بی‌دلیل از دوست‌داشتن یا خوشحالی شدید حرف نزن. اگر کاربر می‌گوید پاسخ نامربوط یا چرت بوده، بدون شوخی دفاعی یا بهانه‌تراشی عذرخواهی کن، اشتباه را مشخص کن و همان سؤال اصلی را درست جواب بده. اگر منظور واقعاً مبهم است فقط یک سؤال روشن‌کننده بپرس؛ اگر روشن است سؤال تازه نساز. جواب معمولاً ۱ تا ۴ جمله، محاوره‌ای، روان و بدون عبارت‌های کلیشه‌ای باشد. کمی شوخ‌طبعی ظریف و به‌جا داشته باش؛ اگر کاربر شوخی، کنایه یا سربه‌سر گذاشتن دارد، منظور و لحنش را بفهم و متناسب جواب بده، نه اینکه همه‌چیز را لفظی و خشک تفسیر کنی. گاهی یک واکنش بامزه یا نکته هوشمندانه طبیعی اضافه کن، اما جوک را به زور وارد هر پاسخ نکن و شوخی را تکراری نکن. در موضوع جدی یا ناراحتی کاربر شوخی نکن. از ایموجی فقط در صورت طبیعی بودن استفاده کن. هیچ‌وقت برای پر کردن فضا جمله بی‌ربط نساز."
-      : "\n\nNatural conversation rules (critical): Read the user's latest message carefully and answer its actual intent directly. Use conversation history to resolve references, corrections, and follow-ups, but do not drag in unrelated earlier topics. If asked what you did today or about your personal life, briefly and honestly explain that you are an AI and do not have a human day or personal experiences; never invent activities, memories, feelings, relationships, yesterday's events, or experiences. You may explain what you can do in this conversation. Do not claim affection or exaggerated emotions toward the user. If the user says your answer was irrelevant or nonsense, apologize plainly without defensive jokes or excuses, identify the mistake, and answer the original question correctly. Ask one clarifying question only when the intent is genuinely unclear; otherwise do not invent a new question. Keep ordinary replies to 1–4 natural sentences, without boilerplate or filler. Add subtle, well-timed wit when it genuinely fits; recognize teasing, irony, jokes, and implied meaning instead of interpreting everything literally. Occasionally offer a clever, relevant reaction, but never force a joke into every reply or recycle canned punchlines. Drop humor for serious topics or when the user is upset. Use emojis sparingly. Never make up unrelated text just to fill space.")
-    : "") + conversationPreferenceGuidance(history, userText, language);
-  const messages = [
-    { role: "system", content: wolfSystemPrompt(language) + memoryContext + conversationGuidance },
-    ...history,
-    { role: "user", content: contextualUserText.slice(0, 4000) }
-  ];
-
-  // Resolve an explicitly named, known project and file before asking the model.
-  // This prevents unnecessary clarification when the current message already contains both.
-  const explicitWolfAiFileRead =
-    /\bWolfAI\b/i.test(userText) &&
-    /src\/worker\.js/i.test(userText) &&
-    /(بررسی|بخوان|خواندن|بازبینی|باز کن|inspect|read|review|open)/i.test(userText);
-  if (explicitWolfAiFileRead) {
-    const action = { type: "github.get_file", args: { repo: "WolfAI", path: "src/worker.js" } };
-    const id = await createTask(env, "بررسی فایل src/worker.js در مخزن WolfAI", userId, action);
-    const notice = language === "fa"
-      ? "مخزن و مسیر فایل را از پیام خودت تشخیص دادم؛ نیازی به تکرار نام مخزن نیست. برای خواندن فایل، تأییدت لازم است."
-      : "I resolved the repository and file path from your message. No need to repeat them. Please approve reading the file.";
-    await saveConversation(env, chatId, history, userText, notice);
-    await reply(env, chatId, notice + "\n\nRepository: onlysingbox/WolfAI\nFile: src/worker.js\nTask ID: " + id, {
-      reply_markup: { inline_keyboard: [[
-        { text: language === "fa" ? "تأیید و خواندن فایل" : "Approve & read file", callback_data: "approve:" + id },
-        { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }
-      ]] }
-    });
-    return;
-  }
-
-  try {
-    const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-    // Auto mode uses the stronger Gemma model for natural conversation; an explicit
-    // user-selected /model preference remains authoritative.
-    const modelKey = casualChat && preferredMode === "auto"
-      ? "gemma"
-      : chooseWolfModel(preferredMode, contextualUserText);
-    const modelPayload = {
-      messages,
-      max_tokens: casualChat ? 650 : 2200,
-      chat_template_kwargs: { enable_thinking: false }
-    };
-    // Casual chat stays on the fast conversational path: no web or agent tools.
-    if (!casualChat) {
-      modelPayload.tools = wolfFunctionTools();
-      modelPayload.tool_choice = "auto";
-    }
-    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, modelPayload, modelKey);
-    await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
-    const assistant = output?.choices?.[0]?.message;
-    const toolCalls = Array.isArray(assistant?.tool_calls) ? assistant.tool_calls : [];
-    if (toolCalls.length) {
-      if (toolCalls.length > 5) {
-        await reply(env, chatId, language === "fa" ? "این مأموریت بیش از پنج مرحله دارد. آن را به چند درخواست کوچک‌تر تقسیم کن تا هر مرحله جداگانه بررسی شود." : "This request produced more than five steps. Please split it into smaller missions so each can be reviewed.");
-        return;
-      }
-      let action;
-      try {
-        const actions = toolCalls.slice(0, 5).map(mapWolfToolCall);
-        for (const item of actions) {
-          if (item.type === "github.update_file") {
-            const current = await githubRequest(env, "/repos/onlysingbox/" + encodeURIComponent(item.args.repo) + "/contents/" + item.args.path.split("/").map(encodeURIComponent).join("/"));
-            if (Array.isArray(current) || current.type !== "file" || !current.sha || !current.content) throw new Error("فایل موجود یا متنی قابل ویرایش نیست.");
-            const decoded = atob(current.content.replace(/\s/g, ""));
-            const oldBytes = Uint8Array.from(decoded, c => c.charCodeAt(0));
-            item.args.expected_sha = current.sha;
-            item.args.previous_content = new TextDecoder().decode(oldBytes).slice(0, 18000);
-            if (item.args.previous_content.length >= 18000) throw new Error("فایل فعلی برای ثبت نسخه بازگشت بیش از حد بزرگ است؛ ویرایش امن متوقف شد.");
-          }
-        }
-        const totalWriteChars = actions.filter(item => ["github.create_file","github.update_file","artifact.create","memory.save"].includes(item.type)).reduce((sum, item) => sum + String(item.args.content || item.args.value || "").length, 0);
-        if (totalWriteChars > 18000) throw new Error("مجموع محتوای تغییرات این مأموریت از سقف امن ۱۸۰۰۰ نویسه بیشتر است؛ آن را به چند مأموریت جدا تقسیم کن.");
-        action = actions.length === 1 ? actions[0] : { type: "agent.sequence", args: { steps: actions } };
-      } catch (error) {
-        const clarification = error.message || "برای انجام این بررسی به اطلاعات بیشتری نیاز دارم.";
-        await saveConversation(env, chatId, history, userText, clarification);
-        await reply(env, chatId, clarification);
-        return;
-      }
-      const id = await createTask(env, userText.slice(0, 220), userId, action);
-      const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
-      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type));
-      const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
-      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open"]);
-      const requiresApproval = actionList.some(item => !readOnlyTypes.has(item.type));
-      if (!requiresApproval) {
-        const id = await createTask(env, userText.slice(0, 220), userId, action);
-        await env.DB.prepare("UPDATE tasks SET status='approved', approved_by=?, approved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind("policy:read_only", id).run();
-        await env.DB.prepare("UPDATE approvals SET status='approved', decided_by=?, decided_at=CURRENT_TIMESTAMP WHERE task_id=? AND status='pending'").bind("policy:read_only", id).run();
-        await env.DB.prepare("UPDATE agent_steps SET status='running', approval_required=0, approved_by=?, approved_at=CURRENT_TIMESTAMP, started_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='awaiting_approval'").bind("policy:read_only", id).run();
-        await env.DB.prepare("UPDATE agent_runs SET status='running', updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(id).run();
-        try {
-          const execution = await executeApprovedAction(env, action, id, 1, String(userId));
-          await env.DB.prepare("UPDATE tasks SET status='completed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify(execution).slice(0, 20000), id).run();
-          await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')").bind(JSON.stringify(execution).slice(0, 20000), id).run();
-          await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({tool:execution.tool,completed:true}).slice(0,20000), id).run();
-          await log(env, userId, "task.auto_executed_read_only", "task", id, {tool:execution.tool,step_count:actionList.length});
-          // Explicit website/source directories need one distinct domain per result
-          // and must honor the exact requested count. Handle them before generic search.
-          const linkDirectory = isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
-          const searchResults = !linkDirectory && execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
-          if (searchResults || linkDirectory) {
-            const formatted = searchResults || linkDirectory;
-            await saveConversation(env, chatId, history, userText, formatted.text.replace(/<[^>]+>/g, ""));
-            await reply(env, chatId, formatted.text, {
-              parse_mode: "HTML",
-              disable_web_page_preview: true,
-              ...(formatted.reply_markup ? { reply_markup: formatted.reply_markup } : {})
-            });
-          } else {
-            const summary = await summarizeWolfExecution(env, execution, userText);
-            const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
-            const sourceText = sourceItems.length ? "\n\nمنابع:\n" + sourceItems.slice(0, 8).map((x,i) => (i+1) + ". " + String(x.title || "منبع") + "\n" + String(x.url || "")).join("\n") : execution.tool === "research.open" ? "\n\nمنبع: " + String(execution.title || "") + "\n" + String(execution.url || "") : "";
-            await saveConversation(env, chatId, history, userText, summary + sourceText);
-            await reply(env, chatId, summary + sourceText);
-          }
-        } catch (error) {
-          const message = String(error.message || error);
-          await env.DB.prepare("UPDATE tasks SET status='execution_failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
-          await env.DB.prepare("UPDATE agent_steps SET status='failed', error_text=?, completed_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='running'").bind(message.slice(0,2000), id).run();
-          await env.DB.prepare("UPDATE agent_runs SET status='failed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({error:message}).slice(0,20000), id).run();
-          await log(env, userId, "task.read_only_execution_failed", "task", id, {error:message});
-          await reply(env, chatId, (language === "fa" ? "اجرای درخواست فقط‌خواندنی ناموفق شد: " : "Read-only operation failed: ") + message);
-        }
-        return;
-      }
-      const approvalText = language === "fa" ? "طرح و جزئیات عملیات در حافظه ثبت شد. پیش از اجرا باید تأییدش کنی." : "The plan and operation details are stored. Please approve before execution.";
-      const stepsPreview = actionList.map((item, index) => {
-        let detail = (index + 1) + ". " + item.type;
-        if (item.args?.repo) detail += " | onlysingbox/" + item.args.repo;
-        if (item.args?.query) detail += " | " + item.args.query;
-        if (item.args?.url) detail += " | " + item.args.url;
-        if (item.args?.path) detail += " | " + item.args.path;
-        if (item.type === "artifact.create") detail += " | " + item.args.title;
-        if (item.type === "finance.add_entry") detail += " | " + item.args.entry_type + " | " + item.args.category + " | " + item.args.amount_minor + " " + item.args.currency + " | " + item.args.occurred_at;
-        return detail;
-      }).join("\n");
-      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type)).map((item, index) => {
-        if (item.type === "memory.save") return "\nWrite step " + (index + 1) + ": SAVE TO PRIVATE MEMORY\nCategory: " + item.args.category + "\nKey: " + item.args.key + "\nExact value to save:\n" + item.args.value;
-        if (item.type === "artifact.create") return "\nWrite step " + (index + 1) + ": SAVE DOCUMENT\nTitle: " + item.args.title + "\nKind: " + item.args.kind + "\nExact document content:\n" + item.args.content;
-        if (item.type === "finance.add_entry") return "\nWrite step " + (index + 1) + ": RECORD LEDGER ENTRY\nType: " + item.args.entry_type + "\nCategory: " + item.args.category + "\nAmount: " + item.args.amount_minor + " " + item.args.currency + "\nDate: " + item.args.occurred_at + "\nDescription: " + (item.args.description || "-") + "\nThis records information only; no money is moved.";
-        return "\nWrite step " + (index + 1) + ": " + (item.type === "github.create_file" ? "CREATE" : "UPDATE") +
-          "\nRepository: onlysingbox/" + item.args.repo + "\nPath: " + item.args.path +
-          "\nCommit: " + item.args.commit_message + "\nExact content to be committed:\n" + item.args.content;
-      }).join("\n\n") : "";
-      await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
-      const previewChunks = [];
-      for (let offset = 0; offset < preview.length; offset += 8500) previewChunks.push(preview.slice(offset, offset + 8500));
-      for (let index = 0; index < previewChunks.length; index++) {
-        await reply(env, chatId, "جزئیات دقیق تغییرات (" + (index + 1) + "/" + previewChunks.length + "):\n" + previewChunks[index]);
-      }
-      await reply(env, chatId, preface + "\n\n" + approvalText + "\n\nمراحل مأموریت:\n" + stepsPreview + "\n\nTool: " + action.type + "\nTask ID: " + id, {
-        reply_markup: { inline_keyboard: [[
-          { text: language === "fa" ? "تأیید و اجرا" : "Approve & run", callback_data: "approve:" + id },
-          { text: language === "fa" ? "رد" : "Reject", callback_data: "reject:" + id }
-        ]] }
-      });
-      return;
-    }
-    const draftAnswer = String(assistant?.content || "").trim() || (language === "fa" ? "پیامت را دریافت کردم، اما نتوانستم پاسخ مناسبی بسازم. دوباره بگو." : "I received your message, but couldn't form a useful reply. Please try again.");
-    const answer = casualChat ? draftAnswer : await polishWolfAnswer(env, draftAnswer, language, contextualUserText);
-    await saveConversation(env, chatId, history, userText, answer);
-    await reply(env, chatId, answer);
-  } catch (error) {
-    console.error("WOLF AI conversation failed", error);
-    await reply(env, chatId, language === "fa"
-      ? "فعلاً موتور هوشمند پاسخ نداد. احتمالاً سهمیه یا سرویس Workers AI موقتاً در دسترس نیست. اتصال و سهمیه را بررسی می‌کنیم."
-      : "The AI engine did not respond. The Workers AI service or its usage allowance may be temporarily unavailable.");
-  }
+  if (selected.length < expected) messages.push({ text: language === "fa" ? "📌 نتیجه معتبر: " + selected.length + " از " + expected : "📌 Valid results: " + selected.length + " of " + expected });
+  if (!selected.length) messages.push({ text: language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found." });
+  return { messages };
 }
 
 function decodeResearchHtml(value) {
@@ -2247,21 +1947,23 @@ async function processQueuedDirectSearch(env, update) {
       return true;
     }).slice(0, limit);
     if (!links.length) throw new Error("هیچ نتیجه مرتبط و قابل‌استفاده‌ای از موتورهای جست‌وجو دریافت نشد.");
-    const formattedResults = "<b>🔎 نتایج جست‌وجو</b>\\n\\n" + links.map((item, index) => {
+    await reply(env, chatId, "<b>🔎 نتایج جست‌وجو</b>", { parse_mode: "HTML", disable_web_page_preview: true });
+    for (let index = 0; index < links.length; index++) {
+      const item = links[index];
       let host = "";
       try { host = new URL(item.url).hostname.replace(/^www\\./, ""); } catch {}
       const title = escapeHtml(String(item.title || host || "نتیجه").replace(/[\\r\\n<>]/g, " ").slice(0, 180));
       const snippet = escapeHtml(String(item.snippet || "").replace(/[\\r\\n]+/g, " ").slice(0, 220));
-      return "✨ <b>" + (index + 1) + ". " + title + "</b>" +
+      const number = index + 1;
+      const body = "✨ <b>" + number + ". " + title + "</b>" +
         (host ? "\\n<code>🌐 " + escapeHtml(host) + "</code>" : "") +
         (snippet ? "\\n" + snippet : "");
-    }).join("\\n\\n");
-    const keyboard = links.map((item, index) => [{ text: "🔗 باز کردن نتیجه " + (index + 1), url: item.url }]);
-    await reply(env, chatId, formattedResults, {
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: keyboard }
-    });
+      await reply(env, chatId, body, {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: [[{ text: number + ") سایت " + (host || number), url: item.url }]] }
+      });
+    }
   } catch (error) {
     console.error("WOLF AI queued direct search failed", {
       updateId: update?.update_id,
