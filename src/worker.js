@@ -1375,7 +1375,7 @@ async function handleTelegramUpdate(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === "POST" && (url.pathname === "/dashboard/connect" || url.pathname === "/dashboard/github")) {
       return await handleDashboardPost(request, env, url.pathname);
@@ -1412,8 +1412,24 @@ export default {
       }
     }
     if (request.method === "POST" && url.pathname === "/telegram/webhook") {
-      try { return await handleTelegramUpdate(request, env); }
-      catch (error) { console.error("telegram webhook error", error); return json({ ok: false, error: "Webhook processing failed" }, 500); }
+      const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID"].filter(key => !env[key]);
+      if (missingTelegramConfig.length) {
+        console.error("Telegram webhook configuration incomplete", { missing: missingTelegramConfig });
+        return json({ ok: false, error: "Telegram setup incomplete" }, 503);
+      }
+      if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
+        return json({ ok: false, error: "Unauthorized" }, 401);
+      }
+      if (!ctx || typeof ctx.waitUntil !== "function") {
+        console.error("Telegram webhook execution context unavailable");
+        return json({ ok: false, error: "Background processing unavailable" }, 503);
+      }
+      // Acknowledge Telegram immediately. AI generation and research continue in the background,
+      // so Telegram's webhook connection does not remain open until the model finishes.
+      ctx.waitUntil(handleTelegramUpdate(request.clone(), env).catch(error => {
+        console.error("telegram background processing failed", error);
+      }));
+      return json({ ok: true, accepted: true });
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/dashboard")) return html();
     if (url.pathname.startsWith("/api/")) return json({ ok: false, error: "Not implemented in this version" }, 501);
