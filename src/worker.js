@@ -1651,10 +1651,15 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
     await reply(env, callback.message.chat.id, detail);
     return json({ ok: true });
   }
-  if (!message?.text) return json({ ok: true });
+  if (!message) return json({ ok: true });
   const userId = String(message.from?.id || "");
   const chatId = message.chat.id;
   if (userId !== String(env.ADMIN_TELEGRAM_ID) || message.chat?.type !== "private") {
+    return json({ ok: true });
+  }
+  if (!message.text) {
+    try { await archiveTelegramMessage(env, chatId, message, "user"); }
+    catch (error) { console.warn("Private media archive write failed", String(error?.message || error)); }
     return json({ ok: true });
   }
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, role, last_seen_at) VALUES (?, ?, ?, 'owner', CURRENT_TIMESTAMP) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_seen_at=CURRENT_TIMESTAMP")
