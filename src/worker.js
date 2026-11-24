@@ -1544,36 +1544,38 @@ async function executeResearchSearch(query, env = {}) {
     }
   });
 
-  const jobs = [
-    ...providers.flatMap(provider => queryVariants.map(async q => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8500);
-      try {
-        const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
-        if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
-        const results = await provider.parse(response);
-        if (!results.length) throw new Error(provider.name + " returned no parseable results");
-        return results.map(item => ({ ...item, provider: provider.name }));
-      } finally { clearTimeout(timeout); }
-    })),
-    ...apiProviders.flatMap(provider => queryVariants.map(async q => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8500);
-      try {
-        const results = await provider.run(q, controller.signal);
-        if (!results.length) throw new Error(provider.name + " returned no results");
-        return results.map(item => ({ ...item, provider: provider.name }));
-      } finally { clearTimeout(timeout); }
-    }))
-  ];
-
-  // Collect all engines that answer within a short fixed window. One fast but
-  // irrelevant result must never suppress better results from other engines.
-  const settled = await Promise.allSettled(jobs);
+  // Keep outbound subrequests bounded inside a single Worker invocation.
+  // Prefer one configured search API; otherwise try Bing RSS and then Yahoo,
+  // sequentially, with one query. Do not fan out across every engine at once.
   const all = [];
-  for (const item of settled) {
-    if (item.status === "fulfilled") all.push(...item.value);
-    else failures.push(String(item.reason?.message || item.reason).slice(0, 120));
+  const searchQuery = original;
+  const preferredApi = apiProviders[0];
+  const searchPlan = preferredApi
+    ? [{ name: preferredApi.name, run: (q, signal) => preferredApi.run(q, signal) }]
+    : [providers[1], providers[3]].map(provider => ({
+        name: provider.name,
+        run: async (q, signal) => {
+          const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal });
+          if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
+          const results = await provider.parse(response);
+          if (!results.length) throw new Error(provider.name + " returned no parseable results");
+          return results;
+        }
+      }));
+  for (const provider of searchPlan) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4500);
+    try {
+      const results = await provider.run(searchQuery, controller.signal);
+      if (results.length) {
+        all.push(...results.map(item => ({ ...item, provider: provider.name })));
+        break;
+      }
+    } catch (error) {
+      failures.push(String(error?.message || error).slice(0, 120));
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   const stopWords = new Set(["the","and","for","with","from","what","where","when","how","find","best","latest","current","about","into","that","this","در","از","به","برای","با","را","چیست","کدام","چطور","چه","های","یک","و"]);
