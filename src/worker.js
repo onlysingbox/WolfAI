@@ -919,6 +919,17 @@ function mapWolfToolCall(call) {
   throw new Error("این ابزار در فهرست ابزارهای مجاز WOLF AI نیست.");
 }
 
+function isAcademicStudyRequest(value) {
+  const text = String(value || "").toLowerCase();
+  return /(?:حل\s*(?:کن|کنید|مسئله|سؤال|تمرین)|جواب\s*(?:این\s*)?(?:سؤال|تمرین)|روش\s*حل|مرحله\s*به\s*مرحله|توضیح\s*(?:بده|ده|دهید)|درس|تکلیف|امتحان|آزمون|تمرین|مسئله|سؤال|سوال|معادله|کسر|تابع|مشتق|انتگرال|حد\b|ماتریس|احتمال|آمار|هندسه|مثلثات|حسابان|ریاضی|فیزیک|شیمی|زیست(?:‌شناسی)?|علوم|ادبیات|دستور\s*زبان|نگارش|تاریخ|جغرافیا|اقتصاد|حسابداری|برنامه.?نویسی|الگوریتم|مهندسی|پزشکی|حقوق|فلسفه|جامعه.?شناسی|روان.?شناسی|biology|chemistry|physics|mathematics|math|algebra|calculus|geometry|statistics|programming|engineering|homework|assignment|exam|exercise|solve\s+(?:this|the)|work\s+out|show\s+your\s+work|explain\s+(?:the|this)\s+(?:problem|solution))/i.test(text);
+}
+
+function wolfStudyGuidance(language) {
+  return language === "fa"
+    ? "حالت آموزش و حل مسئله: با هر درخواست درسی از دبستان، متوسطه اول، متوسطه دوم یا دانشگاه مانند یک معلم دقیق و صبور برخورد کن. این قاعده برای همه درس‌ها و رشته‌هاست، نه فقط ریاضی. ابتدا صورت سؤال و خواسته را درست تشخیص بده. سپس متناسب با پایه و درس، روش حل طبیعی و استاندارد را انتخاب کن و مراحل واقعی رسیدن به پاسخ را به ترتیب توضیح بده؛ از پرش در محاسبات و ارائه فرمول بی‌توضیح خودداری کن. در ریاضی و فیزیک داده‌ها، مجهول، فرمول، جای‌گذاری، واحدها و کنترل جواب را نشان بده. در شیمی واکنش و معادله را درست بنویس، در صورت نیاز موازنه کن و واحدها و مراحل محاسبه را کنترل کن. در درس‌های مفهومی، دلیل و رابطه علت‌ومعلولی را توضیح بده و در زبان و ادبیات مثال درست بیاور. سطح بیان را از متن سؤال و پایه اعلام‌شده تشخیص بده؛ اگر پایه مشخص نیست، با سطح قابل‌فهم و بدون ساده‌سازی افراطی پاسخ بده. فارسی را یکدست و روان بنویس؛ واژه انگلیسی را فقط در صورت نیاز، همراه معادل فارسی بیاور. پاسخ را با نتیجه نهایی روشن تمام کن. محاسبات را دوباره بررسی کن، اگر داده یا صورت سؤال غلط یا مبهم است صریحاً تذکر بده و هیچ داده‌ای را حدس نزن. وانمود نکن که فرایند ذهنی پنهان خود را نمایش می‌دهی؛ به‌جای آن راه‌حل قابل‌آموزش و قابل‌بررسی را ارائه کن."
+    : "Teaching and problem-solving mode: Treat every academic request from elementary school through university as a careful, patient teacher would. This applies to every subject and discipline, not only mathematics. Identify what the question gives and asks. Choose an appropriate standard method for the subject and level, then show the actual solution in clear, ordered, checkable steps. Do not skip calculations or drop unexplained formulas. In math and physics, state known values, unknowns, formulas, substitutions, units, and a quick verification. In chemistry, write and balance equations when needed and check units and calculations. For conceptual subjects, explain the reasoning and cause-and-effect; for language and literature, use accurate examples. Infer the level from the question and any stated grade; if unknown, use accessible but not oversimplified language. Keep the response consistently in the user's language. End with a clear final answer. Recheck calculations, flag incorrect or ambiguous question data, and never guess missing values. Do not claim to reveal hidden private reasoning; provide a useful, teachable, verifiable solution instead.";
+}
+
 function wolfSystemPrompt(language) {
   const languageRule = language === "fa"
     ? "Always reply in Persian, even if the user writes in English."
@@ -1807,6 +1818,19 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
       await reply(env, callback.message.chat.id, "تنظیم مدل ذخیره شد: " + labels[selected]);
       return json({ ok: true });
     }
+    if (String(callback.data || "").startsWith("study:")) {
+      const selected = String(callback.data).slice(6);
+      if (!["auto", "on", "off"].includes(selected)) {
+        await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "تنظیم حالت آموزشی نامعتبر است." });
+        return json({ ok: true });
+      }
+      await putSetting(env, "study_mode", selected);
+      await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: "حالت آموزشی ذخیره شد." });
+      await telegram(env, "editMessageReplyMarkup", { chat_id: callback.message.chat.id, message_id: callback.message.message_id, reply_markup: { inline_keyboard: [] } });
+      const labels = { auto: "خودکار؛ تشخیص سؤال درسی", on: "همیشه روشن", off: "خاموش" };
+      await reply(env, callback.message.chat.id, "حالت آموزش و حل مسئله: " + labels[selected]);
+      return json({ ok: true });
+    }
     if (String(callback.data || "").startsWith("lang:")) {
       const selected = String(callback.data).slice(5);
       if (!["auto", "en", "fa"].includes(selected)) {
@@ -1871,7 +1895,7 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   if (command === "/start") {
     // A fresh start begins a clean conversation and must produce exactly one welcome message.
     await putSetting(env, "conversation:" + String(chatId), "[]");
-    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nمی‌توانم گفتگو کنم، مأموریت‌ها را ثبت کنم و ابزارهای متصل را با تأیید تو اجرا کنم. خواندن و ایجاد/ویرایش فایل متنی در GitHub پس از تأیید فعال است.\nبرای انتخاب زبان پاسخ /language و مدل هوش مصنوعی /model را بزن.");
+    await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nمی‌توانم گفتگو کنم، مأموریت‌ها را ثبت کنم و ابزارهای متصل را با تأیید تو اجرا کنم. خواندن و ایجاد/ویرایش فایل متنی در GitHub پس از تأیید فعال است.\nبرای انتخاب زبان پاسخ /language، مدل هوش مصنوعی /model و حالت حل درسی /study را بزن.");
   } else if (command === "/language") {
     const current = await getSetting(env, "response_language", "auto");
     const currentLabel = current === "fa" ? "همیشه فارسی" : current === "en" ? "همیشه انگلیسی" : "خودکار";
@@ -1890,8 +1914,17 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
         [{ text: "GLM-4.7-Flash", callback_data: "model:glm" }, { text: "Gemma 4 26B", callback_data: "model:gemma" }]
       ] }
     });
+  } else if (command === "/study") {
+    const current = await getSetting(env, "study_mode", "auto");
+    const labels = { auto: "خودکار؛ تشخیص سؤال درسی", on: "همیشه روشن", off: "خاموش" };
+    await reply(env, chatId, "حالت آموزش و حل مسئله فعلی: " + (labels[current] || labels.auto) + "\n\nاین حالت برای همه درس‌ها از دبستان تا دانشگاه است. حالت موردنظر را انتخاب کن:", {
+      reply_markup: { inline_keyboard: [
+        [{ text: "خودکار (پیشنهادی)", callback_data: "study:auto" }],
+        [{ text: "همیشه روشن", callback_data: "study:on" }, { text: "خاموش", callback_data: "study:off" }]
+      ] }
+    });
   } else if (command === "/help") {
-    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/memory - حافظه بلندمدت\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
+    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/study - حالت آموزش و حل مسئله برای همه درس‌ها\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/memory - حافظه بلندمدت\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(); return {ok:t.n===14, text:t.n===14 ? "متصل؛ ۱۴ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
@@ -2089,8 +2122,11 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       ? "\n\nدستورهای ویژه مکالمه طبیعی (بسیار مهم): پیام آخر کاربر را دقیق بخوان و فقط به همان منظور پاسخ بده؛ پاسخ باید مستقیماً به سؤال یا حرف آخر او مربوط باشد. تاریخچه را برای فهم مرجع ضمیرها، اصلاح‌ها و ادامه موضوع به کار ببر، اما موضوع قبلی را بی‌دلیل وارد پاسخ نکن. اگر کاربر می‌پرسد «امروز چه کار کردی؟» یا درباره زندگی شخصی‌ات می‌پرسد، صادقانه و کوتاه بگو انسان نیستی و روز یا تجربه شخصی نداری؛ هرگز فعالیت، خاطره، احساس، رابطه، اتفاق دیروز یا تجربه‌ای را جعل نکن. می‌توانی بگویی در همین گفتگو چه کمکی می‌توانی بکنی. به کاربر نسبت عاطفی نده و بی‌دلیل از دوست‌داشتن یا خوشحالی شدید حرف نزن. اگر کاربر می‌گوید پاسخ نامربوط یا چرت بوده، بدون شوخی دفاعی یا بهانه‌تراشی عذرخواهی کن، اشتباه را مشخص کن و همان سؤال اصلی را درست جواب بده. اگر منظور واقعاً مبهم است فقط یک سؤال روشن‌کننده بپرس؛ اگر روشن است سؤال تازه نساز. جواب معمولاً ۱ تا ۴ جمله، محاوره‌ای، روان و بدون عبارت‌های کلیشه‌ای باشد. کمی شوخ‌طبعی ظریف و به‌جا داشته باش؛ اگر کاربر شوخی، کنایه یا سربه‌سر گذاشتن دارد، منظور و لحنش را بفهم و متناسب جواب بده، نه اینکه همه‌چیز را لفظی و خشک تفسیر کنی. گاهی یک واکنش بامزه یا نکته هوشمندانه طبیعی اضافه کن، اما جوک را به زور وارد هر پاسخ نکن و شوخی را تکراری نکن. در موضوع جدی یا ناراحتی کاربر شوخی نکن. از ایموجی فقط در صورت طبیعی بودن استفاده کن. هیچ‌وقت برای پر کردن فضا جمله بی‌ربط نساز."
       : "\n\nNatural conversation rules (critical): Read the user's latest message carefully and answer its actual intent directly. Use conversation history to resolve references, corrections, and follow-ups, but do not drag in unrelated earlier topics. If asked what you did today or about your personal life, briefly and honestly explain that you are an AI and do not have a human day or personal experiences; never invent activities, memories, feelings, relationships, yesterday's events, or experiences. You may explain what you can do in this conversation. Do not claim affection or exaggerated emotions toward the user. If the user says your answer was irrelevant or nonsense, apologize plainly without defensive jokes or excuses, identify the mistake, and answer the original question correctly. Ask one clarifying question only when the intent is genuinely unclear; otherwise do not invent a new question. Keep ordinary replies to 1–4 natural sentences, without boilerplate or filler. Add subtle, well-timed wit when it genuinely fits; recognize teasing, irony, jokes, and implied meaning instead of interpreting everything literally. Occasionally offer a clever, relevant reaction, but never force a joke into every reply or recycle canned punchlines. Drop humor for serious topics or when the user is upset. Use emojis sparingly. Never make up unrelated text just to fill space.")
     : "") + conversationPreferenceGuidance(history, userText, language);
+  const studyMode = await getSetting(env, "study_mode", "auto");
+  const studyActive = studyMode === "on" || (studyMode === "auto" && isAcademicStudyRequest(contextualUserText));
+  const studyGuidance = studyActive ? "\n\n" + wolfStudyGuidance(language) : "";
   const messages = [
-    { role: "system", content: wolfSystemPrompt(language) + memoryContext + conversationGuidance },
+    { role: "system", content: wolfSystemPrompt(language) + memoryContext + conversationGuidance + studyGuidance },
     ...history,
     { role: "user", content: contextualUserText.slice(0, 4000) }
   ];
