@@ -1276,8 +1276,10 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')").bind(JSON.stringify(execution).slice(0, 20000), id).run();
           await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({tool:execution.tool,completed:true}).slice(0,20000), id).run();
           await log(env, userId, "task.auto_executed_read_only", "task", id, {tool:execution.tool,step_count:actionList.length});
-          const searchResults = execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
-          const linkDirectory = !searchResults && isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
+          // Explicit website/source directories need one distinct domain per result
+          // and must honor the exact requested count. Handle them before generic search.
+          const linkDirectory = isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
+          const searchResults = !linkDirectory && execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
           if (searchResults || linkDirectory) {
             const formatted = searchResults || linkDirectory;
             await saveConversation(env, chatId, history, userText, formatted.replace(/<[^>]+>/g, ""));
@@ -1556,7 +1558,7 @@ async function executeResearchSearch(query, env = {}) {
   }
 
   const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
-  const results = ranked.slice(0, 12).map(({ relevance, ...item }) => item);
+  const results = ranked.slice(0, 20).map(({ relevance, ...item }) => item);
   if (!results.length) {
     const providerSummary = failures.length ? failures.join("; ") : "All configured search providers returned no usable results.";
     throw new Error("هیچ نتیجه قابل‌استفاده‌ای از موتورهای جست‌وجوی عمومی دریافت نشد. " + providerSummary);
