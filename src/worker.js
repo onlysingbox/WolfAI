@@ -1095,9 +1095,9 @@ function formatWolfSearchResults(execution, request, language) {
     const number = index + 1;
     const title = escapeHtml(item.title || item.host);
     const host = escapeHtml(item.host);
-    const snippet = item.snippet ? "\\n" + escapeHtml(item.snippet) : "";
+    const snippet = item.snippet ? "\n" + escapeHtml(item.snippet) : "";
     messages.push({
-      text: "✨ <b>" + number + ". " + title + "</b>\\n<code>🌐 " + host + "</code>" + snippet,
+      text: "✨ <b>" + number + ". " + title + "</b>\n<code>🌐 " + host + "</code>" + snippet,
       reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
     });
   });
@@ -1129,9 +1129,9 @@ function formatWolfLinkDirectory(execution, request, language) {
   const messages = [{ text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>" }];
   selected.forEach((item, index) => {
     const number = index + 1;
-    const snippet = item.snippet ? "\\n" + escapeHtml(item.snippet) : "";
+    const snippet = item.snippet ? "\n" + escapeHtml(item.snippet) : "";
     messages.push({
-      text: "✨ <b>" + number + ". " + escapeHtml(item.title) + "</b>\\n<code>🌐 " + escapeHtml(item.host) + "</code>" + snippet,
+      text: "✨ <b>" + number + ". " + escapeHtml(item.title) + "</b>\n<code>🌐 " + escapeHtml(item.host) + "</code>" + snippet,
       reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
     });
   });
@@ -2176,12 +2176,26 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           const searchResults = !linkDirectory && execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
           if (searchResults || linkDirectory) {
             const formatted = searchResults || linkDirectory;
-            await saveConversation(env, chatId, history, userText, formatted.text.replace(/<[^>]+>/g, ""));
-            await reply(env, chatId, formatted.text, {
-              parse_mode: "HTML",
-              disable_web_page_preview: true,
-              ...(formatted.reply_markup ? { reply_markup: formatted.reply_markup } : {})
-            });
+            const formattedMessages = Array.isArray(formatted.messages) ? formatted.messages : null;
+            const conversationText = formattedMessages
+              ? formattedMessages.map(item => String(item.text || "").replace(/<[^>]+>/g, "")).join("\n\n")
+              : String(formatted.text || "").replace(/<[^>]+>/g, "");
+            await saveConversation(env, chatId, history, userText, conversationText);
+            if (formattedMessages) {
+              for (const item of formattedMessages) {
+                await reply(env, chatId, item.text || "", {
+                  parse_mode: "HTML",
+                  disable_web_page_preview: true,
+                  ...(item.reply_markup ? { reply_markup: item.reply_markup } : {})
+                });
+              }
+            } else {
+              await reply(env, chatId, formatted.text || "", {
+                parse_mode: "HTML",
+                disable_web_page_preview: true,
+                ...(formatted.reply_markup ? { reply_markup: formatted.reply_markup } : {})
+              });
+            }
           } else {
             const summary = await summarizeWolfExecution(env, execution, userText);
             const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
