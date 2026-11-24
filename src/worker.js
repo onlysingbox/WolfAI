@@ -266,10 +266,10 @@ function conversationPreferenceGuidance(history, currentText, language) {
   ].slice(-10);
   let lengthPreference = "normal";
   let stepPreference = false;
-  const shortPattern = /(?:\b(?:keep\s+(?:it|your\s+answers?)\s+short|short\s+and\s+clear|be\s+brief|briefly|concise|not\s+(?:too\s+)?long|don't\s+write\s+long|do\s+not\s+write\s+long|less\s+detail)\b|\b(?:مختصر|کوتاه|خلاصه|زیاد\s+طولانی\s+نکن|طولانی\s+جواب\s+نده|کمتر\s+توضیح\s+بده|کوتاه\s+و\s+روشن)\b)/i;
-  const detailPattern = /(?:\b(?:explain\s+(?:in\s+)?detail|more\s+details?|elaborate|give\s+me\s+the\s+full\s+explanation|be\s+more\s+detailed)\b|\b(?:با\s+جزئیات|مفصل\s+توضیح|کامل\s+توضیح|بیشتر\s+توضیح\s+بده)\b)/i;
-  const stepPattern = /(?:\b(?:step\s+by\s+step|in\s+steps|numbered\s+steps)\b|\b(?:مرحله\s+به\s+مرحله|گام\s+به\s+گام|قدم\s+به\s+قدم)\b)/i;
-  const noStepPattern = /(?:\b(?:no\s+steps|don't\s+number|without\s+steps)\b|\b(?:بدون\s+مرحله|شماره\s+گذاری\s+نکن)\b)/i;
+  const shortPattern = /(?:\b(?:keep\s+(?:it|your\s+answers?)\s+short|short\s+and\s+clear|answer\s+(?:me\s+)?short|short\s+answers?|be\s+brief|briefly|concise|not\s+(?:too\s+)?long|don't\s+(?:write|be)\s+long|do\s+not\s+(?:write|be)\s+long|less\s+detail)\b|مختصر|کوتاه|خلاصه|زیاد\s+طولانی\s+نکن|طولانی\s+جواب\s+نده|کمتر\s+توضیح\s+بده|کوتاه\s+و\s+روشن|جواب\s+کوتاه)/i;
+  const detailPattern = /(?:\b(?:explain\s+(?:in\s+)?detail|more\s+details?|elaborate|give\s+me\s+the\s+full\s+explanation|be\s+more\s+detailed)\b|با\s+جزئیات|مفصل\s+توضیح|کامل\s+توضیح|بیشتر\s+توضیح\s+بده)/i;
+  const stepPattern = /(?:\b(?:step\s+by\s+step|in\s+steps|numbered\s+steps)\b|مرحله\s+به\s+مرحله|گام\s+به\s+گام|قدم\s+به\s+قدم)/i;
+  const noStepPattern = /(?:\b(?:no\s+steps|don't\s+number|without\s+steps)\b|بدون\s+مرحله|شماره\s+گذاری\s+نکن)/i;
   for (const item of messages) {
     const value = String(item.content || "");
     if (shortPattern.test(value)) lengthPreference = "short";
