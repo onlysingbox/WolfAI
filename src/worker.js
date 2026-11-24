@@ -344,7 +344,7 @@ function wolfSystemPrompt(language) {
     "For university admissions research, verify each university against its own official admissions or international-students pages. Separate university-wide rules from programme-specific requirements. Do not guess tuition, language scores, deadlines, diplomas, financial proof, visa rules, or scholarships. If a detail was not checked on the official page, label it clearly as not verified and do not imply that the whole admission profile is verified. For every research task, maintain an evidence ledger internally: each factual claim must be traceable to an opened source URL; prefer the institution's own page for its policies, and do not use a search snippet as proof. When several entities are requested, normalize official names and count distinct entities before drafting. For every requested item, include only fields supported by checked sources; write not verified for missing fields. Never fill a table cell with guesses, generic admissions folklore, unrelated source names, invented links, broken URLs, or placeholder text. If source access fails or the required count cannot be verified, clearly state the shortfall and stop instead of fabricating. Do not claim that research is complete unless the requested count, source checks, and required fields have all passed. Prefer fewer accurate facts over a full-looking but unsupported table.",
     "Do not use vague claims such as a full outsourced onboarding process is required when the next step is simply to inspect public official pages. Do not propose outsourcing unless the user explicitly asks for it or a genuine external service is necessary.",
     "For Persian answers, use natural, fluent Persian, correct نیم‌فاصله, Persian punctuation, and Persian numerals consistently when appropriate. Avoid machine-translated phrases and foreign fragments. Use English names only where they are official names, and explain abbreviations on first use.",
-    "You may call the declared tools only when the user clearly requests the corresponding task. You are a general-purpose personal assistant, not a search-first engine. First understand the user's actual goal and choose the simplest suitable approach. Answer directly from reliable knowledge for stable explanations, calculations, writing, translation, brainstorming, coding help, and reasoning; do not call web_search merely because a topic is mentioned. Use web_search when the user asks to find or verify current/external information, discover real websites or services, compare current options, investigate a subject, or when freshness and source evidence materially matter. Search is one capability among many, not the default for every task. When research is needed, search broadly across relevant independent providers, then open authoritative pages to verify important claims. Prefer primary, official, government, university, and peer-reviewed sources when relevant; use reputable independent sources for context. Search snippets are leads, not evidence. Never invent sources or facts. For an explicit request for a list of websites, sources, or links where the user mainly wants destinations, return a clean numbered list containing only the site/source name linked to its direct URL, with no descriptions or introductory commentary; provide only distinct, usable results and state briefly if the requested count cannot be met. Do not apply this link-only format to ordinary explanations, comparisons, reports, or other tasks unless requested. Web search and public HTTPS page reading are read-only research tools. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
+    "You are a capable general-purpose agent. Understand intent before acting. Greetings, thanks, casual chat, and simple conversation must receive a natural direct reply and must NEVER trigger web search or tools. Answer stable questions, calculations, writing, translation, brainstorming, coding help, and reasoning directly. Search the web only when the user explicitly asks to search/find links or when current external information is genuinely needed. When search is used, keep the response compact and well-organized: prioritize direct clickable source links, each with a short useful snippet; avoid long introductions, repetitive commentary, and unstructured source dumps. If the user asks a factual question, give a brief answer supported by a few relevant links. Choose the appropriate capability for the actual request; do not turn every message into a search. You are a general-purpose personal assistant, not a search-first engine. First understand the user's actual goal and choose the simplest suitable approach. Answer directly from reliable knowledge for stable explanations, calculations, writing, translation, brainstorming, coding help, and reasoning; do not call web_search merely because a topic is mentioned. Use web_search when the user asks to find or verify current/external information, discover real websites or services, compare current options, investigate a subject, or when freshness and source evidence materially matter. Search is one capability among many, not the default for every task. When research is needed, search broadly across relevant independent providers, then open authoritative pages to verify important claims. Prefer primary, official, government, university, and peer-reviewed sources when relevant; use reputable independent sources for context. Search snippets are leads, not evidence. Never invent sources or facts. For an explicit request for a list of websites, sources, or links where the user mainly wants destinations, return a clean numbered list containing only the site/source name linked to its direct URL, with no descriptions or introductory commentary; provide only distinct, usable results and state briefly if the requested count cannot be met. Do not apply this link-only format to ordinary explanations, comparisons, reports, or other tasks unless requested. Web search and public HTTPS page reading are read-only research tools. Read tools inspect data; GitHub create/update, private document creation, and finance ledger entries change stored data and always require explicit owner approval. Finance tools record information only and never move money.",
     "When you call tools, explain briefly what you are doing. The application stores a durable plan of up to five sequential steps. Read-only research and inspection may execute immediately and are logged; any write or external side effect must wait for the owner's explicit approval of the exact operation.",
     "The owner-approved long-term memory included in context is reliable personal and project context. Use it to avoid asking the owner to repeat established facts. Treat entries categorized status_snapshot as historical snapshots only: they describe a past observation, are not live telemetry, and must never be presented as current status without a fresh health check. Save a memory only when the owner explicitly asks you to remember or save a durable preference or fact; call memory_save and show the exact value for approval. Search it when the owner asks what was previously decided. Never save passwords, API tokens, payment credentials, or highly sensitive personal data.",
     "When the owner asks you to create and save a document and gives a clear title but no body, do not ask what to write. Draft a useful, well-structured first version based on the title and ordinary safe assumptions, then call artifact_create so the exact draft is shown for approval. Ask a clarification only if the document requires specific personal facts, figures, or decisions that cannot safely be assumed; otherwise use clearly marked placeholders.",
@@ -489,6 +489,27 @@ function isWolfLinkDirectoryRequest(request) {
   return destinationWords && (listIntent || explicitMinimal || countIntent);
 }
 
+function formatWolfSearchResults(execution, request, language) {
+  const results = Array.isArray(execution?.results) ? execution.results : [];
+  const seen = new Set();
+  const selected = [];
+  for (const item of results) {
+    let url;
+    try { url = new URL(String(item.url || "")); } catch { continue; }
+    if (url.protocol !== "https:" || seen.has(url.toString())) continue;
+    seen.add(url.toString());
+    selected.push({ title: String(item.title || url.hostname).replace(/[\\r\\n<>]/g, " ").trim().slice(0, 180), url: url.toString(), host: url.hostname.replace(/^www\\./, ""), snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 240) });
+    if (selected.length >= 8) break;
+  }
+  const heading = language === "fa" ? "🔎 نتایج جست‌وجو" : "🔎 Search results";
+  const lines = selected.map((item, index) =>
+    (index + 1) + '. <a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title || item.host) + '</a>' +
+    "\\n<code>" + escapeHtml(item.host) + "</code>" +
+    (item.snippet ? "\\n" + escapeHtml(item.snippet) : "")
+  );
+  return "<b>" + heading + "</b>" + (lines.length ? "\\n\\n" + lines.join("\\n\\n") : (language === "fa" ? "\\nنتیجه معتبری پیدا نشد." : "\\nNo usable results found."));
+}
+
 function formatWolfLinkDirectory(execution, request, language) {
   const singleSearch = execution?.tool === "research.search";
   const searchSequence = execution?.tool === "agent.sequence" && Array.isArray(execution.results) && execution.results.length > 0 && execution.results.every(x => x.result?.tool === "research.search");
@@ -552,34 +573,6 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
 
-  // Simple Google-style search mode: every normal message is searched directly.
-  // No model tool-planning, multi-step research, or editorial pass is involved.
-  const searchLabel = language === "fa" ? "نتایج جست‌وجو برای" : "Search results for";
-  try {
-    const searchData = await executeResearchSearch(userText, env);
-    const items = (searchData.results || []).slice(0, 8);
-    const resultLines = items.map((item, index) => {
-      const title = escapeHtml(String(item.title || "بدون عنوان").slice(0, 180));
-      const url = escapeHtml(String(item.url || ""));
-      const snippet = escapeHtml(String(item.snippet || "").slice(0, 360));
-      const host = escapeHtml((() => { try { return new URL(item.url).hostname.replace(/^www\\./, ""); } catch { return ""; } })());
-      return (index + 1) + '. <a href="' + url + '">' + title + '</a>' +
-        (host ? "\\n<code>" + host + "</code>" : "") +
-        (snippet ? "\\n" + snippet : "");
-    });
-    const answer = "<b>" + searchLabel + ":</b> " + escapeHtml(userText.slice(0, 250)) +
-      (resultLines.length ? "\\n\\n" + resultLines.join("\\n\\n") : (language === "fa" ? "\\nنتیجه‌ای پیدا نشد." : "\\nNo results found."));
-    await saveConversation(env, chatId, history, userText, answer.replace(/<[^>]+>/g, ""));
-    await reply(env, chatId, answer, { parse_mode: "HTML", disable_web_page_preview: true });
-  } catch (error) {
-    console.error("WOLF simple web search failed", error);
-    const failure = language === "fa"
-      ? "جست‌وجوی وب فعلاً نتیجه قابل‌استفاده‌ای نداد. چند لحظه دیگر دوباره تلاش کن."
-      : "Web search returned no usable results. Please try again shortly.";
-    await saveConversation(env, chatId, history, userText, failure);
-    await reply(env, chatId, failure);
-  }
-  return;
   // Resolve short replies to the immediately preceding clarification instead of
   // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
   let contextualUserText = userText;
@@ -715,10 +708,12 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           await env.DB.prepare("UPDATE agent_steps SET status='completed', output_json=?, completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP), error_text=NULL WHERE run_id=? AND status IN ('running','approved','awaiting_approval')").bind(JSON.stringify(execution).slice(0, 20000), id).run();
           await env.DB.prepare("UPDATE agent_runs SET status='completed', result_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(JSON.stringify({tool:execution.tool,completed:true}).slice(0,20000), id).run();
           await log(env, userId, "task.auto_executed_read_only", "task", id, {tool:execution.tool,step_count:actionList.length});
-          const linkDirectory = isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
-          if (linkDirectory) {
-            await saveConversation(env, chatId, history, userText, linkDirectory);
-            await reply(env, chatId, linkDirectory, { parse_mode: "HTML", disable_web_page_preview: true });
+          const searchResults = execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
+          const linkDirectory = !searchResults && isWolfLinkDirectoryRequest(userText) ? formatWolfLinkDirectory(execution, userText, language) : null;
+          if (searchResults || linkDirectory) {
+            const formatted = searchResults || linkDirectory;
+            await saveConversation(env, chatId, history, userText, formatted.replace(/<[^>]+>/g, ""));
+            await reply(env, chatId, formatted, { parse_mode: "HTML", disable_web_page_preview: true });
           } else {
             const summary = await summarizeWolfExecution(env, execution, userText);
             const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
