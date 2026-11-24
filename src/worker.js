@@ -1547,7 +1547,7 @@ async function executeResearchSearch(query, env = {}) {
   const jobs = [
     ...providers.flatMap(provider => queryVariants.map(async q => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5600);
+      const timeout = setTimeout(() => controller.abort(), 3200);
       try {
         const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
         if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
@@ -1558,7 +1558,7 @@ async function executeResearchSearch(query, env = {}) {
     })),
     ...apiProviders.flatMap(provider => queryVariants.map(async q => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5600);
+      const timeout = setTimeout(() => controller.abort(), 3200);
       try {
         const results = await provider.run(q, controller.signal);
         if (!results.length) throw new Error(provider.name + " returned no results");
@@ -1567,16 +1567,13 @@ async function executeResearchSearch(query, env = {}) {
     }))
   ];
 
-  // Return as soon as the first search provider succeeds. Waiting for every
-  // search engine made simple link requests unnecessarily slow.
+  // Collect all engines that answer within a short fixed window. One fast but
+  // irrelevant result must never suppress better results from other engines.
+  const settled = await Promise.allSettled(jobs);
   const all = [];
-  try {
-    const firstSuccessful = await Promise.any(jobs);
-    all.push(...firstSuccessful);
-  } catch (error) {
-    for (const reason of (error?.errors || [])) {
-      failures.push(String(reason?.message || reason).slice(0, 120));
-    }
+  for (const item of settled) {
+    if (item.status === "fulfilled") all.push(...item.value);
+    else failures.push(String(item.reason?.message || item.reason).slice(0, 120));
   }
 
   const stopWords = new Set(["the","and","for","with","from","what","where","when","how","find","best","latest","current","about","into","that","this","در","از","به","برای","با","را","چیست","کدام","چطور","چه","های","یک","و"]);
@@ -1588,9 +1585,10 @@ async function executeResearchSearch(query, env = {}) {
     for (const token of queryTokens) if (!stopWords.has(token) && tokens.has(token)) score += 3;
     if (musicQuery) {
       if (/(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body)) score += 5;
-      if (/(iran|iranian|ایران|ایرانی)/i.test(body)) score += 4;
-      if (/(download|دانلود)/i.test(body)) score += 4;
-      if (/(netflix|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(host + " " + body)) score -= 15;
+      if (/(iran|iranian|ایران|ایرانی|persian|فارسی)/i.test(body)) score += 6;
+      if (/(download|دانلود)/i.test(body)) score += 5;
+      if (host.endsWith(".ir")) score += 3;
+      if (/(netflix|maroon.?5|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(host + " " + body)) score -= 20;
     }
     if (/\.(gov|gov\.[a-z]{2}|gouv\.[a-z]{2})$/.test(host) || host.includes(".gov.")) score += 8;
     if (/\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/.test(host) || host.includes(".edu.")) score += 7;
@@ -1624,7 +1622,15 @@ async function executeResearchSearch(query, env = {}) {
   }
 
   const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
-  const relevant = musicQuery ? ranked.filter(item => item.relevance >= 5) : ranked;
+  const relevant = musicQuery ? ranked.filter(item => {
+    const host = hostOf(item.url);
+    const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
+    const hasMusic = /(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body);
+    const hasDownload = /(download|دانلود|mp3)/i.test(body);
+    const hasIranianContext = /(iran|iranian|ایران|ایرانی|persian|فارسی)/i.test(body) || host.endsWith(".ir");
+    const unrelated = /(netflix|maroon.?5|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(body);
+    return item.relevance >= 8 && hasMusic && hasDownload && hasIranianContext && !unrelated;
+  }) : ranked;
   const selected = [];
   const selectedHosts = new Set();
   for (const item of relevant) {
