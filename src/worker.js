@@ -636,7 +636,7 @@ async function createTask(env, title, ownerId, action = null, requestText = null
     .bind(runId, String(ownerId), String(requestText || title || taskTitle).slice(0, 4000), JSON.stringify(plan)).run();
   for (let index = 0; index < plan.length; index++) {
     const item = actions[index];
-    await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
+    await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', ?)")
       .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
         item ? JSON.stringify(item).slice(0, 20000) : null, plan[index].approval_required ? 1 : 0).run();
   }
