@@ -1190,6 +1190,8 @@ async function executeResearchSearch(query, env = {}) {
   const queryVariants = [original];
   const musicQuery = /(?:موسیقی|موزیک|آهنگ|music|song|mp3)/i.test(original);
   const movieStreamingQuery = /(?:فیلم|سریال|سینما|تماشای|پخش.?آنلاین|movie|film|cinema|streaming|tv.?series)/i.test(original);
+  const bookQuery = /(?:کتاب|کتاب.?ها|کتاب.?خوان|کتاب.?الکترونیک|کتاب.?صوتی|book|books|ebook|e-books)/i.test(original);
+  if (bookQuery) queryVariants.push("سایت کتاب الکترونیکی فارسی کتابخانه دانلود کتاب");
   if (musicQuery) queryVariants.push("Iranian music download websites MP3");
   if (movieStreamingQuery) queryVariants.push("سایت رسمی تماشای آنلاین فیلم و سریال پلتفرم پخش فیلم");
   if (/(official|رسمی|وب.?سایت|سایت اصلی)/i.test(original)) queryVariants.push(original + " official website");
@@ -1438,6 +1440,17 @@ async function executeResearchSearch(query, env = {}) {
     if (selected.length >= 20) break;
   }
   const results = selected.map(({ relevance, ...item }) => item);
+  // Book requests use a strict book-only fallback. General search engines can
+  // return retailers, ads, or unrelated pages for short Persian queries.
+  if (bookQuery) {
+    const curatedBookSites = [
+      { title: "کتابناک | آرشیو کتاب‌های الکترونیکی", url: "https://www.ketabnak.com/", snippet: "آرشیو کتاب‌های الکترونیکی فارسی؛ دسترسی و مجوز هر عنوان را جداگانه بررسی کن", provider: "curated-book-platforms" },
+      { title: "کتابراه | کتاب الکترونیکی و صوتی", url: "https://www.ketabrah.com/", snippet: "فروشگاه و کتابخانه دیجیتال؛ برخی عنوان‌ها رایگان و برخی خریدنی هستند", provider: "curated-book-platforms" },
+      { title: "طاقچه | کتاب الکترونیکی و صوتی", url: "https://taaghche.com/", snippet: "کتاب‌های الکترونیکی و صوتی؛ شامل عنوان‌های رایگان و پولی", provider: "curated-book-platforms" },
+      { title: "فیدیبو | کتاب الکترونیکی و صوتی", url: "https://fidibo.com/", snippet: "کتاب‌های الکترونیکی و صوتی؛ دسترسی رایگان یا خرید بسته به عنوان", provider: "curated-book-platforms" }
+    ];
+    results.splice(0, results.length, ...curatedBookSites);
+  }
   // If public search engines block or fail to parse a movie-platform query,
   // use a small curated set of known official streaming services instead of
   // returning a dead-end error or irrelevant magazine articles.
@@ -1938,7 +1951,13 @@ async function processQueuedDirectSearch(env, update) {
     const query = directSearchQuery(text) || text;
     const search = await executeResearchSearch(query, env);
     const countText = text.match(/[0-9۰-۹]+/);
-    const requestedCount = countText ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))) : 5;
+    const wordCounts = { "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6, "هفت": 7, "هشت": 8, "نه": 9, "ده": 10 };
+    const wordCount = Object.entries(wordCounts).find(([word]) =>
+      new RegExp("(?:^|\\s)" + word + "(?=\\s*(?:سایت|وب.?سایت|منبع))").test(text)
+    )?.[1];
+    const requestedCount = countText
+      ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))))
+      : (wordCount || 5);
     const limit = Math.max(1, Math.min(10, requestedCount || 5));
     const seen = new Set();
     const links = (search.results || []).filter(item => {
@@ -1951,13 +1970,13 @@ async function processQueuedDirectSearch(env, update) {
     for (let index = 0; index < links.length; index++) {
       const item = links[index];
       let host = "";
-      try { host = new URL(item.url).hostname.replace(/^www\\./, ""); } catch {}
-      const title = escapeHtml(String(item.title || host || "نتیجه").replace(/[\\r\\n<>]/g, " ").slice(0, 180));
-      const snippet = escapeHtml(String(item.snippet || "").replace(/[\\r\\n]+/g, " ").slice(0, 220));
+      try { host = new URL(item.url).hostname.replace(/^www\./, ""); } catch {}
+      const title = escapeHtml(String(item.title || host || "نتیجه").replace(/[\r\n<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, 180));
+      const snippet = escapeHtml(String(item.snippet || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 180));
       const number = index + 1;
       const body = "✨ <b>" + number + ". " + title + "</b>" +
-        (host ? "\\n<code>🌐 " + escapeHtml(host) + "</code>" : "") +
-        (snippet ? "\\n" + snippet : "");
+        (host ? "\n<code>🌐 " + escapeHtml(host) + "</code>" : "") +
+        (snippet ? "\n" + snippet : "");
       await reply(env, chatId, body, {
         parse_mode: "HTML",
         disable_web_page_preview: true,
