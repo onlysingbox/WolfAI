@@ -1611,7 +1611,7 @@ async function executeResearchSearch(query, env = {}) {
     for (const token of queryTokens) if (!stopWords.has(token) && tokens.has(token)) score += 3;
     if (movieStreamingQuery) {
       if (/(تماشای آنلاین|پخش آنلاین|فیلم و سریال|فیلم آنلاین|video on demand|streaming|watch online|فیلیمو|نماوا|فیلم.?نت)/i.test(body)) score += 9;
-      if (/(?:^|\\/)(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:\\/|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(new URL(item.url).pathname + " " + item.title)) score -= 18;
+      if (/(?:^|[/])(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:[/]|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(new URL(item.url).pathname + " " + item.title)) score -= 18;
       if (/(w2g|watch.?together|اشتراک.?تماشا)/i.test(host + " " + body)) score -= 16;
       if (/(فیلم|سریال|movie|film|cinema|stream)/i.test(body)) score += 4;
     }
@@ -1657,11 +1657,11 @@ async function executeResearchSearch(query, env = {}) {
   let relevant = movieStreamingQuery ? ranked.filter(item => {
     const host = hostOf(item.url);
     const body = (item.title + " " + item.snippet + " " + host + " " + new URL(item.url).pathname).toLowerCase();
-    const articleLike = /(?:^|\\/)(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:\\/|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(body);
+    const articleLike = /(?:^|[/])(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:[/]|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(body);
     const platformLike = /(تماشای آنلاین|پخش آنلاین|فیلم و سریال|فیلم آنلاین|video on demand|streaming|watch online|فیلیمو|نماوا|فیلم.?نت)/i.test(body);
     const movieLike = /(فیلم|سریال|movie|film|cinema|stream)/i.test(body);
     const sideService = /(w2g|watch.?together|اشتراک.?تماشا)/i.test(host + " " + body);
-    return !articleLike && !sideService && movieLike && (platformLike || /^(?:www\\.)?(?:filimo|namava|filmnet)\\./i.test(host));
+    return !articleLike && !sideService && movieLike && (platformLike || /^(?:www[.])?(?:filimo|namava|filmnet)[.]/i.test(host));
   }) : musicQuery ? ranked.filter(item => {
     const host = hostOf(item.url);
     const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
