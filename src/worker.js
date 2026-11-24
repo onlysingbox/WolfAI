@@ -263,12 +263,76 @@ function requestedReplacementText(value) {
   return "";
 }
 
+function requestedReplacementPair(value) {
+  const text = String(value || "").trim();
+  const patterns = [
+    /(?:به\s*جای|بجای)\s+(.+?)\s+(?:باید\s+)?بنویس(?:ی|ید)?\s+([\s\S]+)$/i,
+    /(?:به\s*جای|بجای)\s+(.+?)\s+قرار\s+بده\s+([\s\S]+)$/i,
+    /(?:به\s*جای|بجای)\s+(.+?)\s+جایگزین\s+کن\s+با\s+([\s\S]+)$/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]?.trim() && match?.[2]?.trim()) {
+      return { from: match[1].trim(), to: match[2].trim() };
+    }
+  }
+  return null;
+}
+
+async function findPreviousUserText(env, chatId, currentMessageId) {
+  if (!env.MESSAGE_ARCHIVE) return null;
+  const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
+  const candidates = (listed.keys || [])
+    .filter(item => item.metadata?.role === "user" &&
+      Number(item.metadata?.messageId) < Number(currentMessageId) &&
+      item.metadata?.kind === "text")
+    .sort((a, b) => Number(b.metadata?.messageId || 0) - Number(a.metadata?.messageId || 0));
+  for (const item of candidates) {
+    const archived = await readArchivedTelegramMessage(env, chatId, item.metadata.messageId);
+    if (String(archived?.text || "").trim()) {
+      return {
+        message_id: Number(item.metadata.messageId),
+        text: String(archived.text),
+        from: { is_bot: false },
+        archive_key: item.name
+      };
+    }
+  }
+  return null;
+}
+
+async function replaceUserMessageWithBotMessage(env, chatId, sourceMessage, newText) {
+  if (!sourceMessage?.message_id || sourceMessage.from?.is_bot) {
+    throw new Error("پیام کاربر برای جایگزینی مشخص نیست.");
+  }
+  const sent = await telegram(env, "sendMessage", { chat_id: chatId, text: String(newText).slice(0, 4000) });
+  try {
+    await telegram(env, "deleteMessage", { chat_id: chatId, message_id: sourceMessage.message_id });
+    if (sourceMessage.archive_key && env.MESSAGE_ARCHIVE) {
+      await env.MESSAGE_ARCHIVE.delete(sourceMessage.archive_key);
+    }
+    return sent;
+  } catch (error) {
+    if (sent?.message_id) {
+      try { await telegram(env, "deleteMessage", { chat_id: chatId, message_id: sent.message_id }); } catch {}
+    }
+    throw error;
+  }
+}
+
 async function handleTextEditRequest(env, chatId, message, requestText) {
   const text = String(requestText || "").trim();
-  const explicitReplacement = requestedReplacementText(text);
+  const replacementPair = requestedReplacementPair(text);
+  let explicitReplacement = requestedReplacementText(text);
   let sourceMessage = message?.reply_to_message || null;
   let sourceText = "";
   const quoted = text.match(/«([\s\S]+?)»|“([\s\S]+?)”|"([\s\S]+?)"|'([\s\S]+?)'/);
+
+  // If the user refers to "this" message without using Telegram's Reply,
+  // resolve only the immediately preceding archived user text message.
+  if (!sourceMessage && (replacementPair || explicitReplacement || /اینو|این\s+پیام|پیام\s+قبلی|متن\s+قبلی/i.test(text))) {
+    sourceMessage = await findPreviousUserText(env, chatId, message?.message_id);
+  }
 
   if (sourceMessage) {
     sourceText = String(sourceMessage.text || sourceMessage.caption || "");
@@ -280,13 +344,27 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
   if (!sourceText && quoted) {
     sourceText = String(quoted.slice(1).find(Boolean) || "");
   }
-  if (!sourceText && !explicitReplacement) {
+  if (!sourceText && !explicitReplacement && !replacementPair) {
     const colon = text.match(/[:：]\s*([\s\S]{5,4000})$/);
     if (colon) sourceText = colon[1].trim();
   }
 
-  // A direct "replace it with ..." instruction is deterministic. Never ask
-  // a language model to guess the replacement wording.
+  // "Replace X with Y" means change only X and preserve the rest of the source.
+  if (replacementPair) {
+    if (!sourceText) {
+      await reply(env, chatId, "متن اصلی را پیدا نکردم. روی همان پیام Reply بزن و دوباره درخواست ویرایش را بفرست.");
+      return;
+    }
+    const position = sourceText.indexOf(replacementPair.from);
+    if (position < 0) {
+      await reply(env, chatId, "عبارت «" + replacementPair.from + "» در پیام اصلی پیدا نشد؛ چیزی را تغییر ندادم.");
+      return;
+    }
+    explicitReplacement = sourceText.slice(0, position) + replacementPair.to +
+      sourceText.slice(position + replacementPair.from.length);
+  }
+
+  // A direct replacement is deterministic; never ask a language model to guess it.
   if (explicitReplacement) {
     const finalText = explicitReplacement.slice(0, 4000);
     if (sourceMessage?.from?.is_bot && sourceMessage.message_id) {
@@ -301,10 +379,17 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         console.warn("Bot message edit failed; returning replacement as a new message", String(error?.message || error));
       }
     }
-    const note = sourceMessage
-      ? "متن جایگزین آماده است. پیام اصلی متعلق به شماست و تلگرام اجازه نمی‌دهد ربات پیام ارسالی شما را مستقیماً ویرایش کند:"
-      : "متن جایگزین:";
-    await reply(env, chatId, note + "\n\n" + finalText);
+    if (sourceMessage?.message_id && !sourceMessage?.from?.is_bot) {
+      try {
+        await replaceUserMessageWithBotMessage(env, chatId, sourceMessage, finalText);
+        return;
+      } catch (error) {
+        console.error("User message replacement failed", error);
+        await reply(env, chatId, "جایگزینی پیام انجام نشد و پیام اصلی دست‌نخورده باقی ماند. خطا: " + String(error?.message || error).slice(0, 220));
+        return;
+      }
+    }
+    await reply(env, chatId, "متن جایگزین:\n\n" + finalText);
     return;
   }
 
@@ -348,9 +433,11 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         console.warn("Bot message edit failed; returning corrected text as a new message", String(error?.message || error));
       }
     }
-    await reply(env, chatId, sourceMessage
-      ? "نسخه اصلاح‌شده:\n\n" + polished + "\n\nپیام اصلی متعلق به شماست و ربات نمی‌تواند آن را مستقیماً ویرایش کند."
-      : "نسخه اصلاح‌شده:\n\n" + polished);
+    if (sourceMessage?.message_id && !sourceMessage?.from?.is_bot) {
+      await replaceUserMessageWithBotMessage(env, chatId, sourceMessage, polished);
+      return;
+    }
+    await reply(env, chatId, "نسخه اصلاح‌شده:\n\n" + polished);
   } catch (error) {
     console.error("Text editing failed", error);
     await reply(env, chatId, "ویرایش متن انجام نشد: " + String(error?.message || error).slice(0, 300));
