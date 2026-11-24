@@ -454,18 +454,14 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         });
         return;
       } catch (error) {
-        console.warn("Bot message edit failed; returning replacement as a new message", String(error?.message || error));
+        console.error("In-place bot message edit failed; no replacement was sent", String(error?.message || error));
+        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + String(error?.message || error).slice(0, 220));
+        return;
       }
     }
     if (sourceMessage?.message_id && !sourceMessage?.from?.is_bot) {
-      try {
-        await replaceUserMessageWithBotMessage(env, chatId, sourceMessage, finalText);
-        return;
-      } catch (error) {
-        console.error("User message replacement failed", error);
-        await reply(env, chatId, "جایگزینی پیام انجام نشد و پیام اصلی دست‌نخورده باقی ماند. خطا: " + String(error?.message || error).slice(0, 220));
-        return;
-      }
+      await reply(env, chatId, "این پیام را پیدا کردم، اما تلگرام اجازه نمی‌دهد ربات پیام نوشته‌شده توسط شما را در همان جای قبلی ویرایش کند. پیام اصلی را دست‌نخورده گذاشتم و حذف یا جایگزینش نکردم. فقط پیام‌های خود ربات را می‌توانم در همان محل ویرایش کنم.");
+      return;
     }
     await reply(env, chatId, "متن جایگزین:\n\n" + finalText);
     return;
@@ -508,11 +504,13 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         });
         return;
       } catch (error) {
-        console.warn("Bot message edit failed; returning corrected text as a new message", String(error?.message || error));
+        console.error("In-place bot message edit failed; no replacement was sent", String(error?.message || error));
+        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + String(error?.message || error).slice(0, 220));
+        return;
       }
     }
     if (sourceMessage?.message_id && !sourceMessage?.from?.is_bot) {
-      await replaceUserMessageWithBotMessage(env, chatId, sourceMessage, polished);
+      await reply(env, chatId, "این پیام را پیدا کردم، اما تلگرام اجازه نمی‌دهد ربات پیام نوشته‌شده توسط شما را در همان جای قبلی ویرایش کند. پیام اصلی را دست‌نخورده گذاشتم و حذف یا جایگزینش نکردم. فقط پیام‌های خود ربات را می‌توانم در همان محل ویرایش کنم.");
       return;
     }
     await reply(env, chatId, "نسخه اصلاح‌شده:\n\n" + polished);
