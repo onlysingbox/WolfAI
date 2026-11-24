@@ -7,7 +7,7 @@ android {
     namespace = "com.onlysingbox.wolfai"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.onlys ingbox.wolfai".replace(" ", "")
+        applicationId = "com.onlysingbox.wolfai"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
