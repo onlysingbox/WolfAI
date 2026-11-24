@@ -219,7 +219,7 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
   // Detect requests such as: "سه پیام دادم که نوشتم پاک را پاک کن".
   const keywordMatch = text.match(/(?:نوشتم|نوشته‌ام|کلمه(?:‌ی)?|عبارت(?:ی)?)\s*[«"“']?(.+?)[»"”']?\s*(?:را|رو)\s*(?:پاک|حذف)/i);
   const keyword = keywordMatch ? keywordMatch[1].trim().replace(/[«»“”"']/g, "") : "";
-  const countMatch = text.match(/(?:^|\\s)(\\d+|[۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\\s+پیام/i);
+  const countMatch = text.match(/(?:^|\s)(\d+|[۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\s+پیام/i);
   const countWords = { "یک":1,"دو":2,"سه":3,"چهار":4,"پنج":5,"شش":6,"هفت":7,"هشت":8,"نه":9,"ده":10 };
   const countRaw = countMatch?.[1] || "";
   const count = countRaw ? (countWords[countRaw] || Number(countRaw.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))) || 1) : 1;
