@@ -1474,9 +1474,25 @@ export default {
         console.error("telegram webhook invalid JSON", error);
         return json({ ok: false, error: "Invalid Telegram update" }, 400);
       }
+
+      // Keep Telegram commands and callbacks on the immediate request path.
+      // They are short and must never depend on background queue delivery.
+      const incomingText = String(update.message?.text || "").trim();
+      const isCommand = incomingText.startsWith("/");
+      if (isCommand || update.callback_query) {
+        try {
+          const result = await handleTelegramUpdate(request, env, update);
+          return result instanceof Response ? result : json({ ok: true });
+        } catch (error) {
+          console.error("telegram command processing failed", {
+            updateId: update.update_id,
+            error: error?.stack || String(error)
+          });
+          return json({ ok: false, error: "Telegram command processing failed" }, 500);
+        }
+      }
+
       try {
-        // Persist the update in Cloudflare Queues before acknowledging Telegram.
-        // The queue consumer has a 15-minute wall-time budget, not waitUntil's 30 seconds.
         await env.TELEGRAM_UPDATES.send(update);
         return json({ ok: true, accepted: true, queued: true });
       } catch (error) {
