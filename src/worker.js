@@ -1161,7 +1161,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const limit = Math.max(1, Math.min(10, requestedCount || 5));
       const links = (search.results || []).filter(item => item?.url).slice(0, limit);
       if (!links.length) throw new Error("جست‌وجو نتیجه قابل‌استفاده‌ای برنگرداند.");
-      const answer = links.map((item, index) => (index + 1) + ". " + item.url).join("\\n");
+      const answer = links.map((item, index) => (index + 1) + ". " + item.url).join("\n");
       await saveConversation(env, chatId, history, userText, answer);
       await reply(env, chatId, answer);
       return;
