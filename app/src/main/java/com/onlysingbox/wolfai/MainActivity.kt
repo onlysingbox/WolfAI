@@ -1,4 +1,4 @@
-packagecom.onlys ingbox.wolfai
+package com.onlysingbox.wolfai
 import android.content.Intent
 import android.os.Bundle
 import android.speech.RecognizerIntent
