@@ -1456,7 +1456,7 @@ export default {
       }
     }
     if (request.method === "POST" && url.pathname === "/telegram/webhook") {
-      const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID"].filter(key => !env[key]);
+      const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID", "TELEGRAM_UPDATES"].filter(key => !env[key]);
       if (missingTelegramConfig.length) {
         console.error("Telegram webhook configuration incomplete", { missing: missingTelegramConfig });
         return json({ ok: false, error: "Telegram setup incomplete" }, 503);
@@ -1464,27 +1464,50 @@ export default {
       if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
         return json({ ok: false, error: "Unauthorized" }, 401);
       }
-      if (!ctx || typeof ctx.waitUntil !== "function") {
-        console.error("Telegram webhook execution context unavailable");
-        return json({ ok: false, error: "Background processing unavailable" }, 503);
-      }
-      // Read the incoming body while the request is still active. Cloudflare may
-      // make the request stream unavailable after the webhook response is returned.
       let update;
       try {
         update = await request.json();
+        if (!update || typeof update !== "object" || !Number.isInteger(update.update_id)) {
+          return json({ ok: false, error: "Invalid Telegram update" }, 400);
+        }
       } catch (error) {
         console.error("telegram webhook invalid JSON", error);
         return json({ ok: false, error: "Invalid Telegram update" }, 400);
       }
-      // Acknowledge Telegram immediately, then process the already-parsed update in background.
-      ctx.waitUntil(handleTelegramUpdate(request, env, update).catch(error => {
-        console.error("telegram background processing failed", error);
-      }));
-      return json({ ok: true, accepted: true });
+      try {
+        // Persist the update in Cloudflare Queues before acknowledging Telegram.
+        // The queue consumer has a 15-minute wall-time budget, not waitUntil's 30 seconds.
+        await env.TELEGRAM_UPDATES.send(update);
+        return json({ ok: true, accepted: true, queued: true });
+      } catch (error) {
+        console.error("telegram update enqueue failed", error);
+        return json({ ok: false, error: "Telegram update could not be queued" }, 503);
+      }
     }
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/dashboard")) return html();
     if (url.pathname.startsWith("/api/")) return json({ ok: false, error: "Not implemented in this version" }, 501);
     return json({ ok: false, error: "Not found" }, 404);
+  },
+  async queue(batch, env, ctx) {
+    for (const message of batch.messages) {
+      try {
+        const internalRequest = new Request("https://wolfai.onlysingbox.workers.dev/telegram/webhook", {
+          method: "POST",
+          headers: { "X-Telegram-Bot-Api-Secret-Token": env.TELEGRAM_WEBHOOK_SECRET }
+        });
+        const result = await handleTelegramUpdate(internalRequest, env, message.body);
+        if (result instanceof Response && result.status >= 400) {
+          throw new Error("Telegram update handler returned HTTP " + result.status);
+        }
+        message.ack();
+      } catch (error) {
+        console.error("telegram queue message processing failed", {
+          messageId: message.id,
+          attempts: message.attempts,
+          error: error?.stack || String(error)
+        });
+        message.retry({ delaySeconds: 10 });
+      }
+    }
   }
 };
