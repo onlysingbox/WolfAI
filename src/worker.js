@@ -676,8 +676,13 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
 
   const casualChat = isCasualChatMessage(userText);
+  const conversationGuidance = casualChat
+    ? (language === "fa"
+      ? "\\n\\nدستورهای ویژه مکالمه طبیعی (بسیار مهم): پیام آخر کاربر را دقیق بخوان و فقط به همان منظور پاسخ بده؛ پاسخ باید مستقیماً به سؤال یا حرف آخر او مربوط باشد. تاریخچه را برای فهم مرجع ضمیرها، اصلاح‌ها و ادامه موضوع به کار ببر، اما موضوع قبلی را بی‌دلیل وارد پاسخ نکن. اگر کاربر می‌پرسد «امروز چه کار کردی؟» یا درباره زندگی شخصی‌ات می‌پرسد، صادقانه و کوتاه بگو انسان نیستی و روز یا تجربه شخصی نداری؛ هرگز فعالیت، خاطره، احساس، رابطه، اتفاق دیروز یا تجربه‌ای را جعل نکن. می‌توانی بگویی در همین گفتگو چه کمکی می‌توانی بکنی. به کاربر نسبت عاطفی نده و بی‌دلیل از دوست‌داشتن یا خوشحالی شدید حرف نزن. اگر کاربر می‌گوید پاسخ نامربوط یا چرت بوده، بدون شوخی دفاعی یا بهانه‌تراشی عذرخواهی کن، اشتباه را مشخص کن و همان سؤال اصلی را درست جواب بده. اگر منظور واقعاً مبهم است فقط یک سؤال روشن‌کننده بپرس؛ اگر روشن است سؤال تازه نساز. جواب معمولاً ۱ تا ۴ جمله، محاوره‌ای، روان و بدون عبارت‌های کلیشه‌ای باشد. از ایموجی فقط در صورت طبیعی بودن استفاده کن. هیچ‌وقت برای پر کردن فضا جمله بی‌ربط نساز."
+      : "\\n\\nNatural conversation rules (critical): Read the user's latest message carefully and answer its actual intent directly. Use conversation history to resolve references, corrections, and follow-ups, but do not drag in unrelated earlier topics. If asked what you did today or about your personal life, briefly and honestly explain that you are an AI and do not have a human day or personal experiences; never invent activities, memories, feelings, relationships, yesterday's events, or experiences. You may explain what you can do in this conversation. Do not claim affection or exaggerated emotions toward the user. If the user says your answer was irrelevant or nonsense, apologize plainly without defensive jokes or excuses, identify the mistake, and answer the original question correctly. Ask one clarifying question only when the intent is genuinely unclear; otherwise do not invent a new question. Keep ordinary replies to 1–4 natural sentences, without boilerplate or filler. Use emojis sparingly. Never make up unrelated text just to fill space.")
+    : "";
   const messages = [
-    { role: "system", content: wolfSystemPrompt(language) + memoryContext },
+    { role: "system", content: wolfSystemPrompt(language) + memoryContext + conversationGuidance },
     ...history,
     { role: "user", content: contextualUserText.slice(0, 4000) }
   ];
@@ -706,10 +711,14 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
 
   try {
     const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-    const modelKey = chooseWolfModel(preferredMode, contextualUserText);
+    // Auto mode uses the stronger Gemma model for natural conversation; an explicit
+    // user-selected /model preference remains authoritative.
+    const modelKey = casualChat && preferredMode === "auto"
+      ? "gemma"
+      : chooseWolfModel(preferredMode, contextualUserText);
     const modelPayload = {
       messages,
-      max_tokens: casualChat ? 420 : 2200,
+      max_tokens: casualChat ? 650 : 2200,
       chat_template_kwargs: { enable_thinking: false }
     };
     // Casual chat stays on the fast conversational path: no web or agent tools.
