@@ -1697,6 +1697,26 @@ async function executeResearchSearch(query, env = {}) {
     if (selected.length >= 20) break;
   }
   const results = selected.map(({ relevance, ...item }) => item);
+  // If public search engines block or fail to parse a movie-platform query,
+  // use a small curated set of known official streaming services instead of
+  // returning a dead-end error or irrelevant magazine articles.
+  if (movieStreamingQuery) {
+    const curatedMoviePlatforms = [
+      { title: "فیلیمو | تماشای آنلاین فیلم و سریال", url: "https://www.filimo.com/", snippet: "پلتفرم تماشای آنلاین فیلم و سریال" },
+      { title: "نماوا | تماشای آنلاین فیلم و سریال", url: "https://www.namava.ir/", snippet: "سرویس تماشای آنلاین فیلم و سریال" },
+      { title: "فیلم‌نت | تماشای آنلاین فیلم و سریال", url: "https://filmnet.ir/", snippet: "پلتفرم پخش آنلاین فیلم و سریال" },
+      { title: "هاشور | تماشای آنلاین مستند و فیلم", url: "https://hashure.com/", snippet: "پلتفرم تماشای مستند و فیلم‌های داستانی" },
+      { title: "تلوبیون | پخش آنلاین و آرشیو برنامه‌ها", url: "https://telewebion.com/", snippet: "سرویس پخش زنده و آرشیو محتوای تصویری" }
+    ];
+    const existingHosts = new Set(results.map(item => hostOf(item.url)));
+    for (const item of curatedMoviePlatforms) {
+      if (results.length >= 5) break;
+      const host = hostOf(item.url);
+      if (existingHosts.has(host)) continue;
+      results.push({ ...item, provider: "curated-official-platforms" });
+      existingHosts.add(host);
+    }
+  }
   if (!results.length) {
     const providerSummary = failures.length ? failures.join("; ") : "All configured search providers returned no usable results.";
     throw new Error("هیچ نتیجه قابل‌استفاده‌ای از موتورهای جست‌وجوی عمومی دریافت نشد. " + providerSummary);
