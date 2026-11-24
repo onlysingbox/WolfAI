@@ -90,7 +90,13 @@ async function telegram(env, method, payload) {
   });
   const data = await response.json();
   if (!data.ok) throw new Error(data.description || "Telegram API error");
-  return data.result;
+  const result = data.result;
+  if (env.MESSAGE_ARCHIVE && result?.message_id &&
+      /^(?:sendMessage|sendPhoto|sendVideo|sendDocument|sendAudio|sendVoice|sendSticker|editMessageText|editMessageCaption)$/.test(method)) {
+    try { await archiveTelegramMessage(env, payload.chat_id, result, "assistant"); }
+    catch (error) { console.warn("Outgoing private message archive write failed", String(error?.message || error)); }
+  }
+  return result;
 }
 
 
@@ -295,10 +301,7 @@ async function reply(env, chatId, text, extra = {}) {
   const body = String(text ?? "");
   const limit = 3800;
   if (body.length <= limit) {
-    const sent = await telegram(env, "sendMessage", { chat_id: chatId, text: body, ...extra });
-    try { await archiveTelegramMessage(env, chatId, sent, "assistant"); }
-    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
-    return sent;
+    return telegram(env, "sendMessage", { chat_id: chatId, text: body, ...extra });
   }
   const chunks = [];
   let remaining = body;
@@ -316,8 +319,6 @@ async function reply(env, chatId, text, extra = {}) {
       text: chunks[index],
       ...(index === chunks.length - 1 ? extra : {})
     });
-    try { await archiveTelegramMessage(env, chatId, result, "assistant"); }
-    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
   }
   return result;
 }
