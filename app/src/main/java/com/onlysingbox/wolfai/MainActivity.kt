@@ -44,7 +44,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
         val master = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        securePrefs = EncryptedSharedPreferences.create(this, "wolf_secure", master,
+        securePrefs = EncryptedSharedPreferences.create("wolf_secure", master, this,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
         setContent { WolfApp(
