@@ -689,6 +689,110 @@ async function putSetting(env, key, value) {
     .bind(key, String(value)).run();
 }
 
+async function sha256Hex(value) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(value)));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+function randomBase64Url(bytes = 32) {
+  const data = crypto.getRandomValues(new Uint8Array(bytes));
+  let binary = "";
+  for (const byte of data) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+async function createCompanionPairCode(env, ownerId) {
+  if (String(ownerId) !== String(env.ADMIN_TELEGRAM_ID)) throw new Error("Owner only");
+  const random = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000;
+  const code = String(random).padStart(6, "0");
+  await putSetting(env, "companion_pair_pending", JSON.stringify({
+    hash: await sha256Hex(code), owner_id: String(ownerId), expires_at: Date.now() + 10 * 60 * 1000
+  }));
+  return code;
+}
+async function authorizeCompanion(request, env) {
+  const header = request.headers.get("authorization") || "";
+  const token = header.match(/^Bearer\s+(.+)$/i)?.[1] || "";
+  if (token.length < 32 || token.length > 256) return null;
+  const hash = await sha256Hex(token);
+  const raw = await getSetting(env, "companion_device:" + hash);
+  if (!raw) return null;
+  try {
+    const device = JSON.parse(raw);
+    if (device.revoked || String(device.owner_id) !== String(env.ADMIN_TELEGRAM_ID)) return null;
+    return { hash, ...device };
+  } catch { return null; }
+}
+async function companionPair(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const code = String(body?.code || "").replace(/\s/g, "");
+  if (!/^\d{6}$/.test(code)) return json({ ok: false, error: "کد اتصال باید شش رقم باشد." }, 400);
+  const pendingRaw = await getSetting(env, "companion_pair_pending");
+  if (!pendingRaw) return json({ ok: false, error: "کد اتصال وجود ندارد یا منقضی شده است." }, 410);
+  let pending;
+  try { pending = JSON.parse(pendingRaw); } catch { pending = null; }
+  if (!pending || pending.expires_at < Date.now() || pending.hash !== await sha256Hex(code) ||
+      String(pending.owner_id) !== String(env.ADMIN_TELEGRAM_ID)) {
+    return json({ ok: false, error: "کد اتصال نامعتبر یا منقضی شده است." }, 403);
+  }
+  await putSetting(env, "companion_pair_pending", "");
+  const token = randomBase64Url(32);
+  const tokenHash = await sha256Hex(token);
+  const deviceName = String(body?.device_name || "Android companion").replace(/[<>\r\n]/g, " ").trim().slice(0, 80);
+  await putSetting(env, "companion_device:" + tokenHash, JSON.stringify({
+    owner_id: String(env.ADMIN_TELEGRAM_ID), device_name: deviceName,
+    created_at: new Date().toISOString(), revoked: false
+  }));
+  await log(env, env.ADMIN_TELEGRAM_ID, "companion.device_paired", "companion_device", tokenHash.slice(0, 16), { device_name: deviceName });
+  return json({ ok: true, token, device_name: deviceName });
+}
+async function companionChat(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست؛ دوباره جفت‌سازی کن." }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const userText = String(body?.text || "").trim().slice(0, 4000);
+  if (!userText) return json({ ok: false, error: "متن پیام خالی است." }, 400);
+  if (!env.AI?.run) return json({ ok: false, error: "موتور هوش مصنوعی در دسترس نیست." }, 503);
+  const sessionId = String(body?.session_id || "default").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "default";
+  const sessionKey = "companion_conversation:" + device.hash + ":" + sessionId;
+  let history = [];
+  try {
+    const parsed = JSON.parse(await getSetting(env, sessionKey, "[]"));
+    history = Array.isArray(parsed) ? parsed.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-12) : [];
+  } catch { history = []; }
+  const language = await responseLanguage(env, userText);
+  let ownerMemory = [];
+  try {
+    const parsed = JSON.parse(await getSetting(env, "owner_memory:" + String(device.owner_id), "[]"));
+    ownerMemory = Array.isArray(parsed) ? parsed.slice(-25) : [];
+  } catch { ownerMemory = []; }
+  const memoryContext = ownerMemory.length
+    ? "\n\nOwner-approved memory (use only when relevant):\n" + ownerMemory.map(item => "- " + String(item.key || "") + ": " + String(item.value || "").slice(0, 400)).join("\n")
+    : "";
+  const system = wolfSystemPrompt(language) + memoryContext +
+    (language === "fa"
+      ? "\n\nاین یک مکالمه صوتی/متنی معمولی با مالک است، نه صرفاً دریافت فرمان. طبیعی، صمیمی، مرتبط و روان پاسخ بده. اگر کاربر درخواست انجام کار بیرونی کرد، فعلاً فقط توضیح بده که درخواست باید از مسیر مأموریت و تأیید امن اجرا شود؛ ادعا نکن عملی انجام داده‌ای. هیچ اقدام بیرونی را از این endpoint اجرا نکن."
+      : "\n\nThis is ordinary spoken/text conversation with the owner, not merely command input. Be natural, warm, relevant and conversational. If the user asks for an external action, explain that it must go through the agent task and approval flow; do not claim it was performed. Never execute external side effects from this endpoint.");
+  const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+  const modelKey = chooseWolfModel(preferredMode, userText);
+  try {
+    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
+      messages: [{ role: "system", content: system }, ...history, { role: "user", content: userText }],
+      max_tokens: 700, chat_template_kwargs: { enable_thinking: false }
+    }, modelKey);
+    const answer = String(output?.choices?.[0]?.message?.content || "").trim();
+    if (!answer) throw new Error("مدل پاسخ متنی برنگرداند.");
+    const next = [...history, { role: "user", content: userText }, { role: "assistant", content: answer }].slice(-12);
+    await putSetting(env, sessionKey, JSON.stringify(next));
+    await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
+    await log(env, device.owner_id, "companion.chat", "companion_device", device.hash.slice(0, 16), { session_id: sessionId, input_chars: userText.length, output_chars: answer.length });
+    return json({ ok: true, reply: answer, language, session_id: sessionId, model: usedModel });
+  } catch (error) {
+    console.error("companion chat failed", error);
+    return json({ ok: false, error: "پاسخ‌گویی انجام نشد: " + String(error?.message || error).slice(0, 300) }, 502);
+  }
+}
+
 function detectMessageLanguage(value) {
   return /[\u0600-\u06FF]/.test(String(value || "")) ? "fa" : "en";
 }
@@ -1904,6 +2008,27 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
     // A fresh start begins a clean conversation and must produce exactly one welcome message.
     await putSetting(env, "conversation:" + String(chatId), "[]");
     await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nمی‌توانم گفتگو کنم، مأموریت‌ها را ثبت کنم و ابزارهای متصل را با تأیید تو اجرا کنم. خواندن و ایجاد/ویرایش فایل متنی در GitHub پس از تأیید فعال است.\nبرای انتخاب زبان پاسخ /language، مدل هوش مصنوعی /model و حالت حل درسی /study را بزن.");
+  } else if (command === "/pair") {
+    try {
+      const code = await createCompanionPairCode(env, userId);
+      await reply(env, chatId, "🔐 کد اتصال WOLF Companion:\n\n<code>" + code + "</code>\n\nاین کد فقط ۱۰ دقیقه اعتبار دارد و فقط یک‌بار استفاده می‌شود. آن را فقط داخل برنامه رسمی WOLF Companion وارد کن؛ برای هیچ‌کس ارسال نکن.", { parse_mode: "HTML" });
+    } catch (error) {
+      await reply(env, chatId, "ساخت کد اتصال انجام نشد: " + String(error?.message || error));
+    }
+  } else if (command === "/unpair") {
+    const rows = await env.DB.prepare("SELECT key, value FROM settings WHERE key LIKE 'companion_device:%'").all();
+    let revoked = 0;
+    for (const row of rows.results || []) {
+      try {
+        const device = JSON.parse(row.value);
+        if (String(device.owner_id) === String(userId) && !device.revoked) {
+          device.revoked = true;
+          await putSetting(env, row.key, JSON.stringify(device));
+          revoked++;
+        }
+      } catch {}
+    }
+    await reply(env, chatId, revoked ? "دسترسی " + revoked + " دستگاه همراه لغو شد." : "دستگاه فعالی برای لغو دسترسی پیدا نشد.");
   } else if (command === "/language") {
     const current = await getSetting(env, "response_language", "auto");
     const currentLabel = current === "fa" ? "همیشه فارسی" : current === "en" ? "همیشه انگلیسی" : "خودکار";
@@ -1932,7 +2057,7 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
       ] }
     });
   } else if (command === "/help") {
-    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/study - حالت آموزش و حل مسئله برای همه درس‌ها\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/memory - حافظه بلندمدت\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
+    await reply(env, chatId, "🐺 با من مثل یک دستیار معمولی گفتگو کن؛ فارسی یا انگلیسی.\n\n/pair - ساخت کد اتصال برنامه اندروید\n/unpair - لغو دسترسی همه دستگاه‌ها\n/language - انتخاب زبان پاسخ\n/model - انتخاب مدل هوش مصنوعی\n/study - حالت آموزش و حل مسئله برای همه درس‌ها\n/status - وضعیت سیستم\n/tasks - وظایف اخیر\n/runs - اجرای مأموریت‌ها\n/memory - حافظه بلندمدت\n/help - راهنما\n\nخواندن GitHub و ایجاد/ویرایش فایل متنی GitHub پس از تأیید فعال است. سایر اتصال‌ها مرحله‌به‌مرحله اضافه می‌شوند.");
   } else if (command === "/status") {
     const checks = await Promise.all([
       (async () => { try { const r = await env.DB.prepare("SELECT COUNT(*) AS total FROM tasks").first(); const t = await env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(); return {ok:t.n===14, text:t.n===14 ? "متصل؛ ۱۴ جدول اصلی موجود" : "ساختار ناقص", tasks:r.total}; } catch(e) { return {ok:false,text:"خطا: "+e.message,tasks:null}; } })(),
@@ -2442,6 +2567,12 @@ export default {
     }
     if (request.method === "GET" && url.pathname === "/api/github/overview") {
       return await githubOverview(request, env, url);
+    }
+    if (request.method === "POST" && url.pathname === "/api/companion/pair") {
+      return await companionPair(request, env);
+    }
+    if (request.method === "POST" && url.pathname === "/api/companion/chat") {
+      return await companionChat(request, env);
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
