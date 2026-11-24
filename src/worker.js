@@ -139,15 +139,8 @@ async function archiveTelegramMessage(env, chatId, message, role) {
     metadata: { chatId: String(chatId), messageId: id, role, language, date, kind }
   });
 
-  // Keep the private archive bounded without touching D1. A cleanup scan is
-  // performed only once per roughly 50 Telegram messages.
-  if (id % 50 === 0) {
-    const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
-    const keys = (listed.keys || []).slice().sort((a, b) => Number(a.metadata?.date || 0) - Number(b.metadata?.date || 0));
-    for (const old of keys.slice(0, Math.max(0, keys.length - 300))) {
-      await env.MESSAGE_ARCHIVE.delete(old.name);
-    }
-  }
+  // KV expiration (48 hours) bounds this archive. Do not delete older
+  // records by count: bulk deletion must be able to see every eligible message.
 }
 
 async function readArchivedTelegramMessage(env, chatId, messageId) {
@@ -209,10 +202,18 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
     return;
   }
 
-  const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
+  const prefix = "chat:" + String(chatId) + ":";
+  const archivedKeys = [];
+  let cursor;
+  do {
+    const page = await env.MESSAGE_ARCHIVE.list({ prefix, limit: 1000, ...(cursor ? { cursor } : {}) });
+    archivedKeys.push(...(page.keys || []));
+    cursor = page.list_complete ? undefined : page.cursor;
+    if (!page.list_complete && !cursor) break;
+  } while (cursor);
   const currentId = Number(message?.message_id || 0);
   // Never select the deletion command currently being processed.
-  let records = (listed.keys || [])
+  let records = archivedKeys
     .map(item => ({ name: item.name, ...(item.metadata || {}) }))
     .filter(item => !currentId || Number(item.messageId) < currentId);
 
@@ -304,22 +305,29 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
 
   const now = Math.floor(Date.now() / 1000);
   let deleted = 0;
+  let tooOld = 0;
+  let failed = 0;
   for (const item of records) {
     const id = Number(item.messageId);
-    if (!Number.isFinite(id) || now - Number(item.date || 0) >= 48 * 60 * 60) continue;
+    if (!Number.isFinite(id)) { failed++; continue; }
+    if (now - Number(item.date || 0) >= 48 * 60 * 60) { tooOld++; continue; }
     try {
       await telegram(env, "deleteMessage", { chat_id: chatId, message_id: id });
       await env.MESSAGE_ARCHIVE.delete(item.name);
       deleted++;
     } catch (error) {
+      failed++;
       console.warn("Telegram message deletion failed", { messageId: id, role: item.role, error: String(error?.message || error) });
     }
   }
 
-  // Successful deletion is intentionally silent.
-  if (!deleted && records.length) {
-    console.warn("No archived messages could be deleted; check Telegram permissions and the 48-hour limit.");
-  }
+  const summary = [
+    "گزارش حذف پیام‌ها:",
+    "حذف‌شده: " + deleted,
+    "ناموفق: " + failed
+  ];
+  if (tooOld) summary.push("بیشتر از ۴۸ ساعت و خارج از محدودیت تلگرام: " + tooOld);
+  await reply(env, chatId, summary.join("\n"));
 }
 function isTextEditRequest(value) {
   const text = String(value || "");
