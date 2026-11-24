@@ -602,7 +602,7 @@ async function reply(env, chatId, text, extra = {}) {
   return result;
 }
 
-async function createTask(env, title, ownerId, action = null) {
+async function createTask(env, title, ownerId, action = null, requestText = null) {
   const id = crypto.randomUUID().slice(0, 8);
   const runId = id;
   const actions = action?.type === "agent.sequence" && Array.isArray(action.args?.steps) ? action.args.steps : (action ? [action] : []);
@@ -633,12 +633,12 @@ async function createTask(env, title, ownerId, action = null) {
   await env.DB.prepare("INSERT INTO approvals (id, task_id, action_summary, risk_level, status) VALUES (?, ?, ?, 'low', 'pending')")
     .bind(crypto.randomUUID(), id, approvalSummary.slice(0, 500)).run();
   await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, 'text', 'awaiting_approval', ?)")
-    .bind(runId, String(ownerId), taskTitle.slice(0, 4000), JSON.stringify(plan)).run();
+    .bind(runId, String(ownerId), String(requestText || title || taskTitle).slice(0, 4000), JSON.stringify(plan)).run();
   for (let index = 0; index < plan.length; index++) {
     const item = actions[index];
     await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
       .bind(crypto.randomUUID(), runId, index + 1, plan[index].capability, plan[index].title,
-        item ? JSON.stringify({ type: item.type, args: { repo: item.args?.repo, path: item.args?.path, title: item.args?.title, category: item.args?.category, query: item.args?.query, url: item.args?.url } }) : null).run();
+        item ? JSON.stringify(item).slice(0, 20000) : null, plan[index].approval_required ? 1 : 0).run();
   }
   await log(env, ownerId, "task.created", "task", id, { title: taskTitle, run_id: runId, step_count: plan.length, capabilities: [...new Set(plan.map(item => item.capability))] });
   return id;
@@ -2202,14 +2202,13 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
         await reply(env, chatId, clarification);
         return;
       }
-      const id = await createTask(env, userText.slice(0, 220), userId, action);
+      const id = await createTask(env, userText.slice(0, 220), userId, action, userText);
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
       const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
       const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open"]);
       const requiresApproval = actionList.some(item => !readOnlyTypes.has(item.type));
       if (!requiresApproval) {
-        const id = await createTask(env, userText.slice(0, 220), userId, action);
         await env.DB.prepare("UPDATE tasks SET status='approved', approved_by=?, approved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind("policy:read_only", id).run();
         await env.DB.prepare("UPDATE approvals SET status='approved', decided_by=?, decided_at=CURRENT_TIMESTAMP WHERE task_id=? AND status='pending'").bind("policy:read_only", id).run();
         await env.DB.prepare("UPDATE agent_steps SET status='running', approval_required=0, approved_by=?, approved_at=CURRENT_TIMESTAMP, started_at=CURRENT_TIMESTAMP WHERE run_id=? AND status='awaiting_approval'").bind("policy:read_only", id).run();
