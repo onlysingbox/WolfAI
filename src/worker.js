@@ -1101,7 +1101,7 @@ function formatWolfLinkDirectory(execution, request, language) {
     if (seenHosts.has(host)) continue;
     seenHosts.add(host);
     const title = String(item.title || host).replace(/[\[\]\r\n]/g, " ").trim().slice(0, 180) || host;
-    unique.push({ title, url: url.toString() });
+    unique.push({ title, url: url.toString(), snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 220) });
   }
   const digits = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
   const match = String(request || "").match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2}|ده|پنج|شش|هفت|هشت|نه|یازده|دوازده|پانزده|بیست)(?:\s*تا)?\s+(?:سایت|وب.?سایت|منبع|لینک|sites?|websites?|sources?|links?)(?=\s|$)/i);
@@ -2232,8 +2232,21 @@ async function processQueuedDirectSearch(env, update) {
       return true;
     }).slice(0, limit);
     if (!links.length) throw new Error("هیچ نتیجه مرتبط و قابل‌استفاده‌ای از موتورهای جست‌وجو دریافت نشد.");
-    const formattedResults = "نتایج جست‌وجو:\n\n" + links.map(item => item.url).join("\n\n");
-    await reply(env, chatId, formattedResults, { disable_web_page_preview: true });
+    const formattedResults = "<b>🔎 نتایج جست‌وجو</b>\\n\\n" + links.map((item, index) => {
+      let host = "";
+      try { host = new URL(item.url).hostname.replace(/^www\\./, ""); } catch {}
+      const title = escapeHtml(String(item.title || host || "نتیجه").replace(/[\\r\\n<>]/g, " ").slice(0, 180));
+      const snippet = escapeHtml(String(item.snippet || "").replace(/[\\r\\n]+/g, " ").slice(0, 220));
+      return "✨ <b>" + (index + 1) + ". " + title + "</b>" +
+        (host ? "\\n<code>🌐 " + escapeHtml(host) + "</code>" : "") +
+        (snippet ? "\\n" + snippet : "");
+    }).join("\\n\\n");
+    const keyboard = links.map((item, index) => [{ text: "🔗 باز کردن نتیجه " + (index + 1), url: item.url }]);
+    await reply(env, chatId, formattedResults, {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: keyboard }
+    });
   } catch (error) {
     console.error("WOLF AI queued direct search failed", {
       updateId: update?.update_id,
