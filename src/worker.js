@@ -1072,98 +1072,6 @@ function isWolfLinkDirectoryRequest(request) {
   return destinationWords && (listIntent || explicitMinimal || countIntent);
 }
 
-function wolfMiniAppKeyboard(items, language) {
-  const safe = (Array.isArray(items) ? items : []).slice(0, 20).map(item => {
-    try {
-      const u = new URL(String(item.url || ""));
-      if (u.protocol !== "https:") return null;
-      return {
-        title: String(item.title || u.hostname).replace(/[\\r\\n<>]/g, " ").trim().slice(0, 140),
-        url: u.toString(),
-        host: u.hostname.replace(/^www\\./, ""),
-        snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 150)
-      };
-    } catch { return null; }
-  }).filter(Boolean);
-  if (!safe.length) return null;
-  const bytes = new TextEncoder().encode(JSON.stringify(safe));
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  const encoded = btoa(binary).split("+").join("-").split("/").join("_").replace(/=+$/, "");
-  const appUrl = "https://wolfai.onlysingbox.workers.dev/open?d=" + encoded;
-  return {
-    inline_keyboard: [[{
-      text: language === "fa" ? "🌐 مشاهده و باز کردن سایت‌ها" : "🌐 View and open websites",
-      web_app: { url: appUrl },
-      style: "primary"
-    }]]
-  };
-}
-
-function wolfMiniAppPage() {
-  return new Response(`<!doctype html>
-<html lang="fa" dir="rtl">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<meta name="color-scheme" content="dark">
-<title>WOLF AI | سایت‌ها</title>
-<script src="https://telegram.org/js/telegram-web-app.js?65"></script>
-<style>
-:root{color-scheme:dark;--bg:#0b1220;--card:#111d30;--line:#263b5b;--text:#edf3ff;--muted:#a9bad3;--blue:#2563eb;--green:#16845b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Tahoma,Arial,sans-serif}
-main{max-width:760px;margin:auto;padding:18px 14px 32px}
-header{padding:20px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(135deg,#142c4c,#102033);margin-bottom:16px}
-h1{font-size:22px;margin:0 0 7px}.sub{font-size:13px;line-height:1.8;color:var(--muted)}
-#list{display:grid;gap:12px}.site{padding:16px;border:1px solid var(--line);border-radius:15px;background:var(--card)}
-.site h2{font-size:16px;line-height:1.7;margin:0 0 5px;overflow-wrap:anywhere}
-.host{font-size:12px;color:#8bb7ff;direction:ltr;text-align:left;overflow-wrap:anywhere}
-.desc{font-size:13px;line-height:1.8;color:#c3d2e7;margin:10px 0 14px;white-space:pre-wrap}
-.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-button{min-height:44px;border:0;border-radius:10px;padding:10px 8px;color:#fff;font-size:13px;font-weight:bold;cursor:pointer}
-.chrome{background:var(--blue)}.normal{background:#334155}
-.empty{padding:18px;text-align:center;color:var(--muted);line-height:1.9}
-footer{padding:18px 4px;text-align:center;color:#8195b2;font-size:11px}
-</style></head>
-<body><main>
-<header><h1>🐺 WOLF AI</h1><div class="sub">سایت موردنظرت را انتخاب کن. می‌توانی آن را با Chrome یا مرورگر پیش‌فرض باز کنی.</div></header>
-<section id="list"><div class="empty">در حال آماده‌سازی فهرست سایت‌ها…</div></section>
-<footer>این فهرست موقت است و در هیچ آرشیوی ذخیره نمی‌شود.</footer>
-</main>
-<script>
-(function(){
-  const tg = window.Telegram && window.Telegram.WebApp;
-  if(tg){tg.ready();try{tg.expand();}catch(e){}}
-  const list=document.getElementById("list");
-  function showError(message){list.innerHTML="";const p=document.createElement("div");p.className="empty";p.textContent=message;list.appendChild(p);}
-  try{
-    const encoded=new URLSearchParams(location.search).get("d")||"";
-    if(!encoded) throw new Error("فهرست سایت‌ها به این صفحه منتقل نشده است.");
-    const base64=encoded.replace(/-/g,"+").replace(/_/g,"/");
-    const binary=atob(base64);
-    const bytes=Uint8Array.from(binary,c=>c.charCodeAt(0));
-    const items=JSON.parse(new TextDecoder().decode(bytes));
-    if(!Array.isArray(items)||!items.length) throw new Error("سایتی برای نمایش وجود ندارد.");
-    list.innerHTML="";
-    items.forEach((item,index)=>{
-      let url;
-      try{url=new URL(String(item.url||""));if(url.protocol!=="https:")return;}catch(e){return;}
-      const card=document.createElement("article");card.className="site";
-      const title=document.createElement("h2");title.textContent=(index+1)+". "+String(item.title||url.hostname);
-      const host=document.createElement("div");host.className="host";host.textContent=String(item.host||url.hostname);
-      const desc=document.createElement("p");desc.className="desc";desc.textContent=String(item.snippet||"توضیحی برای این سایت ثبت نشده است.");
-      const actions=document.createElement("div");actions.className="actions";
-      const chrome=document.createElement("button");chrome.className="chrome";chrome.textContent="باز کردن با Chrome";
-      chrome.addEventListener("click",()=>{if(tg&&tg.openLink)tg.openLink(url.toString(),{try_browser:"chrome"});else window.open(url.toString(),"_blank","noopener");});
-      const normal=document.createElement("button");normal.className="normal";normal.textContent="باز کردن عادی";
-      normal.addEventListener("click",()=>{if(tg&&tg.openLink)tg.openLink(url.toString());else window.open(url.toString(),"_blank","noopener");});
-      actions.append(chrome,normal);card.append(title,host,desc,actions);list.appendChild(card);
-    });
-    if(!list.children.length) throw new Error("هیچ لینک HTTPS معتبری در فهرست وجود ندارد.");
-  }catch(e){showError(e&&e.message?e.message:"نمایش فهرست ممکن نشد.");}
-})();
-</script></body></html>`, {headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}});
-}
-
 function formatWolfSearchResults(execution, request, language) {
   const results = Array.isArray(execution?.results) ? execution.results : [];
   const seen = new Set();
@@ -1182,7 +1090,7 @@ function formatWolfSearchResults(execution, request, language) {
     if (selected.length >= 8) break;
   }
   const heading = language === "fa" ? "🔎 نتایج جست‌وجو" : "🔎 Search results";
-  const messages = [{ text: "<b>" + heading + "</b>", reply_markup: wolfMiniAppKeyboard(selected, language) || undefined }];
+  const messages = [{ text: "<b>" + heading + "</b>" }];
   selected.forEach((item, index) => {
     const number = index + 1;
     const title = escapeHtml(item.title || item.host);
@@ -1218,7 +1126,7 @@ function formatWolfLinkDirectory(execution, request, language) {
   const wordCounts = {پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20};
   const expected = match ? (wordCounts[match[1]] || Number(match[1].replace(/[۰-۹]/g, d => digits[d]))) : 10;
   const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
-  const messages = [{ text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>", reply_markup: wolfMiniAppKeyboard(selected, language) || undefined }];
+  const messages = [{ text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>" }];
   selected.forEach((item, index) => {
     const number = index + 1;
     const snippet = item.snippet ? "\n" + escapeHtml(item.snippet) : "";
@@ -2374,7 +2282,7 @@ async function processQueuedDirectSearch(env, update) {
       return true;
     }).slice(0, limit);
     if (!links.length) throw new Error("هیچ نتیجه مرتبط و قابل‌استفاده‌ای از موتورهای جست‌وجو دریافت نشد.");
-    await reply(env, chatId, "<b>🔎 نتایج جست‌وجو</b>", { parse_mode: "HTML", disable_web_page_preview: true, ...(wolfMiniAppKeyboard(links, "fa") ? { reply_markup: wolfMiniAppKeyboard(links, "fa") } : {}) });
+    await reply(env, chatId, "<b>🔎 نتایج جست‌وجو</b>", { parse_mode: "HTML", disable_web_page_preview: true });
     for (let index = 0; index < links.length; index++) {
       const item = links[index];
       let host = "";
@@ -2496,7 +2404,6 @@ export default {
         return json({ ok: false, error: "Telegram update could not be queued" }, 503);
       }
     }
-    if (request.method === "GET" && url.pathname === "/open") return wolfMiniAppPage();
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/dashboard")) return html();
     if (url.pathname.startsWith("/api/")) return json({ ok: false, error: "Not implemented in this version" }, 501);
     return json({ ok: false, error: "Not found" }, 404);
