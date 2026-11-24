@@ -1229,7 +1229,7 @@ async function githubOverview(request, env, url) {
   }
 }
 
-async function handleTelegramUpdate(request, env) {
+async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID"].filter(key => !env[key]);
   if (missingTelegramConfig.length) {
     console.error("Telegram webhook configuration incomplete", { missing: missingTelegramConfig });
@@ -1238,7 +1238,7 @@ async function handleTelegramUpdate(request, env) {
   if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) {
     return json({ ok: false, error: "Unauthorized" }, 401);
   }
-  const update = await request.json();
+  const update = parsedUpdate || await request.json();
   const message = update.message;
   const callback = update.callback_query;
   if (callback) {
@@ -1439,9 +1439,17 @@ export default {
         console.error("Telegram webhook execution context unavailable");
         return json({ ok: false, error: "Background processing unavailable" }, 503);
       }
-      // Acknowledge Telegram immediately. AI generation and research continue in the background,
-      // so Telegram's webhook connection does not remain open until the model finishes.
-      ctx.waitUntil(handleTelegramUpdate(request.clone(), env).catch(error => {
+      // Read the incoming body while the request is still active. Cloudflare may
+      // make the request stream unavailable after the webhook response is returned.
+      let update;
+      try {
+        update = await request.json();
+      } catch (error) {
+        console.error("telegram webhook invalid JSON", error);
+        return json({ ok: false, error: "Invalid Telegram update" }, 400);
+      }
+      // Acknowledge Telegram immediately, then process the already-parsed update in background.
+      ctx.waitUntil(handleTelegramUpdate(request, env, update).catch(error => {
         console.error("telegram background processing failed", error);
       }));
       return json({ ok: true, accepted: true });
