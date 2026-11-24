@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
         val master = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        securePrefs = EncryptedSharedPreferences.create("wolf_secure", master, this,
+        securePrefs = EncryptedSharedPreferences.create(this, "wolf_secure", master,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
         File(filesDir, "wolf_storage").apply { listOf("history", "memory", "notes", "files", "audio").forEach { File(this, it).mkdirs() } }
@@ -154,7 +154,6 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                 } else if (!paired) {
-                if (!paired) {
                     Text("اتصال امن به WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true)
                     Button(enabled = pairCode.length == 6 && !busy, onClick = {
