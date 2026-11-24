@@ -411,7 +411,10 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
   // message. For phrase replacement, search backward for the bot message
   // that actually contains the phrase, rather than accidentally selecting
   // the user's edit instruction.
-  if (!sourceMessage && (replacementPair || explicitReplacement || /اینو|این\s+پیام|پیام\s+قبلی|متن\s+قبلی/i.test(text))) {
+  // Every edit request without an explicit Telegram reply targets the latest
+  // bot-authored text. The handler is only called for edit intents, so phrases
+  // like «یه ذره بهتر ویرایش کن» must not require the user to repeat «اینو».
+  if (!sourceMessage) {
     sourceMessage = await findPreviousBotText(
       env, chatId, message?.message_id, replacementPair?.from || ""
     );
@@ -475,8 +478,13 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         });
         return;
       } catch (error) {
-        console.error("In-place bot message edit failed; no replacement was sent", String(error?.message || error));
-        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + String(error?.message || error).slice(0, 220));
+        const errorText = String(error?.message || error);
+        if (/message is not modified/i.test(errorText)) {
+          await reply(env, chatId, "متن از قبل همین نسخه بود؛ تغییری لازم نبود.");
+          return;
+        }
+        console.error("In-place bot message edit failed; no replacement was sent", errorText);
+        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + errorText.slice(0, 220));
         return;
       }
     }
@@ -499,15 +507,15 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
 
   const language = detectMessageLanguage(sourceText);
   const instruction = language === "fa"
-    ? "متن زیر را فقط از نظر املا، دستور زبان، روانی و نشانه‌گذاری اصلاح کن. معنی و اطلاعات را تغییر نده و هیچ جمله یا اطلاعات تازه‌ای اضافه نکن. فقط متن نهایی را برگردان."
-    : "Proofread the text for spelling, grammar, clarity and punctuation only. Preserve its meaning and facts. Do not add any new sentence or information. Return only the corrected text.";
+    ? "تو ویراستار متن هستی. متن اصلی را مطابق دستور و خواسته مشخص‌شده کاربر بازنویسی کن. اگر کاربر خواسته متن کوتاه‌تر، زیباتر، رسمی‌تر، صمیمی‌تر یا روان‌تر شود، واقعاً همان تغییر را انجام بده و صرفاً غلط‌گیری نکن. معنی و واقعیت‌های اصلی را حفظ کن، مگر اینکه کاربر صریحاً تغییرشان را خواسته باشد. اگر کاربر خواسته چیزی حذف شود، آن را حذف کن. فقط نسخه نهایی متن را برگردان، بدون توضیح و مقدمه."
+    : "You are a text editor. Rewrite the source according to the user's explicit editing instruction. If they ask for shorter, clearer, more polished, warmer, or more formal wording, make that change rather than merely proofreading. Preserve core meaning and facts unless asked to change them. If asked to remove something, remove it. Return only the final text, with no explanation.";
   try {
     const preferred = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
     const modelKey = chooseWolfModel(preferred, "ویرایش متن");
     const payload = {
       messages: [
         { role: "system", content: instruction },
-        { role: "user", content: sourceText.slice(0, 4000) }
+        { role: "user", content: "دستور ویرایش کاربر: " + text.slice(0, 1200) + "\\n\\nمتن اصلی:\\n" + sourceText.slice(0, 4000) }
       ],
       max_tokens: 1400,
       chat_template_kwargs: { enable_thinking: false }
@@ -525,8 +533,13 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
         });
         return;
       } catch (error) {
-        console.error("In-place bot message edit failed; no replacement was sent", String(error?.message || error));
-        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + String(error?.message || error).slice(0, 220));
+        const errorText = String(error?.message || error);
+        if (/message is not modified/i.test(errorText)) {
+          await reply(env, chatId, "متن از قبل همین نسخه بود؛ تغییری لازم نبود.");
+          return;
+        }
+        console.error("In-place bot message edit failed; no replacement was sent", errorText);
+        await reply(env, chatId, "ویرایش همان پیام انجام نشد؛ پیام قبلی را حذف نکردم و پیام تازه‌ای هم جای آن نفرستادم. خطای تلگرام: " + errorText.slice(0, 220));
         return;
       }
     }
