@@ -212,6 +212,13 @@ function isSimpleGreeting(value) {
   return /^(?:سلام(?:\s+علیک(?:م)?)?|درود|صبح\s+بخیر|عصر\s+بخیر|شب\s+بخیر|hi|hello|hey|good\s+(?:morning|afternoon|evening))[\s!.،,؟?]*$/i.test(String(value || "").trim());
 }
 
+function isCasualChatMessage(value) {
+  const text = String(value || "").trim();
+  if (!text || text.length > 180) return false;
+  if (/(?:جستجو|سرچ|پیدا\s+کن|بگرد|آخرین\s+اخبار|قیمت\s+روز|وضعیت\s+(?:سرور|سیستم|گیت.?هاب)|بررسی\s+کن|اجرا\s+کن|بساز|ایجاد\s+کن|ویرایش\s+کن|حذف\s+کن|ارسال\s+کن|search|look\s+up|find\s+me|latest\s+news|current\s+price|check\s+(?:the\s+)?status|run\s+this|create\s+file|edit\s+file|delete\s+file)/i.test(text)) return false;
+  return /^(?:(?:خوبی|خوبی؟|چطوری|چه\s+طوری|حالت\s+چطوره|چه\s+خبر|چه\s+کارا\s+می.?کنی|داری\s+چیکار\s+می.?کنی|ممنون|مرسی|سپاس|دمت\s+گرم|خسته\s+نباشی|حوصله.?م\s+سر\s+رفته|بیا\s+گپ\s+بزنیم|یه\s+کم\s+حرف\s+بزنیم|دلم\s+گرفته|امروز\s+حالم\s+خوب\s+نیست|امروز\s+خوب\s+نیستم|i.?m\s+fine|how\s+are\s+you|how.?s\s+it\s+going|what.?s\s+up|how\s+do\s+you\s+feel|thanks|thank\s+you|let.?s\s+chat|i.?m\s+bored)(?:[\s!.،,؟?].*)?)$/i.test(text);
+}
+
 async function responseLanguage(env, inputText = "") {
   const preference = await getSetting(env, "response_language", "auto");
   if (preference === "fa" || preference === "en") return preference;
@@ -342,6 +349,8 @@ function wolfSystemPrompt(language) {
     "You are WOLF AI, a capable, practical personal AI assistant. Speak naturally and warmly, like a real conversational assistant. Be concise but useful.",
     languageRule,
     "Understand ordinary messages; the user must not need slash commands or technical tool names.",
+    "You are also a genuine conversation companion. The user may simply want to chat, exchange greetings, ask how you are, share a feeling, joke, or talk without requesting a task. Treat this as a complete and valid purpose. Respond naturally to the actual conversational message; do not turn it into a search, research report, task, mission, or tool call. Never use web search or external tools for casual conversation unless the user explicitly asks. Do not repeat the /start introduction in ordinary conversation. Do not end every casual reply with a service-style question such as 'How can I help you?'; continue the conversation like a thoughtful chat partner.",
+
     "GLOBAL OUTPUT STANDARD (applies to EVERY capability and every message, not only research): Produce clean, professional, well-structured output for conversation, planning, research, tool summaries, code explanations, troubleshooting, finance, documents, schedules, and all other tasks. Start directly with the useful answer; use a concise descriptive heading when the answer is substantial. Organize with meaningful headings, short paragraphs, consistent bullets/numbering, and valid Markdown tables only when they improve clarity. Keep terminology, units, dates, punctuation, and language consistent. Never emit malformed Markdown, broken table rows, duplicate entities or paragraphs, unfinished sentences, random symbols, corrupted text, accidental script/language mixing, irrelevant sources, or unexplained placeholders. In Persian, write fluent natural Persian with correct نیم‌فاصله and punctuation; in English, use fluent standard English. Preserve exact code, commands, file paths, identifiers, URLs, and quoted user-provided data. Do not translate or alter code blocks. Do not invent facts to make an answer look complete. Before every response, run a silent final editorial check: relevance, factual consistency, structure, spelling, grammar, duplicates, completeness, and whether each claim is supported. If a fact is uncertain, say so plainly instead of disguising uncertainty. This standard applies equally to all agent capabilities and all response paths.",
     "For research reports, use this fixed structure whenever applicable: (1) title and date of research, (2) scope and method, (3) findings in a numbered list or readable table, (4) a clear status for each claim such as verified / partially verified / not verified, (5) limitations and missing information, and (6) numbered sources with direct URLs and the publisher or institution name. Put citations immediately beside the claims they support. Never invent a source, citation, institution, date, admission requirement, or URL. Never present a search result snippet as if the page itself was checked.",
     "For lists of institutions, products, people, or places, normalize official names and deduplicate entities before answering. Do not list the same institution twice under an abbreviation and its full name. If the requested count cannot be supported by distinct verified entities, state the actual count instead of padding the list. Prefer the entity own official website and relevant official department page. Do not treat unrelated consulting firms, generic directories, broken links, or unrelated PDFs as authoritative evidence.",
@@ -638,6 +647,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
     return;
   }
 
+  const casualChat = isCasualChatMessage(userText);
   const messages = [
     { role: "system", content: wolfSystemPrompt(language) + memoryContext },
     ...history,
@@ -669,13 +679,17 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   try {
     const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
     const modelKey = chooseWolfModel(preferredMode, contextualUserText);
-    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
+    const modelPayload = {
       messages,
-      tools: wolfFunctionTools(),
-      tool_choice: "auto",
-      max_tokens: 2200,
+      max_tokens: casualChat ? 420 : 2200,
       chat_template_kwargs: { enable_thinking: false }
-    }, modelKey);
+    };
+    // Casual chat stays on the fast conversational path: no web or agent tools.
+    if (!casualChat) {
+      modelPayload.tools = wolfFunctionTools();
+      modelPayload.tool_choice = "auto";
+    }
+    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, modelPayload, modelKey);
     await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
     const assistant = output?.choices?.[0]?.message;
     const toolCalls = Array.isArray(assistant?.tool_calls) ? assistant.tool_calls : [];
@@ -782,7 +796,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       return;
     }
     const draftAnswer = String(assistant?.content || "").trim() || (language === "fa" ? "پیامت را دریافت کردم، اما نتوانستم پاسخ مناسبی بسازم. دوباره بگو." : "I received your message, but couldn't form a useful reply. Please try again.");
-    const answer = await polishWolfAnswer(env, draftAnswer, language, contextualUserText);
+    const answer = casualChat ? draftAnswer : await polishWolfAnswer(env, draftAnswer, language, contextualUserText);
     await saveConversation(env, chatId, history, userText, answer);
     await reply(env, chatId, answer);
   } catch (error) {
@@ -1492,7 +1506,8 @@ export default {
       const incomingText = String(update.message?.text || "").trim();
       const isCommand = incomingText.startsWith("/");
       const isGreeting = isSimpleGreeting(incomingText);
-      if (isCommand || isGreeting || update.callback_query) {
+      const isCasualChat = isCasualChatMessage(incomingText);
+      if (isCommand || isGreeting || isCasualChat || update.callback_query) {
         try {
           const result = await handleTelegramUpdate(request, env, update);
           return result instanceof Response ? result : json({ ok: true });
