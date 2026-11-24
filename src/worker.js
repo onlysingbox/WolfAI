@@ -690,12 +690,11 @@ function isCasualChatMessage(value) {
 
 function isResearchFollowUp(history, currentText) {
   const text = String(currentText || "").trim();
-  // Short references to a previously returned website list still require research tools.
-  const previous = Array.isArray(history) ? [...history].reverse() : [];
-  const previousAssistant = previous.find(item => item?.role === "assistant")?.content || "";
-  const previousUser = previous.find(item => item?.role === "user")?.content || "";
-  const priorWebsiteList = /(?:سایت|وب.?سایت|website|websites|منبع|لینک)/i.test(previousUser) &&
-    /(?:^|\n)\s*\d+[.)、-]\s*[^\n]{2,120}(?:\.ir|\.com|\.org|\.net|\.co|https?:\/\/)/im.test(previousAssistant);
+  const previous = Array.isArray(history) ? history : [];
+  // Search the full recent history, not only the immediately preceding reply:
+  // a user may ask for details after an intervening assistant explanation.
+  const priorWebsiteList = previous.some(item => item?.role === "assistant" &&
+    /(?:^|\n)\s*[0-9۰-۹]+[.)、-]\s*[^\n]{2,160}(?:\.ir|\.com|\.org|\.net|\.co|https?:\/\/)/im.test(String(item.content || "")));
   const refersToPriorSites = /(?:این\s+(?:پنج|چند|سایت|وب.?سایت|منبع|لینک)|همین\s+(?:سایت|وب.?سایت|منبع)|سایت.?های\s+بالا|موارد\s+بالا|the(?:se)?\s+(?:five|listed|above)\s+(?:sites|websites|sources)|those\s+(?:sites|websites|sources))/i.test(text);
   const asksForInspection = /(?:توضیح|بررسی|اعتبار|معتبر|فعال|مقایسه|نقد|اطلاعات|جزئیات|explain|check|verify|review|compare|details|legit|reliable)/i.test(text);
   if (priorWebsiteList && refersToPriorSites && asksForInspection) return true;
