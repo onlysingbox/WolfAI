@@ -422,9 +422,10 @@ function inspectWolfAnswer(value, language, userRequest = "") {
 async function polishWolfAnswer(env, draft, language, userRequest = "") {
   const original = cleanupWolfMarkdown(draft);
   if (!original || !env.AI?.run) return original;
-  // Research answers receive the same editorial repair pass as other answers.
-  // The editor may only repair presentation from the supplied draft; deterministic
-  // validation still runs afterward and can reject genuinely incomplete output.
+  // Fast path: if deterministic checks already pass, avoid a second model call.
+  // Invoke the GLM editorial repair pass only when a concrete quality issue exists.
+  const initialIssues = inspectWolfAnswer(original, language, userRequest);
+  if (!initialIssues.length) return original;
   try {
     const instruction = language === "fa"
       ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. برای درخواست صریح فهرست سایت‌ها/منابع/لینک‌ها، قالب مینیمال نام لینک‌شده به URL مستقیم را حفظ کن و توضیح یا مقدمه اضافه نکن؛ این قالب را به پاسخ‌های عادی تحمیل نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
