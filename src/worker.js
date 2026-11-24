@@ -167,82 +167,113 @@ async function readArchivedTelegramMessage(env, chatId, messageId) {
 }
 
 function isMessageDeleteRequest(value) {
-  return /(?:پاک\s*(?:کن|ش|ش\s*کن)|حذف\s*(?:کن|ش|ش\s*کن)|پاک(?:سازی)?\s+کن|delete|remove|erase)/i.test(String(value || "")) &&
-    /(?:پیام|پیام‌ها|متن|این|همه|تمام|فارسی|انگلیسی|آخرین|قبلی|message|messages|text|this|all|last|previous|persian|english|my|your)/i.test(String(value || ""));
+  const text = String(value || "");
+  const action = /(?:پاک\s*(?:کن|ش|ش\s*کن)|حذف\s*(?:کن|ش|ش\s*کن)|پاک(?:سازی)?\s+کن|delete|remove|erase)/i.test(text);
+  const target = /(?:پیام|پیام‌ها|متن|این|همه|تمام|فارسی|انگلیسی|آخرین|قبلی|دومی|اولی|سومی|message|messages|text|this|all|last|previous|second|first|third|persian|english|من|خودم|خودت|ربات|my|your)/i.test(text);
+  return action && target;
 }
 
 async function handleMessageDeleteRequest(env, chatId, message, requestText) {
   if (!env.MESSAGE_ARCHIVE) {
-    await reply(env, chatId, "فضای آرشیو امن هنوز به ربات متصل نیست؛ هیچ پیامی حذف نشد.");
+    await reply(env, chatId, "آرشیو پیام‌ها در دسترس نیست؛ هیچ پیامی حذف نشد.");
     return;
   }
-  const text = String(requestText || "");
+
+  const text = String(requestText || "").trim();
   const repliedId = Number(message?.reply_to_message?.message_id || 0);
   const quote = text.match(/«([\s\S]{2,300}?)»|“([\s\S]{2,300}?)”|"([\s\S]{2,300}?)"|'([\s\S]{2,300}?)'/);
   const quotedText = quote ? String(quote.slice(1).find(Boolean) || "") : "";
+
   const wantsFa = /فارسی|persian/i.test(text);
   const wantsEn = /انگلیسی|english/i.test(text);
-  const wantsUser = /(?:پیام(?:‌های)?\s*(?:من|خودم)|متن\s+(?:من|خودم)|نوشتم|نوشته‌ام)|my\s+messages/i.test(text);
-  const wantsBot = /(?:پیام(?:‌های)?\s*(?:تو|ربات|خودت)|متن\s+(?:تو|خودت)|خودت\s*(?:نوشتی|نوشته‌ای)|نوشتی\s*(?:تو|خودت))|your\s+messages|bot\s+messages/i.test(text);
-  const wantsAll = /همه|تمام|کلیه|all\s+messages/i.test(text) || (wantsUser || wantsBot) || (wantsFa && !wantsBot && !wantsUser) || (wantsEn && !wantsBot && !wantsUser);
-  const wantsLast = /آخرین|last\s+message/i.test(text);
-  const explicitThis = /این\s*(?:پیام|متن)|this\s+message/i.test(text);
 
-  if (!repliedId && !quotedText && !wantsAll && !wantsLast) {
-    await reply(env, chatId, explicitThis
-      ? "برای اینکه دقیقاً همان پیام را حذف کنم، روی خود پیام Reply بزن و بنویس «این پیام را پاک کن». بدون شناسه، حدس نمی‌زنم."
-      : "هدف حذف روشن نیست. روی پیام موردنظر Reply بزن، یا مشخص کن همه پیام‌های فارسی، انگلیسی، پیام‌های خودت یا پیام‌های ربات حذف شوند.");
+  // Detect sender independently of word order:
+  // "پیام‌های انگلیسی من دادم" and "پیام انگلیسی خودت" both work.
+  const explicitBot = /(?:خودت|تو|ربات|دستیار|assistant|bot|your\s+messages)/i.test(text);
+  const explicitUser = /(?:\bمن\b|خودم|من\s+دادم|من\s+نوشتم|نوشتم|نوشته‌ام|my\s+messages|messages\s+i)/i.test(text);
+  const wantsBot = explicitBot && !explicitUser;
+  const wantsUser = explicitUser && !explicitBot;
+  const senderConflict = explicitBot && explicitUser;
+
+  const explicitAll = /(?:همه|تمام|کلیه|all\s+messages|all\s+my\s+and\s+your)/i.test(text);
+  const wantsAll = explicitAll || ((!explicitBot && !explicitUser) && (wantsFa || wantsEn));
+  const wantsLast = /(?:آخرین|last\s+message)/i.test(text);
+  const explicitThis = /(?:این\s*(?:پیام|متن)|این(?:و)?\s+پاک|this\s+message)/i.test(text);
+
+  const ordinalMatch = text.match(/(?:پیام\s*)?(اولی|اول|دومی|دوم|سومی|سوم|چهارمی|چهارم|اولین|دومین|سومین|first|second|third|fourth)/i);
+  const ordinalMap = { "اولی":1,"اول":1,"اولین":1,"first":1,"دومی":2,"دوم":2,"دومین":2,"second":2,"سومی":3,"سوم":3,"سومین":3,"third":3,"چهارمی":4,"چهارم":4,"fourth":4 };
+  const ordinal = ordinalMatch ? ordinalMap[ordinalMatch[1].toLowerCase()] : 0;
+
+  if (senderConflict) {
+    await reply(env, chatId, "مشخص نکردی پیام‌های کدام طرف را حذف کنم. «پیام‌های من» یا «پیام‌های خودت» را جداگانه بنویس.");
     return;
   }
 
   const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
   let records = (listed.keys || []).map(item => ({ name: item.name, ...(item.metadata || {}) }));
-  if (repliedId) records = records.filter(item => Number(item.messageId) === repliedId);
-  if (wantsFa) records = records.filter(item => item.language === "fa");
-  if (wantsEn) records = records.filter(item => item.language === "en");
-  if (wantsUser) records = records.filter(item => item.role === "user");
-  if (wantsBot) records = records.filter(item => item.role === "assistant");
 
-  if (quotedText) {
+  // A Telegram reply is the strongest and safest target.
+  if (repliedId) {
+    records = records.filter(item => Number(item.messageId) === repliedId);
+  } else if (quotedText) {
     const matches = [];
     for (const item of records) {
       const archived = await readArchivedTelegramMessage(env, chatId, item.messageId);
       if (String(archived?.text || "").toLocaleLowerCase().includes(quotedText.toLocaleLowerCase())) matches.push(item);
     }
     records = matches;
-  }
-
-  records.sort((a, b) => Number(b.date || 0) - Number(a.date || 0));
-  if (wantsLast && !repliedId && !quotedText && !wantsAll) records = records.slice(0, 1);
-  if (!wantsAll && !wantsLast && !repliedId && !quotedText) records = records.slice(0, 1);
-
-  if (quotedText && records.length > 1) {
-    await reply(env, chatId, "چند پیام شامل این عبارت پیدا شد. لطفاً روی پیام دقیق Reply بزن تا فقط همان را حذف کنم.");
+  } else if (ordinal) {
+    if (wantsBot) records = records.filter(item => item.role === "assistant");
+    else if (wantsUser) records = records.filter(item => item.role === "user");
+    records.sort((a,b) => Number(b.messageId || 0) - Number(a.messageId || 0));
+    records = records.slice(ordinal - 1, ordinal);
+  } else if (wantsAll) {
+    // Keep all messages for a language-only request; constrain by sender if specified.
+  } else if (wantsLast || explicitThis || /^(?:پاک\s*کن|حذف\s*کن|این(?:و)?\s*پاک\s*کن)$/i.test(text)) {
+    // "this/last" without a Telegram reply means the latest archived message
+    // before the delete command, never the delete command itself.
+    const currentId = Number(message?.message_id || 0);
+    records = records.filter(item => !currentId || Number(item.messageId) < currentId);
+    if (wantsBot) records = records.filter(item => item.role === "assistant");
+    else if (wantsUser) records = records.filter(item => item.role === "user");
+    records.sort((a,b) => Number(b.messageId || 0) - Number(a.messageId || 0));
+    records = records.slice(0, 1);
+  } else if (wantsBot || wantsUser) {
+    // Sender-only requests mean all messages from that sender.
+  } else {
+    await reply(env, chatId, "برای حذف یک پیام، روی همان پیام Reply بزن یا بگو «پیام قبلی را پاک کن». برای حذف گروهی، زبان یا فرستنده را مشخص کن.");
     return;
   }
+
+  if (wantsFa) records = records.filter(item => item.language === "fa");
+  if (wantsEn) records = records.filter(item => item.language === "en");
+  if (wantsUser) records = records.filter(item => item.role === "user");
+  if (wantsBot) records = records.filter(item => item.role === "assistant");
+
   if (!records.length) {
-    await reply(env, chatId, "پیام مطابق درخواست در آرشیو امن پیدا نشد. فقط پیام‌هایی که پس از فعال‌شدن آرشیو ثبت شده‌اند قابل شناسایی‌اند.");
+    await reply(env, chatId, "پیام موردنظر در آرشیو پیدا نشد یا قبلاً حذف شده است. پیام‌های قدیمی‌تر از زمان فعال‌شدن آرشیو قابل بازیابی نیستند.");
     return;
   }
 
   const now = Math.floor(Date.now() / 1000);
-  let deleted = 0, tooOld = 0, failed = 0;
+  let deleted = 0;
   for (const item of records) {
     const id = Number(item.messageId);
-    if (!Number.isFinite(id) || now - Number(item.date || 0) >= 48 * 60 * 60) { tooOld++; continue; }
+    if (!Number.isFinite(id) || now - Number(item.date || 0) >= 48 * 60 * 60) continue;
     try {
       await telegram(env, "deleteMessage", { chat_id: chatId, message_id: id });
       await env.MESSAGE_ARCHIVE.delete(item.name);
       deleted++;
     } catch (error) {
-      failed++;
-      console.warn("Telegram message deletion failed", { messageId: id, error: String(error?.message || error) });
+      console.warn("Telegram message deletion failed", { messageId: id, role: item.role, error: String(error?.message || error) });
     }
   }
-  // Deletion is intentionally silent. The user can see the messages disappear;
-  // never send a success/summary message after a delete operation.
-}
 
+  // Successful deletion is intentionally silent.
+  if (!deleted && records.length) {
+    console.warn("No archived messages could be deleted; check Telegram permissions and the 48-hour limit.");
+  }
+}
 function isTextEditRequest(value) {
   const text = String(value || "");
   return /(?:ویرایش|مرتب\s*(?:کن|کنید)?|اصلاح\s*(?:کن|کنید)?|بازنویسی|روان\s*(?:تر|ترش)?\s*(?:کن|کنید)?|ادیت|rewrite|proofread|polish|edit\s+(?:this|the|my)|improve\s+(?:this|the|my)\s+text|(?:به\s*)?جاش\s*بنویس|بجاش\s*بنویس|جایگزین\s*کن)/i.test(text);
