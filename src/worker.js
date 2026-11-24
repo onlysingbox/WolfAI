@@ -438,13 +438,34 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
       await reply(env, chatId, "متن اصلی را پیدا نکردم. روی همان پیام Reply بزن و دوباره درخواست ویرایش را بفرست.");
       return;
     }
-    const position = sourceText.indexOf(replacementPair.from);
+    let position = sourceText.indexOf(replacementPair.from);
+    let matchedLength = replacementPair.from.length;
+    // Accept small natural-language fillers such as «هم» between words.
+    // Example: request «وقت شما بخیر» should match source «وقت شما هم بخیر».
+    if (position < 0) {
+      const words = replacementPair.from.trim().split(/\\s+/).filter(Boolean);
+      if (words.length > 1) {
+        const escaped = words.map(word => word.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\    const position = sourceText.indexOf(replacementPair.from);
     if (position < 0) {
       await reply(env, chatId, "عبارت «" + replacementPair.from + "» در پیام اصلی پیدا نشد؛ چیزی را تغییر ندادم.");
       return;
     }
     explicitReplacement = sourceText.slice(0, position) + replacementPair.to +
-      sourceText.slice(position + replacementPair.from.length);
+      sourceText.slice(position + replacementPair.from.length);"));
+        const flexible = new RegExp(escaped.join("[\\\\s،,:؛.!؟?]+(?:هم[\\\\s،,:؛.!؟?]+)?"), "i");
+        const match = flexible.exec(sourceText);
+        if (match) {
+          position = match.index;
+          matchedLength = match[0].length;
+        }
+      }
+    }
+    if (position < 0) {
+      await reply(env, chatId, "عبارت «" + replacementPair.from + "» در پیام‌های قبلی ربات پیدا نشد؛ چیزی را تغییر ندادم.");
+      return;
+    }
+    explicitReplacement = sourceText.slice(0, position) + replacementPair.to +
+      sourceText.slice(position + matchedLength);
   }
 
   // A direct replacement is deterministic; never ask a language model to guess it.
