@@ -182,9 +182,9 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
   const quotedText = quote ? String(quote.slice(1).find(Boolean) || "") : "";
   const wantsFa = /فارسی|persian/i.test(text);
   const wantsEn = /انگلیسی|english/i.test(text);
-  const wantsUser = /پیام(?:‌های)?\s*(?:من|خودم)|my\s+messages/i.test(text);
-  const wantsBot = /پیام(?:‌های)?\s*(?:تو|ربات|خودت)|your\s+messages|bot\s+messages/i.test(text);
-  const wantsAll = /همه|تمام|کلیه|all\s+messages/i.test(text) || (wantsUser || wantsBot) || wantsFa || wantsEn;
+  const wantsUser = /(?:پیام(?:‌های)?\s*(?:من|خودم)|متن\s+(?:من|خودم)|نوشتم|نوشته‌ام)|my\s+messages/i.test(text);
+  const wantsBot = /(?:پیام(?:‌های)?\s*(?:تو|ربات|خودت)|متن\s+(?:تو|خودت)|خودت\s*(?:نوشتی|نوشته‌ای)|نوشتی\s*(?:تو|خودت))|your\s+messages|bot\s+messages/i.test(text);
+  const wantsAll = /همه|تمام|کلیه|all\s+messages/i.test(text) || (wantsUser || wantsBot) || (wantsFa && !wantsBot && !wantsUser) || (wantsEn && !wantsBot && !wantsUser);
   const wantsLast = /آخرین|last\s+message/i.test(text);
   const explicitThis = /این\s*(?:پیام|متن)|this\s+message/i.test(text);
 
@@ -239,10 +239,8 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
       console.warn("Telegram message deletion failed", { messageId: id, error: String(error?.message || error) });
     }
   }
-  const summary = "حذف انجام شد: " + deleted +
-    (tooOld ? "\nغیرقابل حذف به‌دلیل محدودیت ۴۸ ساعته تلگرام: " + tooOld : "") +
-    (failed ? "\nناموفق یا فاقد مجوز تلگرام: " + failed : "");
-  await reply(env, chatId, summary);
+  // Deletion is intentionally silent. The user can see the messages disappear;
+  // never send a success/summary message after a delete operation.
 }
 
 function isTextEditRequest(value) {
