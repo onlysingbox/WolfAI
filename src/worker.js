@@ -2170,7 +2170,8 @@ async function processQueuedDirectSearch(env, update) {
       return true;
     }).slice(0, limit);
     if (!links.length) throw new Error("هیچ نتیجه مرتبط و قابل‌استفاده‌ای از موتورهای جست‌وجو دریافت نشد.");
-    await reply(env, chatId, links.map(item => item.url).join("\n"), { disable_web_page_preview: true });
+    const formattedResults = "نتایج جست‌وجو:\n\n" + links.map(item => item.url).join("\n\n");
+    await reply(env, chatId, formattedResults, { disable_web_page_preview: true });
   } catch (error) {
     console.error("WOLF AI queued direct search failed", {
       updateId: update?.update_id,
