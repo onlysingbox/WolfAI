@@ -696,10 +696,11 @@ function isDirectSearchRequest(value) {
 
 function directSearchQuery(value) {
   return String(value || "")
+    .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/فقط\s+(?:لینک|لینک.?های)\s+(?:مستقیم\s+)?(?:سایت.?ها|آن.?ها|اونا)\s+را\s+بده/gi, " ")
     .replace(/(?:پیدا\s+کن(?:ید)?|جست.?وجو\s+کن(?:ید)?|سرچ\s+کن(?:ید)?|بگرد|معرفی\s+کن(?:ید)?)/gi, " ")
-    .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
     .replace(/\b\d+\s*(?:سایت|وب.?سایت|منبع)\s+(?:معتبر\s+)?/gi, " ")
+    .replace(/\b(?:فقط|معتبر|مستقیم)\b/gi, " ")
     .replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
@@ -1446,6 +1447,8 @@ async function executeResearchSearch(query, env = {}) {
   const queryTokens = tokenSet(original);
   const currentOrRecent = /(latest|current|today|this year|recent|2026|آخرین|جدیدترین|امروز|امسال|به.?روز|فعلی)/i.test(original);
   const queryVariants = [original];
+  const musicQuery = /(?:موسیقی|موزیک|آهنگ|music|song|mp3)/i.test(original);
+  if (musicQuery) queryVariants.push("Iranian music download websites MP3");
   if (/(official|رسمی|وب.?سایت|سایت اصلی)/i.test(original)) queryVariants.push(original + " official website");
   if (currentOrRecent && !/\b2026\b/.test(original)) queryVariants.push(original + " 2026");
 
@@ -1578,6 +1581,12 @@ async function executeResearchSearch(query, env = {}) {
     const tokens = tokenSet(body);
     let score = 0;
     for (const token of queryTokens) if (!stopWords.has(token) && tokens.has(token)) score += 3;
+    if (musicQuery) {
+      if (/(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body)) score += 5;
+      if (/(iran|iranian|ایران|ایرانی)/i.test(body)) score += 4;
+      if (/(download|دانلود)/i.test(body)) score += 4;
+      if (/(netflix|stackoverflow|stackexchange|github|spring.?boot|software|programming|developer)/i.test(host + " " + body)) score -= 15;
+    }
     if (/\.(gov|gov\.[a-z]{2}|gouv\.[a-z]{2})$/.test(host) || host.includes(".gov.")) score += 8;
     if (/\.(edu|ac\.[a-z]{2}|edu\.[a-z]{2})$/.test(host) || host.includes(".edu.")) score += 7;
     if (/who\.int$|un\.org$|oecd\.org$|worldbank\.org$|europa\.eu$/.test(host)) score += 6;
@@ -1610,7 +1619,17 @@ async function executeResearchSearch(query, env = {}) {
   }
 
   const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
-  const results = ranked.slice(0, 20).map(({ relevance, ...item }) => item);
+  const relevant = musicQuery ? ranked.filter(item => item.relevance >= 5) : ranked;
+  const selected = [];
+  const selectedHosts = new Set();
+  for (const item of relevant) {
+    const host = hostOf(item.url);
+    if (!host || selectedHosts.has(host)) continue;
+    selectedHosts.add(host);
+    selected.push(item);
+    if (selected.length >= 20) break;
+  }
+  const results = selected.map(({ relevance, ...item }) => item);
   if (!results.length) {
     const providerSummary = failures.length ? failures.join("; ") : "All configured search providers returned no usable results.";
     throw new Error("هیچ نتیجه قابل‌استفاده‌ای از موتورهای جست‌وجوی عمومی دریافت نشد. " + providerSummary);
