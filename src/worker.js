@@ -93,10 +93,213 @@ async function telegram(env, method, payload) {
   return data.result;
 }
 
+
+function archiveBase64(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function archiveFromBase64(value) {
+  const binary = atob(String(value || ""));
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+async function archiveCryptoKey(env) {
+  if (!env.TELEGRAM_MESSAGE_ENCRYPTION_KEY) throw new Error("Message archive encryption key is not configured");
+  const raw = archiveFromBase64(env.TELEGRAM_MESSAGE_ENCRYPTION_KEY);
+  if (raw.length !== 32) throw new Error("Message archive key must contain 32 bytes");
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function archiveTelegramMessage(env, chatId, message, role) {
+  if (!env.MESSAGE_ARCHIVE || !message?.message_id) return;
+  const content = String(message.text || message.caption || "");
+  const kind = message.text ? "text" : message.caption ? "caption" :
+    message.photo ? "photo" : message.video ? "video" :
+    message.document ? "document" : message.voice ? "voice" :
+    message.audio ? "audio" : message.sticker ? "sticker" : "other";
+  const date = Number(message.date || Math.floor(Date.now() / 1000));
+  const id = Number(message.message_id);
+  const language = content.trim() ? detectMessageLanguage(content) : "und";
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await archiveCryptoKey(env);
+  const plaintext = new TextEncoder().encode(JSON.stringify({ text: content.slice(0, 4000), kind }));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, plaintext));
+  const value = JSON.stringify({ v: 1, iv: archiveBase64(iv), data: archiveBase64(ciphertext) });
+  const kvKey = "chat:" + String(chatId) + ":" + String(id);
+  await env.MESSAGE_ARCHIVE.put(kvKey, value, {
+    expirationTtl: 7 * 24 * 60 * 60,
+    metadata: { chatId: String(chatId), messageId: id, role, language, date, kind }
+  });
+
+  // Keep the private archive bounded without touching D1. A cleanup scan is
+  // performed only once per roughly 50 Telegram messages.
+  if (id % 50 === 0) {
+    const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
+    const keys = (listed.keys || []).slice().sort((a, b) => Number(a.metadata?.date || 0) - Number(b.metadata?.date || 0));
+    for (const old of keys.slice(0, Math.max(0, keys.length - 300))) {
+      await env.MESSAGE_ARCHIVE.delete(old.name);
+    }
+  }
+}
+
+async function readArchivedTelegramMessage(env, chatId, messageId) {
+  if (!env.MESSAGE_ARCHIVE || !env.TELEGRAM_MESSAGE_ENCRYPTION_KEY) return null;
+  const keyName = "chat:" + String(chatId) + ":" + String(messageId);
+  const raw = await env.MESSAGE_ARCHIVE.get(keyName);
+  if (!raw) return null;
+  const envelope = JSON.parse(raw);
+  if (envelope.v !== 1) return null;
+  const key = await archiveCryptoKey(env);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: archiveFromBase64(envelope.iv) },
+    key,
+    archiveFromBase64(envelope.data)
+  );
+  return JSON.parse(new TextDecoder().decode(plaintext));
+}
+
+function isMessageDeleteRequest(value) {
+  return /(?:پاک\s*(?:کن|ش|ش\s*کن)|حذف\s*(?:کن|ش|ش\s*کن)|پاک(?:سازی)?\s+کن|delete|remove|erase)/i.test(String(value || "")) &&
+    /(?:پیام|پیام‌ها|متن|این|همه|تمام|فارسی|انگلیسی|آخرین|قبلی|message|messages|text|this|all|last|previous|persian|english|my|your)/i.test(String(value || ""));
+}
+
+async function handleMessageDeleteRequest(env, chatId, message, requestText) {
+  if (!env.MESSAGE_ARCHIVE) {
+    await reply(env, chatId, "فضای آرشیو امن هنوز به ربات متصل نیست؛ هیچ پیامی حذف نشد.");
+    return;
+  }
+  const text = String(requestText || "");
+  const repliedId = Number(message?.reply_to_message?.message_id || 0);
+  const quote = text.match(/«([\s\S]{2,300}?)»|“([\s\S]{2,300}?)”|"([\s\S]{2,300}?)"|'([\s\S]{2,300}?)'/);
+  const quotedText = quote ? String(quote.slice(1).find(Boolean) || "") : "";
+  const wantsFa = /فارسی|persian/i.test(text);
+  const wantsEn = /انگلیسی|english/i.test(text);
+  const wantsUser = /پیام(?:‌های)?\s*(?:من|خودم)|my\s+messages/i.test(text);
+  const wantsBot = /پیام(?:‌های)?\s*(?:تو|ربات|خودت)|your\s+messages|bot\s+messages/i.test(text);
+  const wantsAll = /همه|تمام|کلیه|all\s+messages/i.test(text) || (wantsUser || wantsBot) || wantsFa || wantsEn;
+  const wantsLast = /آخرین|last\s+message/i.test(text);
+  const explicitThis = /این\s*(?:پیام|متن)|this\s+message/i.test(text);
+
+  if (!repliedId && !quotedText && !wantsAll && !wantsLast) {
+    await reply(env, chatId, explicitThis
+      ? "برای اینکه دقیقاً همان پیام را حذف کنم، روی خود پیام Reply بزن و بنویس «این پیام را پاک کن». بدون شناسه، حدس نمی‌زنم."
+      : "هدف حذف روشن نیست. روی پیام موردنظر Reply بزن، یا مشخص کن همه پیام‌های فارسی، انگلیسی، پیام‌های خودت یا پیام‌های ربات حذف شوند.");
+    return;
+  }
+
+  const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
+  let records = (listed.keys || []).map(item => ({ name: item.name, ...(item.metadata || {}) }));
+  if (repliedId) records = records.filter(item => Number(item.messageId) === repliedId);
+  if (wantsFa) records = records.filter(item => item.language === "fa");
+  if (wantsEn) records = records.filter(item => item.language === "en");
+  if (wantsUser) records = records.filter(item => item.role === "user");
+  if (wantsBot) records = records.filter(item => item.role === "assistant");
+
+  if (quotedText) {
+    const matches = [];
+    for (const item of records) {
+      const archived = await readArchivedTelegramMessage(env, chatId, item.messageId);
+      if (String(archived?.text || "").toLocaleLowerCase().includes(quotedText.toLocaleLowerCase())) matches.push(item);
+    }
+    records = matches;
+  }
+
+  records.sort((a, b) => Number(b.date || 0) - Number(a.date || 0));
+  if (wantsLast && !repliedId && !quotedText && !wantsAll) records = records.slice(0, 1);
+  if (!wantsAll && !wantsLast && !repliedId && !quotedText) records = records.slice(0, 1);
+
+  if (quotedText && records.length > 1) {
+    await reply(env, chatId, "چند پیام شامل این عبارت پیدا شد. لطفاً روی پیام دقیق Reply بزن تا فقط همان را حذف کنم.");
+    return;
+  }
+  if (!records.length) {
+    await reply(env, chatId, "پیام مطابق درخواست در آرشیو امن پیدا نشد. فقط پیام‌هایی که پس از فعال‌شدن آرشیو ثبت شده‌اند قابل شناسایی‌اند.");
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  let deleted = 0, tooOld = 0, failed = 0;
+  for (const item of records) {
+    const id = Number(item.messageId);
+    if (!Number.isFinite(id) || now - Number(item.date || 0) >= 48 * 60 * 60) { tooOld++; continue; }
+    try {
+      await telegram(env, "deleteMessage", { chat_id: chatId, message_id: id });
+      await env.MESSAGE_ARCHIVE.delete(item.name);
+      deleted++;
+    } catch (error) {
+      failed++;
+      console.warn("Telegram message deletion failed", { messageId: id, error: String(error?.message || error) });
+    }
+  }
+  const summary = "حذف انجام شد: " + deleted +
+    (tooOld ? "\nغیرقابل حذف به‌دلیل محدودیت ۴۸ ساعته تلگرام: " + tooOld : "") +
+    (failed ? "\nناموفق یا فاقد مجوز تلگرام: " + failed : "");
+  await reply(env, chatId, summary);
+}
+
+function isTextEditRequest(value) {
+  return /(?:ویرایش|مرتب\s*(?:کن|کنید)?|اصلاح\s*(?:کن|کنید)?|بازنویسی|روان\s*(?:تر|ترش)?\s*(?:کن|کنید)?|ادیت|rewrite|proofread|polish|edit\s+(?:this|the|my)|improve\s+(?:this|the|my)\s+text)/i.test(String(value || ""));
+}
+
+async function handleTextEditRequest(env, chatId, message, requestText) {
+  const text = String(requestText || "");
+  const quoted = text.match(/«([\s\S]+?)»|“([\s\S]+?)”|"([\s\S]+?)"|'([\s\S]+?)'/);
+  let sourceText = quoted ? String(quoted.slice(1).find(Boolean) || "") : "";
+  if (!sourceText && message?.reply_to_message) {
+    sourceText = String(message.reply_to_message.text || message.reply_to_message.caption || "");
+    if (!sourceText && message.reply_to_message.message_id) {
+      const archived = await readArchivedTelegramMessage(env, chatId, message.reply_to_message.message_id);
+      sourceText = String(archived?.text || "");
+    }
+  }
+  if (!sourceText) {
+    const colon = text.match(/[:：]\s*([\s\S]{5,4000})$/);
+    if (colon) sourceText = colon[1].trim();
+  }
+  if (!sourceText) {
+    await reply(env, chatId, "متنی برای ویرایش پیدا نکردم. متن را بعد از دونقطه بفرست یا روی پیام موردنظر Reply بزن و درخواست ویرایش کن.");
+    return;
+  }
+  if (!env.AI?.run) {
+    await reply(env, chatId, "موتور هوش مصنوعی برای ویرایش در دسترس نیست.");
+    return;
+  }
+  const language = detectMessageLanguage(sourceText);
+  const instruction = language === "fa"
+    ? "متن زیر را از نظر املا، دستور زبان، روانی، نشانه‌گذاری و نظم اصلاح کن. منظور و اطلاعات اصلی را تغییر نده و چیزی از خودت اضافه نکن. اگر متن برای ارسال به شخصی است، لحن طبیعی و محترمانه را حفظ کن. فقط نسخه پیشنهادی نهایی را برگردان؛ توضیح اضافه نده."
+    : "Proofread and improve the text below for grammar, clarity, flow, punctuation, and structure. Preserve the original meaning and facts; do not invent or add content. Keep a natural, appropriate tone for its intended recipient. Return only the polished version, without commentary.";
+  try {
+    const preferred = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+    const modelKey = chooseWolfModel(preferred, "ویرایش و بازنویسی متن");
+    const payload = {
+      messages: [
+        { role: "system", content: instruction },
+        { role: "user", content: sourceText.slice(0, 4000) }
+      ],
+      max_tokens: 1400,
+      chat_template_kwargs: { enable_thinking: false }
+    };
+    const { result } = await runWolfModel(env, payload, modelKey);
+    const polished = String(result?.choices?.[0]?.message?.content || "").trim();
+    if (!polished) throw new Error("مدل نسخه ویرایش‌شده‌ای برنگرداند.");
+    await reply(env, chatId, "پیشنهاد ویرایش‌شده:\n\n" + polished + "\n\nاین نسخه پیشنهادی است و هنوز برای کسی ارسال نشده.");
+  } catch (error) {
+    console.error("Text editing failed", error);
+    await reply(env, chatId, "ویرایش متن انجام نشد: " + String(error?.message || error).slice(0, 300));
+  }
+}
+
 async function reply(env, chatId, text, extra = {}) {
   const body = String(text ?? "");
   const limit = 3800;
-  if (body.length <= limit) return telegram(env, "sendMessage", { chat_id: chatId, text: body, ...extra });
+  if (body.length <= limit) {
+    const sent = await telegram(env, "sendMessage", { chat_id: chatId, text: body, ...extra });
+    try { await archiveTelegramMessage(env, chatId, sent, "assistant"); }
+    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
+    return sent;
+  }
   const chunks = [];
   let remaining = body;
   while (remaining.length > limit) {
@@ -113,6 +316,8 @@ async function reply(env, chatId, text, extra = {}) {
       text: chunks[index],
       ...(index === chunks.length - 1 ? extra : {})
     });
+    try { await archiveTelegramMessage(env, chatId, result, "assistant"); }
+    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
   }
   return result;
 }
@@ -1455,6 +1660,19 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   await env.DB.prepare("INSERT INTO users (telegram_id, username, first_name, role, last_seen_at) VALUES (?, ?, ?, 'owner', CURRENT_TIMESTAMP) ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_seen_at=CURRENT_TIMESTAMP")
     .bind(userId, message.from.username || null, message.from.first_name || null).run();
   const text = message.text.trim();
+  const deleteIntent = isMessageDeleteRequest(text);
+  if (!deleteIntent) {
+    try { await archiveTelegramMessage(env, chatId, message, "user"); }
+    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
+  }
+  if (deleteIntent) {
+    await handleMessageDeleteRequest(env, chatId, message, text);
+    return json({ ok: true });
+  }
+  if (isTextEditRequest(text)) {
+    await handleTextEditRequest(env, chatId, message, text);
+    return json({ ok: true });
+  }
   const [rawCommand, ...rest] = text.split(/\s+/);
   const command = rawCommand.split("@")[0].toLowerCase();
   const arg = rest.join(" ");
