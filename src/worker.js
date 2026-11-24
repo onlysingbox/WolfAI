@@ -1614,11 +1614,19 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     return { tool: action.type, read_only: true, start_date: action.args.start_date, end_date: action.args.end_date, totals: rows.results || [] };
   }
   if (action.type === "system.health") {
-    const [tables, tasks] = await Promise.all([
+    const [tables, tasks, runs, steps] = await Promise.all([
       env.DB.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first(),
-      env.DB.prepare("SELECT COUNT(*) AS n FROM tasks").first()
+      env.DB.prepare("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status").all(),
+      env.DB.prepare("SELECT status, COUNT(*) AS count FROM agent_runs GROUP BY status").all(),
+      env.DB.prepare("SELECT status, COUNT(*) AS count FROM agent_steps GROUP BY status").all()
     ]);
-    return { tool: action.type, read_only: true, tables: tables.n, tasks: tasks.n, worker: "active" };
+    const countStatuses = rows => Object.fromEntries((rows?.results || []).map(row => [String(row.status), Number(row.count || 0)]));
+    return {
+      tool: action.type, read_only: true, tables: Number(tables?.n || 0),
+      task_status: countStatuses(tasks), agent_run_status: countStatuses(runs),
+      agent_step_status: countStatuses(steps), tool_count: wolfFunctionTools().length,
+      worker: "active"
+    };
   }
   if (action.type === "github.list_repos") {
     const repos = await githubRequest(env, "/user/repos?visibility=all&affiliation=owner&sort=updated&per_page=30");
@@ -1992,6 +2000,18 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
 
 async function summarizeWolfExecution(env, execution, originalRequest) {
   const language = await responseLanguage(env, originalRequest);
+  if (execution?.tool === "system.health") {
+    const tasks = execution.task_status || {};
+    const runs = execution.agent_run_status || {};
+    const steps = execution.agent_step_status || {};
+    const sum = values => Object.values(values).reduce((total, value) => total + Number(value || 0), 0);
+    const taskLine = Object.entries(tasks).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
+    const runLine = Object.entries(runs).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
+    const stepLine = Object.entries(steps).map(([status, count]) => status + ": " + count).join("، ") || "بدون سابقه";
+    return language === "fa"
+      ? "گزارش سلامت WOLF AI:\\n• Worker: فعال\\n• جدول‌های اصلی: " + execution.tables + "\\n• ابزارهای تعریف‌شده: " + execution.tool_count + "\\n• کل وظایف ثبت‌شده: " + sum(tasks) + " (در انتظار تأیید: " + (tasks.pending_approval || 0) + "، تکمیل‌شده: " + (tasks.completed || 0) + "، ناموفق: " + (tasks.execution_failed || 0) + ")\\n• وضعیت مأموریت‌ها: " + runLine + "\\n• وضعیت مراحل: " + stepLine + "\\nتوجه: تعداد وظایف ثبت‌شده به معنی تعداد وظایف در حال اجرا نیست."
+      : "WOLF AI health report:\\n• Worker: active\\n• Main tables: " + execution.tables + "\\n• Defined tools: " + execution.tool_count + "\\n• Total recorded tasks: " + sum(tasks) + " (pending approval: " + (tasks.pending_approval || 0) + ", completed: " + (tasks.completed || 0) + ", failed: " + (tasks.execution_failed || 0) + ")\\n• Agent runs: " + runLine + "\\n• Steps: " + stepLine + "\\nRecorded task count does not mean currently running tasks.";
+  }
   if (execution?.tool === "memory.save") {
     return language === "fa" ? "این مورد با موفقیت در حافظه خصوصی WOLF AI ذخیره شد: " + String(execution.key || "") + " = " + String(execution.value || "") : "Saved to private WOLF AI memory: " + String(execution.key || "") + " = " + String(execution.value || "");
   }
