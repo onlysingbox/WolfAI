@@ -688,6 +688,21 @@ function isCasualChatMessage(value) {
   return true;
 }
 
+function isDirectSearchRequest(value) {
+  const text = String(value || "").trim();
+  return /(?:پیدا\s+کن(?:ید)?|جست.?وجو\s+کن(?:ید)?|سرچ\s+کن(?:ید)?|بگرد|معرفی\s+کن(?:ید)?|find\s+(?:me\s+)?\d*|search\s+for|look\s+up)/i.test(text) &&
+    /(?:سایت|وب.?سایت|منبع|لینک|website|websites|site|source|link)/i.test(text);
+}
+
+function directSearchQuery(value) {
+  return String(value || "")
+    .replace(/فقط\s+(?:لینک|لینک.?های)\s+(?:مستقیم\s+)?(?:سایت.?ها|آن.?ها|اونا)\s+را\s+بده/gi, " ")
+    .replace(/(?:پیدا\s+کن(?:ید)?|جست.?وجو\s+کن(?:ید)?|سرچ\s+کن(?:ید)?|بگرد|معرفی\s+کن(?:ید)?)/gi, " ")
+    .replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))
+    .replace(/\b\d+\s*(?:سایت|وب.?سایت|منبع)\s+(?:معتبر\s+)?/gi, " ")
+    .replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
 function isResearchFollowUp(history, currentText) {
   const text = String(currentText || "").trim();
   const previous = Array.isArray(history) ? history : [];
@@ -1134,11 +1149,35 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
     return;
   }
 
+  const history = await loadConversation(env, chatId);
+
+  // Explicit website/source discovery must call search directly, not depend on model tool selection.
+  if (isDirectSearchRequest(userText)) {
+    try {
+      const query = directSearchQuery(userText) || userText;
+      const search = await executeResearchSearch(query, env);
+      const countText = String(userText).match(/[0-9۰-۹]+/);
+      const requestedCount = countText ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))) : 5;
+      const limit = Math.max(1, Math.min(10, requestedCount || 5));
+      const links = (search.results || []).filter(item => item?.url).slice(0, limit);
+      if (!links.length) throw new Error("جست‌وجو نتیجه قابل‌استفاده‌ای برنگرداند.");
+      const answer = links.map((item, index) => (index + 1) + ". " + item.url).join("\\n");
+      await saveConversation(env, chatId, history, userText, answer);
+      await reply(env, chatId, answer);
+      return;
+    } catch (error) {
+      console.error("WOLF AI direct search failed", error);
+      const message = "جست‌وجوی وب انجام نشد: " + String(error?.message || error).slice(0, 700);
+      await saveConversation(env, chatId, history, userText, message);
+      await reply(env, chatId, message);
+      return;
+    }
+  }
+
   if (!env.AI?.run) {
     await reply(env, chatId, "موتور مکالمه هوشمند هنوز در دسترس نیست. تنظیم اتصال Workers AI را بررسی کن.");
     return;
   }
-  const history = await loadConversation(env, chatId);
 
   // Resolve short replies to the immediately preceding clarification instead of
   // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
