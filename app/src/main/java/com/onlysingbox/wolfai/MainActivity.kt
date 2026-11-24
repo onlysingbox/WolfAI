@@ -29,6 +29,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.File
+import android.content.SharedPreferences
 import java.util.Locale
 
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
@@ -47,11 +49,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         securePrefs = EncryptedSharedPreferences.create("wolf_secure", master, this,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
+        File(filesDir, "wolf_storage").apply { listOf("history", "memory", "notes", "files", "audio").forEach { File(this, it).mkdirs() } }
         setContent { WolfApp(
             token = securePrefs.getString("device_token", "") ?: "",
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
             send = { text -> apiChat(securePrefs.getString("device_token", "") ?: "", text) },
-            speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") }
+            speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
+            storagePrefs = securePrefs,
+            storageRoot = File(filesDir, "wolf_storage")
         ) }
     }
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
@@ -76,12 +81,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String)->String, speak: (String)->Unit) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String)->String, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
+    var showStorage by remember { mutableStateOf(false) }
+    var storageRefresh by remember { mutableIntStateOf(0) }
+    var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
+    val storageBuckets = remember(storageRefresh) { listOf("history" to "تاریخچه گفتگوها", "memory" to "حافظه بلندمدت", "notes" to "یادداشت‌ها", "files" to "فایل‌ها", "audio" to "صدا و ضبط‌ها").map { (key, label) -> key to (label to File(storageRoot, key).apply { mkdirs() }) } }
+    fun folderBytes(file: File): Long = if (!file.exists()) 0L else if (file.isFile) file.length() else (file.listFiles()?.sumOf { folderBytes(it) } ?: 0L)
+    val usedBytes = storageBuckets.sumOf { folderBytes(it.second.second) }
+    val usedGb = usedBytes.toDouble() / (1024.0 * 1024 * 1024)
+    val phoneFreeGb = storageRoot.usableSpace.toDouble() / (1024.0 * 1024 * 1024)
+    val usagePercent = if (quotaGb > 0) (usedGb / quotaGb).toFloat().coerceIn(0f, 1f) else 0f
     val chat = remember { mutableStateListOf<Pair<String,String>>() }
     val scope = rememberCoroutineScope()
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -93,6 +107,48 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("🐺 WOLF AI", style = MaterialTheme.typography.headlineLarge, color = Color.White)
                 Text("AGENT  •  مکالمه هوشمند فارسی و انگلیسی", color = Gold)
+                OutlinedButton(onClick = { showStorage = !showStorage }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                if (showStorage) {
+                    Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    Text("مصرف‌شده: %.2f از %.0f گیگابایت".format(usedGb, quotaGb), color = Cyan)
+                    LinearProgressIndicator(progress = { usagePercent }, modifier = Modifier.fillMaxWidth())
+                    if (usagePercent >= 0.9f || phoneFreeGb < 1.0) {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF633333))) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text("هشدار کمبود حافظه", color = Color.White)
+                                Text("فضا رو به اتمام است. فایل‌های غیرضروری را پاک کن یا سقف مصرف را افزایش بده. فضای آزاد واقعی گوشی: %.1f GB".format(phoneFreeGb), color = Color.White)
+                            }
+                        }
+                    } else if (usagePercent >= 0.8f) {
+                        Text("هشدار: بیش از ۸۰٪ سهم حافظه مصرف شده است.", color = Gold)
+                    }
+                    Text("سقف مصرف WOLF: %.0f GB".format(quotaGb), color = Color.White)
+                    Slider(value = quotaGb, onValueChange = { quotaGb = it }, valueRange = 20f..200f, steps = 17)
+                    Button(onClick = { storagePrefs.edit().putInt("storage_quota_gb", quotaGb.toInt()).apply(); status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
+                    Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = Color.LightGray)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(storageBuckets) { bucket ->
+                            val (key, pair) = bucket
+                            val (label, dir) = pair
+                            Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(label, color = Color.White)
+                                        Text("%.2f GB".format(folderBytes(dir) / (1024.0 * 1024 * 1024)), color = Color.LightGray)
+                                    }
+                                    if (key == "files" || key == "audio") {
+                                        TextButton(onClick = {
+                                            dir.listFiles()?.forEach { it.deleteRecursively() }
+                                            storageRefresh++
+                                            status = "$label پاک‌سازی شد"
+                                        }) { Text("پاک‌سازی") }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                } else if (!paired) {
                 if (!paired) {
                     Text("اتصال امن به WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true)
