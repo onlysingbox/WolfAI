@@ -1076,11 +1076,15 @@ function formatWolfSearchResults(execution, request, language) {
   }
   const heading = language === "fa" ? "🔎 نتایج جست‌وجو" : "🔎 Search results";
   const lines = selected.map((item, index) =>
-    (index + 1) + '. <a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title || item.host) + '</a>' +
-    "\n<code>" + escapeHtml(item.host) + "</code>" +
+    "✨ <b>" + (index + 1) + ". " + escapeHtml(item.title || item.host) + "</b>" +
+    "\n<code>🌐 " + escapeHtml(item.host) + "</code>" +
     (item.snippet ? "\n" + escapeHtml(item.snippet) : "")
   );
-  return "<b>" + heading + "</b>" + (lines.length ? "\n\n" + lines.join("\n\n") : (language === "fa" ? "\nنتیجه معتبری پیدا نشد." : "\nNo usable results found."));
+  const keyboard = selected.map((item, index) => [{ text: (language === "fa" ? "🔗 باز کردن نتیجه " : "🔗 Open result ") + (index + 1), url: item.url }]);
+  return {
+    text: "<b>" + heading + "</b>" + (lines.length ? "\n\n" + lines.join("\n\n") : (language === "fa" ? "\nنتیجه معتبری پیدا نشد." : "\nNo usable results found.")),
+    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined
+  };
 }
 
 function formatWolfLinkDirectory(execution, request, language) {
@@ -1104,9 +1108,19 @@ function formatWolfLinkDirectory(execution, request, language) {
   const wordCounts = {پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20};
   const expected = match ? (wordCounts[match[1]] || Number(match[1].replace(/[۰-۹]/g, d => digits[d]))) : 10;
   const selected = unique.slice(0, Math.max(1, Math.min(expected, 20)));
-  const lines = selected.map((item, index) => (index + 1) + '. <a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title) + "</a>");
-  if (selected.length < expected) lines.push(language === "fa" ? "لینک معتبر پیدا‌شده: " + selected.length + " از " + expected : "Valid links found: " + selected.length + " of " + expected);
-  return lines.join("\n") || (language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found.");
+  const lines = selected.map((item, index) => {
+    const host = new URL(item.url).hostname.replace(/^www\\./, "");
+    const snippet = String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 220);
+    return "✨ <b>" + (index + 1) + ". " + escapeHtml(item.title) + "</b>" +
+      "\\n<code>🌐 " + escapeHtml(host) + "</code>" +
+      (snippet ? "\\n" + escapeHtml(snippet) : "");
+  });
+  if (selected.length < expected) lines.push(language === "fa" ? "📌 نتیجه معتبر: " + selected.length + " از " + expected : "📌 Valid results: " + selected.length + " of " + expected);
+  const keyboard = selected.map((item, index) => [{ text: (language === "fa" ? "🔗 باز کردن سایت " : "🔗 Open website ") + (index + 1), url: item.url }]);
+  return {
+    text: "<b>" + (language === "fa" ? "🌍 فهرست سایت‌های پیشنهادی" : "🌍 Recommended websites") + "</b>\\n\\n" + (lines.join("\\n\\n") || (language === "fa" ? "لینک معتبر پیدا نشد." : "No valid links were found.")),
+    reply_markup: keyboard.length ? { inline_keyboard: keyboard } : undefined
+  };
 }
 
 async function summarizeWolfExecution(env, execution, originalRequest) {
@@ -1343,8 +1357,12 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
           const searchResults = !linkDirectory && execution.tool === "research.search" ? formatWolfSearchResults(execution, userText, language) : null;
           if (searchResults || linkDirectory) {
             const formatted = searchResults || linkDirectory;
-            await saveConversation(env, chatId, history, userText, formatted.replace(/<[^>]+>/g, ""));
-            await reply(env, chatId, formatted, { parse_mode: "HTML", disable_web_page_preview: true });
+            await saveConversation(env, chatId, history, userText, formatted.text.replace(/<[^>]+>/g, ""));
+            await reply(env, chatId, formatted.text, {
+              parse_mode: "HTML",
+              disable_web_page_preview: true,
+              ...(formatted.reply_markup ? { reply_markup: formatted.reply_markup } : {})
+            });
           } else {
             const summary = await summarizeWolfExecution(env, execution, userText);
             const sourceItems = execution.tool === "research.search" ? (execution.results || []) : execution.tool === "agent.sequence" ? (execution.results || []).flatMap(x => x.result?.results || []) : [];
