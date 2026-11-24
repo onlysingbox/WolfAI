@@ -690,17 +690,16 @@ function isCasualChatMessage(value) {
 
 function isResearchFollowUp(history, currentText) {
   const text = String(currentText || "").trim();
-  // A follow-up that asks to explain, compare, or verify previously returned
-  // websites is research, even when it does not repeat "search the web".
+  // Short references to a previously returned website list still require research tools.
   const previous = Array.isArray(history) ? [...history].reverse() : [];
   const previousAssistant = previous.find(item => item?.role === "assistant")?.content || "";
   const previousUser = previous.find(item => item?.role === "user")?.content || "";
   const priorWebsiteList = /(?:سایت|وب.?سایت|website|websites|منبع|لینک)/i.test(previousUser) &&
-    /(?:^|\\n)\\s*\\d+[.)、-]\\s*[^\\n]{2,120}(?:\\.ir|\\.com|\\.org|\\.net|\\.co|https?:\\/\\/)/im.test(previousAssistant);
-  const refersToPriorSites = /(?:این\\s+(?:پنج|چند|سایت|وب.?سایت|منبع|لینک)|همین\\s+(?:سایت|وب.?سایت|منبع)|سایت.?های\\s+بالا|موارد\\s+بالا|the(?:se)?\\s+(?:five|listed|above)\\s+(?:sites|websites|sources)|those\\s+(?:sites|websites|sources))/i.test(text);
+    /(?:^|\n)\s*\d+[.)、-]\s*[^\n]{2,120}(?:\.ir|\.com|\.org|\.net|\.co|https?:\/\/)/im.test(previousAssistant);
+  const refersToPriorSites = /(?:این\s+(?:پنج|چند|سایت|وب.?سایت|منبع|لینک)|همین\s+(?:سایت|وب.?سایت|منبع)|سایت.?های\s+بالا|موارد\s+بالا|the(?:se)?\s+(?:five|listed|above)\s+(?:sites|websites|sources)|those\s+(?:sites|websites|sources))/i.test(text);
   const asksForInspection = /(?:توضیح|بررسی|اعتبار|معتبر|فعال|مقایسه|نقد|اطلاعات|جزئیات|explain|check|verify|review|compare|details|legit|reliable)/i.test(text);
   if (priorWebsiteList && refersToPriorSites && asksForInspection) return true;
-  return /(?:بررسی\\s+کن|تحقیق\\s+کن|از\\s+منابع\\s+(?:رسمی|معتبر)|منابع\\s+رسمی|شرایط\\s+پذیرش|مقررات\\s+فعلی|verify\\s+(?:from|using)|research\\s+(?:this|the)|check\\s+(?:official|current)|from\\s+official\\s+sources)/i.test(text);
+  return /(?:بررسی\s+کن|تحقیق\s+کن|از\s+منابع\s+(?:رسمی|معتبر)|منابع\s+رسمی|شرایط\s+پذیرش|مقررات\s+فعلی|verify\s+(?:from|using)|research\s+(?:this|the)|check\s+(?:official|current)|from\s+official\s+sources)/i.test(text);
 }
 
 function deterministicCasualReply(value, language) {
