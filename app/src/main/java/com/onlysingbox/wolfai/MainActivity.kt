@@ -25,6 +25,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -32,6 +33,7 @@ import java.net.URL
 import java.io.File
 import android.content.SharedPreferences
 import java.util.Locale
+import org.json.JSONArray
 
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
 private val Navy = Color(0xFF071426)
@@ -56,7 +58,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             send = { text -> apiChat(securePrefs.getString("device_token", "") ?: "", text) },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
-            storageRoot = File(filesDir, "wolf_storage")
+            storageRoot = File(filesDir, "wolf_storage"),
+            historyFile = File(filesDir, "wolf_storage/history/chat.json")
         ) }
     }
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
@@ -81,7 +84,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String)->String, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String)->String, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -97,8 +100,36 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     val usedGb = usedBytes.toDouble() / (1024.0 * 1024 * 1024)
     val phoneFreeGb = storageRoot.usableSpace.toDouble() / (1024.0 * 1024 * 1024)
     val usagePercent = if (quotaGb > 0) (usedGb / quotaGb).toFloat().coerceIn(0f, 1f) else 0f
-    val chat = remember { mutableStateListOf<Pair<String,String>>() }
+    val chat = remember {
+        mutableStateListOf<Pair<String,String>>().apply {
+            runCatching {
+                if (historyFile.exists()) {
+                    val saved = JSONArray(historyFile.readText())
+                    for (i in 0 until saved.length()) {
+                        val item = saved.getJSONObject(i)
+                        add(item.optString("role") to item.optString("text"))
+                    }
+                }
+            }
+        }
+    }
+    fun persistChat() {
+        runCatching {
+            historyFile.parentFile?.mkdirs()
+            val saved = JSONArray()
+            chat.forEach { (role, text) ->
+                saved.put(JSONObject().put("role", role).put("text", text))
+            }
+            val temp = File(historyFile.parentFile, "chat.json.tmp")
+            temp.writeText(saved.toString())
+            if (!temp.renameTo(historyFile)) {
+                historyFile.writeText(saved.toString())
+                temp.delete()
+            }
+        }
+    }
     val scope = rememberCoroutineScope()
+    var activeRequest by remember { mutableStateOf<Job?>(null) }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!spoken.isNullOrBlank()) message = spoken
@@ -110,7 +141,16 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 Text("AGENT  •  مکالمه هوشمند فارسی و انگلیسی", color = Gold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(if (masterEnabled) "WOLF فعال است" else "تمام فعالیت‌های خودکار متوقف است", color = if (masterEnabled) Cyan else Gold)
-                    Button(onClick = { masterEnabled = !masterEnabled; storagePrefs.edit().putBoolean("master_enabled", masterEnabled).apply(); if (!masterEnabled) { busy = false; status = "WOLF خاموش شد؛ گوشی در حالت عادی باقی می‌ماند" } else status = "WOLF با فرمان تو فعال شد" }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
+                    Button(onClick = {
+                        masterEnabled = !masterEnabled
+                        storagePrefs.edit().putBoolean("master_enabled", masterEnabled).apply()
+                        if (!masterEnabled) {
+                            activeRequest?.cancel()
+                            activeRequest = null
+                            busy = false
+                            status = "WOLF خاموش شد؛ درخواست جاری متوقف شد و گوشی در حالت عادی باقی می‌ماند"
+                        } else status = "WOLF با فرمان تو فعال شد"
+                    }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
                 }
                 OutlinedButton(onClick = { showStorage = !showStorage }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
                 if (showStorage) {
@@ -197,11 +237,30 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             speechLauncher.launch(intent)
                         }) { Icon(Icons.Default.Mic, contentDescription="فرمان صوتی") }
                         Button(enabled=masterEnabled && message.isNotBlank()&&!busy, onClick={
-                            val q=message.trim(); message=""; chat.add("تو" to q); busy=true; status="WOLF در حال فکر کردن..."
-                            scope.launch {
-                                try { val a=send(q); chat.add("WOLF" to a); speak(a); status="آماده گفتگو" }
-                                catch(e:Exception){ status=e.message ?: "ارتباط برقرار نشد" }
-                                busy=false
+                            val q=message.trim()
+                            message=""
+                            chat.add("تو" to q)
+                            persistChat()
+                            busy=true
+                            status="WOLF در حال فکر کردن..."
+                            activeRequest = scope.launch {
+                                try {
+                                    val a=send(q)
+                                    if (masterEnabled) {
+                                        chat.add("WOLF" to a)
+                                        persistChat()
+                                        speak(a)
+                                        status="آماده گفتگو"
+                                    }
+                                } catch(e: kotlinx.coroutines.CancellationException) {
+                                    status="درخواست متوقف شد"
+                                    throw e
+                                } catch(e:Exception) {
+                                    status=e.message ?: "ارتباط برقرار نشد"
+                                } finally {
+                                    busy=false
+                                    activeRequest=null
+                                }
                             }
                         }, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Send, contentDescription=null); Spacer(Modifier.width(8.dp)); Text("ارسال") }
                     }
