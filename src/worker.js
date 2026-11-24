@@ -1448,7 +1448,9 @@ async function executeResearchSearch(query, env = {}) {
   const currentOrRecent = /(latest|current|today|this year|recent|2026|آخرین|جدیدترین|امروز|امسال|به.?روز|فعلی)/i.test(original);
   const queryVariants = [original];
   const musicQuery = /(?:موسیقی|موزیک|آهنگ|music|song|mp3)/i.test(original);
+  const movieStreamingQuery = /(?:فیلم|سریال|سینما|تماشای|پخش.?آنلاین|movie|film|cinema|streaming|tv.?series)/i.test(original);
   if (musicQuery) queryVariants.push("Iranian music download websites MP3");
+  if (movieStreamingQuery) queryVariants.push("سایت رسمی تماشای آنلاین فیلم و سریال پلتفرم پخش فیلم");
   if (/(official|رسمی|وب.?سایت|سایت اصلی)/i.test(original)) queryVariants.push(original + " official website");
   if (currentOrRecent && !/\b2026\b/.test(original)) queryVariants.push(original + " 2026");
 
@@ -1607,6 +1609,12 @@ async function executeResearchSearch(query, env = {}) {
     const tokens = tokenSet(body);
     let score = 0;
     for (const token of queryTokens) if (!stopWords.has(token) && tokens.has(token)) score += 3;
+    if (movieStreamingQuery) {
+      if (/(تماشای آنلاین|پخش آنلاین|فیلم و سریال|فیلم آنلاین|video on demand|streaming|watch online|فیلیمو|نماوا|فیلم.?نت)/i.test(body)) score += 9;
+      if (/(?:^|\\/)(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:\\/|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(new URL(item.url).pathname + " " + item.title)) score -= 18;
+      if (/(w2g|watch.?together|اشتراک.?تماشا)/i.test(host + " " + body)) score -= 16;
+      if (/(فیلم|سریال|movie|film|cinema|stream)/i.test(body)) score += 4;
+    }
     if (musicQuery) {
       if (/(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body)) score += 5;
       if (/(iran|iranian|ایران|ایرانی|persian|فارسی)/i.test(body)) score += 6;
@@ -1646,7 +1654,15 @@ async function executeResearchSearch(query, env = {}) {
   }
 
   const ranked = [...uniqueByUrl.values()].sort((a, b) => b.relevance - a.relevance);
-  let relevant = musicQuery ? ranked.filter(item => {
+  let relevant = movieStreamingQuery ? ranked.filter(item => {
+    const host = hostOf(item.url);
+    const body = (item.title + " " + item.snippet + " " + host + " " + new URL(item.url).pathname).toLowerCase();
+    const articleLike = /(?:^|\\/)(?:mag|blog|news|article|articles|review|reviews|best|guide|guides)(?:\\/|$)|(?:مگ|مجله|مقاله|خبر|معرفی.?سایت|بهترین.?سایت)/i.test(body);
+    const platformLike = /(تماشای آنلاین|پخش آنلاین|فیلم و سریال|فیلم آنلاین|video on demand|streaming|watch online|فیلیمو|نماوا|فیلم.?نت)/i.test(body);
+    const movieLike = /(فیلم|سریال|movie|film|cinema|stream)/i.test(body);
+    const sideService = /(w2g|watch.?together|اشتراک.?تماشا)/i.test(host + " " + body);
+    return !articleLike && !sideService && movieLike && (platformLike || /^(?:www\\.)?(?:filimo|namava|filmnet)\\./i.test(host));
+  }) : musicQuery ? ranked.filter(item => {
     const host = hostOf(item.url);
     const body = (item.title + " " + item.snippet + " " + host).toLowerCase();
     const hasMusic = /(music|song|mp3|موسیقی|موزیک|آهنگ)/i.test(body);
