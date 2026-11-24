@@ -1567,11 +1567,16 @@ async function executeResearchSearch(query, env = {}) {
     }))
   ];
 
-  const settled = await Promise.allSettled(jobs);
+  // Return as soon as the first search provider succeeds. Waiting for every
+  // search engine made simple link requests unnecessarily slow.
   const all = [];
-  for (const item of settled) {
-    if (item.status === "fulfilled") all.push(...item.value);
-    else failures.push(String(item.reason?.message || item.reason).slice(0, 120));
+  try {
+    const firstSuccessful = await Promise.any(jobs);
+    all.push(...firstSuccessful);
+  } catch (error) {
+    for (const reason of (error?.errors || [])) {
+      failures.push(String(reason?.message || reason).slice(0, 120));
+    }
   }
 
   const stopWords = new Set(["the","and","for","with","from","what","where","when","how","find","best","latest","current","about","into","that","this","در","از","به","برای","با","را","چیست","کدام","چطور","چه","های","یک","و"]);
@@ -2165,8 +2170,11 @@ export default {
       await recordStartBoundary(env, update);
       const isCommand = incomingText.startsWith("/");
       const isGreeting = isSimpleGreeting(incomingText);
+      const isDirectSearch = isDirectSearchRequest(incomingText);
       const isCasualChat = isCasualChatMessage(incomingText);
-      if (isCommand || isGreeting || isCasualChat || update.callback_query) {
+      // Explicit website searches are short, bounded operations: handle them
+      // in the webhook request instead of waiting behind the background queue.
+      if (isCommand || isGreeting || isDirectSearch || isCasualChat || update.callback_query) {
         try {
           const result = await handleTelegramUpdate(request, env, update);
           return result instanceof Response ? result : json({ ok: true });
