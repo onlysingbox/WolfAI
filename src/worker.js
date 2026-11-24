@@ -535,6 +535,18 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
+  // Resolve short replies to the immediately preceding clarification instead of
+  // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
+  let contextualUserText = userText;
+  const shortAllCriteriaReply = /^(?:همه\s*چیز|همه\s*موارد|تمام\s*معیارها|همه\s*معیارها|از\s*همه\s*نظرها|all\s+(?:criteria|of\s+them|aspects)|everything)$/i.test(String(userText || "").trim());
+  const previousAssistantMessage = [...history].reverse().find(item => item.role === "assistant" && String(item.content || "").trim());
+  const previousUserMessage = [...history].reverse().find(item => item.role === "user" && String(item.content || "").trim() && !String(item.content).trim().startsWith("/"));
+  const previousAssistantAskedCountryCriterion = /کشورهای برتر|top countries/i.test(String(previousAssistantMessage?.content || "")) &&
+    /کدام معیار|کدام\s*معیار|which\s+(?:criterion|criteria)/i.test(String(previousAssistantMessage?.content || ""));
+  const previousUserAskedTopCountries = isAmbiguousTopCountriesRequest(previousUserMessage?.content || "");
+  if (shortAllCriteriaReply && previousAssistantAskedCountryCriterion && previousUserAskedTopCountries) {
+    contextualUserText = "در پاسخ به درخواست قبلی «" + String(previousUserMessage.content).slice(0,240) + "»، منظورم رتبه‌بندی ترکیبی ۱۰ کشور برتر با درنظرگرفتن همه ابعاد مهم است: اقتصاد و درآمد، کیفیت زندگی، امنیت، آموزش، سلامت، شاخص توسعه انسانی، زیرساخت، محیط زیست، ثبات و رفاه اجتماعی. یک روش ترکیبی شفاف با وزن‌دهی توضیح‌داده‌شده انتخاب کن؛ اگر رتبه‌بندی واحد و رسمی برای همه این ابعاد وجود ندارد، این محدودیت را روشن بگو. با منابع معتبر و تازه تحقیق کن، کشورها را تکرار نکن و برای هر رتبه دلیل و شاخص‌های مؤثر را بنویس. پاسخ کامل فارسی ارائه بده.";
+  }
   if (isAmbiguousTopCountriesRequest(userText)) {
     const clarification = language === "fa"
       ? "منظورت از «کشورهای برتر» کدام معیار است؟ اقتصاد و تولید ناخالص داخلی، کیفیت زندگی، امنیت، آموزش، قدرت نظامی یا شاخص توسعه انسانی؟ بدون معیار، رتبه‌بندی معتبر و واحدی وجود ندارد."
@@ -573,7 +585,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   const messages = [
     { role: "system", content: wolfSystemPrompt(language) + memoryContext },
     ...history,
-    { role: "user", content: userText.slice(0, 4000) }
+    { role: "user", content: contextualUserText.slice(0, 4000) }
   ];
 
   // Resolve an explicitly named, known project and file before asking the model.
@@ -600,7 +612,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
 
   try {
     const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-    const modelKey = chooseWolfModel(preferredMode, userText);
+    const modelKey = chooseWolfModel(preferredMode, contextualUserText);
     const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
       messages,
       tools: wolfFunctionTools(),
