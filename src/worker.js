@@ -190,7 +190,7 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
   // Detect sender independently of word order:
   // "پیام‌های انگلیسی من دادم" and "پیام انگلیسی خودت" both work.
   const explicitBot = /(?:خودت|تو|ربات|دستیار|assistant|bot|your\s+messages)/i.test(text);
-  const explicitUser = /(?:\bمن\b|خودم|من\s+دادم|من\s+نوشتم|نوشتم|نوشته‌ام|my\s+messages|messages\s+i)/i.test(text);
+  const explicitUser = /(?:(?:^|[\s‌])من(?:$|[\s‌])|خودم|من\s+دادم|من\s+نوشتم|نوشتم|نوشته‌ام|my\s+messages|messages\s+i)/i.test(text);
   const wantsBot = explicitBot && !explicitUser;
   const wantsUser = explicitUser && !explicitBot;
   const senderConflict = explicitBot && explicitUser;
