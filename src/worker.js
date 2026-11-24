@@ -213,10 +213,21 @@ function isSimpleGreeting(value) {
 }
 
 function isCasualChatMessage(value) {
-  const text = String(value || "").trim();
+  const text = String(value || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
   if (!text || text.length > 180) return false;
   if (/(?:جستجو|سرچ|پیدا\s+کن|بگرد|آخرین\s+اخبار|قیمت\s+روز|وضعیت\s+(?:سرور|سیستم|گیت.?هاب)|بررسی\s+کن|اجرا\s+کن|بساز|ایجاد\s+کن|ویرایش\s+کن|حذف\s+کن|ارسال\s+کن|search|look\s+up|find\s+me|latest\s+news|current\s+price|check\s+(?:the\s+)?status|run\s+this|create\s+file|edit\s+file|delete\s+file)/i.test(text)) return false;
   return /^(?:(?:خوبی|خوبی؟|چطوری|چه\s+طوری|حالت\s+چطوره|چه\s+خبر|چه\s+کارا\s+می.?کنی|داری\s+چیکار\s+می.?کنی|ممنون|مرسی|سپاس|دمت\s+گرم|خسته\s+نباشی|حوصله.?م\s+سر\s+رفته|بیا\s+گپ\s+بزنیم|یه\s+کم\s+حرف\s+بزنیم|دلم\s+گرفته|امروز\s+حالم\s+خوب\s+نیست|امروز\s+خوب\s+نیستم|i.?m\s+fine|how\s+are\s+you|how.?s\s+it\s+going|what.?s\s+up|how\s+do\s+you\s+feel|thanks|thank\s+you|let.?s\s+chat|i.?m\s+bored)(?:[\s!.،,؟?].*)?)$/i.test(text);
+}
+
+function deterministicCasualReply(value, language) {
+  const text = String(value || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  if (language === "fa" && /^(?:خوبی|چطوری|چه\s+طوری|حالت\s+چطوره)(?:[\s!.،,؟?].*)?$/i.test(text)) {
+    return "خوبم، ممنون که پرسیدی 😊 تو چطوری؟ امروز چه خبر؟";
+  }
+  if (language === "en" && /^(?:how\s+are\s+you|how.?s\s+it\s+going|how\s+do\s+you\s+feel)(?:[\s!.?,].*)?$/i.test(text)) {
+    return "I'm doing well, thanks for asking! How are you?";
+  }
+  return null;
 }
 
 async function responseLanguage(env, inputText = "") {
@@ -590,6 +601,16 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   // not wait for the AI model or enter the background queue.
   if (isSimpleGreeting(userText)) {
     await reply(env, chatId, language === "fa" ? "سلام! چطور می‌توانم کمکت کنم؟" : "Hi! How can I help?");
+    return;
+  }
+
+  // Common small-talk questions get one short, deterministic answer.
+  // This avoids model boilerplate, language mixing, and repeated self-introductions.
+  const casualReply = deterministicCasualReply(userText, language);
+  if (casualReply) {
+    const history = await loadConversation(env, chatId);
+    await saveConversation(env, chatId, history, userText, casualReply);
+    await reply(env, chatId, casualReply);
     return;
   }
 
