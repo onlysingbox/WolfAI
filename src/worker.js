@@ -498,16 +498,21 @@ function formatWolfSearchResults(execution, request, language) {
     try { url = new URL(String(item.url || "")); } catch { continue; }
     if (url.protocol !== "https:" || seen.has(url.toString())) continue;
     seen.add(url.toString());
-    selected.push({ title: String(item.title || url.hostname).replace(/[\\r\\n<>]/g, " ").trim().slice(0, 180), url: url.toString(), host: url.hostname.replace(/^www\\./, ""), snippet: String(item.snippet || "").replace(/[\\r\\n]+/g, " ").trim().slice(0, 240) });
+    selected.push({
+      title: String(item.title || url.hostname).replace(/[\r\n<>]/g, " ").trim().slice(0, 180),
+      url: url.toString(),
+      host: url.hostname.replace(/^www\./, ""),
+      snippet: String(item.snippet || "").replace(/[\r\n]+/g, " ").trim().slice(0, 240)
+    });
     if (selected.length >= 8) break;
   }
   const heading = language === "fa" ? "🔎 نتایج جست‌وجو" : "🔎 Search results";
   const lines = selected.map((item, index) =>
     (index + 1) + '. <a href="' + escapeHtml(item.url) + '">' + escapeHtml(item.title || item.host) + '</a>' +
-    "\\n<code>" + escapeHtml(item.host) + "</code>" +
-    (item.snippet ? "\\n" + escapeHtml(item.snippet) : "")
+    "\n<code>" + escapeHtml(item.host) + "</code>" +
+    (item.snippet ? "\n" + escapeHtml(item.snippet) : "")
   );
-  return "<b>" + heading + "</b>" + (lines.length ? "\\n\\n" + lines.join("\\n\\n") : (language === "fa" ? "\\nنتیجه معتبری پیدا نشد." : "\\nNo usable results found."));
+  return "<b>" + heading + "</b>" + (lines.length ? "\n\n" + lines.join("\n\n") : (language === "fa" ? "\nنتیجه معتبری پیدا نشد." : "\nNo usable results found."));
 }
 
 function formatWolfLinkDirectory(execution, request, language) {
