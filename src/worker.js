@@ -1529,22 +1529,7 @@ async function executeResearchSearch(query, env = {}) {
       return (data.results || []).map(x => ({ title: x.title, url: normalizeUrl(x.url), snippet: String(x.content || "").slice(0, 420) })).filter(x => x.title && x.url);
     }
   });
-  // Tavily officially supports anonymous Search requests. Keep this independent
-  // keyless route as a free fallback even when an optional account key is set.
-  apiProviders.push({
-    name: "Tavily free keyless",
-    run: async (q, signal) => {
-      const response = await fetch("https://api.tavily.com/search", {
-        method: "POST",
-        headers: { "content-type": "application/json", "X-Tavily-Access-Mode": "keyless", "X-Client-Source": "wolf-ai" },
-        signal,
-        body: JSON.stringify({ query: q, search_depth: "basic", max_results: 10, include_answer: false })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error("Tavily keyless HTTP " + response.status + ": " + String(data?.error?.message || data?.detail || response.statusText).slice(0, 140));
-      return (data.results || []).map(x => ({ title: x.title, url: normalizeUrl(x.url), snippet: String(x.content || "").slice(0, 420) })).filter(x => x.title && x.url);
-    }
-  });
+  // Do not use anonymous Tavily: its daily shared quota can return HTTP 429.
   if (env.SERPER_API_KEY) apiProviders.push({
     name: "Serper",
     run: async (q, signal) => {
@@ -1564,15 +1549,25 @@ async function executeResearchSearch(query, env = {}) {
   // engine must not prevent the other engines from returning usable results.
   const all = [];
   const searchQuery = original;
+  // Keep the number of outbound requests bounded. Google/Yahoo HTML pages
+  // frequently rate-limit or redirect-loop from Workers; those redirects can
+  // exhaust the subrequest budget and prevent Telegram error replies.
+  const safeProviders = providers.filter(provider =>
+    provider.name === "DuckDuckGo" || provider.name === "Bing RSS"
+  );
   const baseSearchPlan = [
-    ...apiProviders.map(provider => ({
+    ...apiProviders.slice(0, 1).map(provider => ({
       name: provider.name,
       run: (q, signal) => provider.run(q, signal)
     })),
-    ...providers.map(provider => ({
+    ...safeProviders.map(provider => ({
       name: provider.name,
       run: async (q, signal) => {
-        const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal });
+        const response = await fetch(provider.url(q).toString(), {
+          headers,
+          redirect: "manual",
+          signal
+        });
         if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
         const results = await provider.parse(response);
         if (!results.length) throw new Error(provider.name + " returned no parseable results");
@@ -1580,17 +1575,15 @@ async function executeResearchSearch(query, env = {}) {
       }
     }))
   ];
-  // Search both the user's wording and a focused English variant for Persian
-  // music queries. Previously queryVariants was built but never actually used.
-  const searchPlan = queryVariants.flatMap((variant, variantIndex) =>
-    baseSearchPlan.map(provider => ({
-      name: provider.name + (variantIndex ? " (expanded query)" : ""),
-      run: (q, signal) => provider.run(variant, signal)
-    }))
-  );
+  // One query per invocation: preserve enough subrequest budget to always send
+  // a useful success or failure message back to Telegram.
+  const searchPlan = baseSearchPlan.map(provider => ({
+    name: provider.name,
+    run: (q, signal) => provider.run(original, signal)
+  }));
   const settled = await Promise.allSettled(searchPlan.map(async provider => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 9000);
+    const timeout = setTimeout(() => controller.abort(), 5000);
     try {
       const results = await provider.run(searchQuery, controller.signal);
       return { name: provider.name, results };
