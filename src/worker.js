@@ -357,21 +357,22 @@ function requestedReplacementPair(value) {
   return null;
 }
 
-async function findPreviousUserText(env, chatId, currentMessageId) {
+async function findPreviousBotText(env, chatId, currentMessageId, requiredText = "") {
   if (!env.MESSAGE_ARCHIVE) return null;
   const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
   const candidates = (listed.keys || [])
-    .filter(item => item.metadata?.role === "user" &&
+    .filter(item => item.metadata?.role === "assistant" &&
       Number(item.metadata?.messageId) < Number(currentMessageId) &&
       item.metadata?.kind === "text")
     .sort((a, b) => Number(b.metadata?.messageId || 0) - Number(a.metadata?.messageId || 0));
   for (const item of candidates) {
     const archived = await readArchivedTelegramMessage(env, chatId, item.metadata.messageId);
-    if (String(archived?.text || "").trim()) {
+    const archivedText = String(archived?.text || "").trim();
+    if (archivedText && (!requiredText || archivedText.includes(requiredText))) {
       return {
         message_id: Number(item.metadata.messageId),
-        text: String(archived.text),
-        from: { is_bot: false },
+        text: archivedText,
+        from: { is_bot: true },
         archive_key: item.name
       };
     }
@@ -406,10 +407,14 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
   let sourceText = "";
   const quoted = text.match(/«([\s\S]+?)»|“([\s\S]+?)”|"([\s\S]+?)"|'([\s\S]+?)'/);
 
-  // If the user refers to "this" message without using Telegram's Reply,
-  // resolve only the immediately preceding archived user text message.
+  // Without Telegram Reply, "edit this" refers to the latest bot-authored
+  // message. For phrase replacement, search backward for the bot message
+  // that actually contains the phrase, rather than accidentally selecting
+  // the user's edit instruction.
   if (!sourceMessage && (replacementPair || explicitReplacement || /اینو|این\s+پیام|پیام\s+قبلی|متن\s+قبلی/i.test(text))) {
-    sourceMessage = await findPreviousUserText(env, chatId, message?.message_id);
+    sourceMessage = await findPreviousBotText(
+      env, chatId, message?.message_id, replacementPair?.from || ""
+    );
   }
 
   if (sourceMessage) {
