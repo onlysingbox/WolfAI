@@ -88,6 +88,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
     var showStorage by remember { mutableStateOf(false) }
+    var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
     var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
     val storageBuckets = remember(storageRefresh) { listOf("history" to "تاریخچه گفتگوها", "memory" to "حافظه بلندمدت", "notes" to "یادداشت‌ها", "files" to "فایل‌ها", "audio" to "صدا و ضبط‌ها").map { (key, label) -> key to (label to File(storageRoot, key).apply { mkdirs() }) } }
@@ -107,6 +108,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("🐺 WOLF AI", style = MaterialTheme.typography.headlineLarge, color = Color.White)
                 Text("AGENT  •  مکالمه هوشمند فارسی و انگلیسی", color = Gold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (masterEnabled) "WOLF فعال است" else "تمام فعالیت‌های خودکار متوقف است", color = if (masterEnabled) Cyan else Gold)
+                    Button(onClick = { masterEnabled = !masterEnabled; storagePrefs.edit().putBoolean("master_enabled", masterEnabled).apply(); if (!masterEnabled) { busy = false; status = "WOLF خاموش شد؛ گوشی در حالت عادی باقی می‌ماند" } else status = "WOLF با فرمان تو فعال شد" }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
+                }
                 OutlinedButton(onClick = { showStorage = !showStorage }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
                 if (showStorage) {
                     Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
@@ -182,9 +187,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                         }
                     }
-                    OutlinedTextField(message, {message=it}, modifier=Modifier.fillMaxWidth(), label={Text("با WOLF صحبت کن...")})
+                    OutlinedTextField(message, {message=it}, modifier=Modifier.fillMaxWidth(), enabled=masterEnabled, label={Text("با WOLF صحبت کن...")})
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp), verticalAlignment=Alignment.CenterVertically) {
-                        FilledTonalIconButton(onClick={
+                        FilledTonalIconButton(enabled=masterEnabled, onClick={
                             val intent=Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
@@ -192,7 +197,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                             speechLauncher.launch(intent)
                         }) { Icon(Icons.Default.Mic, contentDescription="فرمان صوتی") }
-                        Button(enabled=message.isNotBlank()&&!busy, onClick={
+                        Button(enabled=masterEnabled && message.isNotBlank()&&!busy, onClick={
                             val q=message.trim(); message=""; chat.add("تو" to q); busy=true; status="WOLF در حال فکر کردن..."
                             scope.launch {
                                 try { val a=send(q); chat.add("WOLF" to a); speak(a); status="آماده گفتگو" }
