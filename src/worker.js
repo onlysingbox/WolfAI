@@ -246,39 +246,86 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
 }
 
 function isTextEditRequest(value) {
-  return /(?:ویرایش|مرتب\s*(?:کن|کنید)?|اصلاح\s*(?:کن|کنید)?|بازنویسی|روان\s*(?:تر|ترش)?\s*(?:کن|کنید)?|ادیت|rewrite|proofread|polish|edit\s+(?:this|the|my)|improve\s+(?:this|the|my)\s+text)/i.test(String(value || ""));
+  const text = String(value || "");
+  return /(?:ویرایش|مرتب\s*(?:کن|کنید)?|اصلاح\s*(?:کن|کنید)?|بازنویسی|روان\s*(?:تر|ترش)?\s*(?:کن|کنید)?|ادیت|rewrite|proofread|polish|edit\s+(?:this|the|my)|improve\s+(?:this|the|my)\s+text|(?:به\s*)?جاش\s*بنویس|بجاش\s*بنویس|جایگزین\s*کن)/i.test(text);
+}
+
+function requestedReplacementText(value) {
+  const text = String(value || "").trim();
+  const patterns = [
+    /(?:به\s*)?جاش\s*بنویس\s*[:：]?\s*([\s\S]+)$/i,
+    /جایگزین\s*کن\s*(?:با|به)?\s*[:：]?\s*([\s\S]+)$/i,
+    /ویرایش\s*کن\s*[,،]?\s*بنویس\s*[:：]?\s*([\s\S]+)$/i,
+    /اصلاح\s*کن\s*[,،]?\s*بنویس\s*[:：]?\s*([\s\S]+)$/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]?.trim()) return match[1].trim();
+  }
+  return "";
 }
 
 async function handleTextEditRequest(env, chatId, message, requestText) {
-  const text = String(requestText || "");
+  const text = String(requestText || "").trim();
+  const explicitReplacement = requestedReplacementText(text);
+  let sourceMessage = message?.reply_to_message || null;
+  let sourceText = "";
   const quoted = text.match(/«([\s\S]+?)»|“([\s\S]+?)”|"([\s\S]+?)"|'([\s\S]+?)'/);
-  let sourceText = quoted ? String(quoted.slice(1).find(Boolean) || "") : "";
-  if (!sourceText && message?.reply_to_message) {
-    sourceText = String(message.reply_to_message.text || message.reply_to_message.caption || "");
-    if (!sourceText && message.reply_to_message.message_id) {
-      const archived = await readArchivedTelegramMessage(env, chatId, message.reply_to_message.message_id);
+
+  if (sourceMessage) {
+    sourceText = String(sourceMessage.text || sourceMessage.caption || "");
+    if (!sourceText && sourceMessage.message_id) {
+      const archived = await readArchivedTelegramMessage(env, chatId, sourceMessage.message_id);
       sourceText = String(archived?.text || "");
     }
   }
-  if (!sourceText) {
+  if (!sourceText && quoted) {
+    sourceText = String(quoted.slice(1).find(Boolean) || "");
+  }
+  if (!sourceText && !explicitReplacement) {
     const colon = text.match(/[:：]\s*([\s\S]{5,4000})$/);
     if (colon) sourceText = colon[1].trim();
   }
+
+  // A direct "replace it with ..." instruction is deterministic. Never ask
+  // a language model to guess the replacement wording.
+  if (explicitReplacement) {
+    const finalText = explicitReplacement.slice(0, 4000);
+    if (sourceMessage?.from?.is_bot && sourceMessage.message_id) {
+      try {
+        await telegram(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: sourceMessage.message_id,
+          text: finalText
+        });
+        return;
+      } catch (error) {
+        console.warn("Bot message edit failed; returning replacement as a new message", String(error?.message || error));
+      }
+    }
+    const note = sourceMessage
+      ? "متن جایگزین آماده است. پیام اصلی متعلق به شماست و تلگرام اجازه نمی‌دهد ربات پیام ارسالی شما را مستقیماً ویرایش کند:"
+      : "متن جایگزین:";
+    await reply(env, chatId, note + "\n\n" + finalText);
+    return;
+  }
+
   if (!sourceText) {
-    await reply(env, chatId, "متنی برای ویرایش پیدا نکردم. متن را بعد از دونقطه بفرست یا روی پیام موردنظر Reply بزن و درخواست ویرایش کن.");
+    await reply(env, chatId, "متنی برای ویرایش پیدا نکردم. روی پیام موردنظر Reply بزن یا متن را بعد از دونقطه بنویس.");
     return;
   }
   if (!env.AI?.run) {
     await reply(env, chatId, "موتور هوش مصنوعی برای ویرایش در دسترس نیست.");
     return;
   }
+
   const language = detectMessageLanguage(sourceText);
   const instruction = language === "fa"
-    ? "متن زیر را از نظر املا، دستور زبان، روانی، نشانه‌گذاری و نظم اصلاح کن. منظور و اطلاعات اصلی را تغییر نده و چیزی از خودت اضافه نکن. اگر متن برای ارسال به شخصی است، لحن طبیعی و محترمانه را حفظ کن. فقط نسخه پیشنهادی نهایی را برگردان؛ توضیح اضافه نده."
-    : "Proofread and improve the text below for grammar, clarity, flow, punctuation, and structure. Preserve the original meaning and facts; do not invent or add content. Keep a natural, appropriate tone for its intended recipient. Return only the polished version, without commentary.";
+    ? "متن زیر را فقط از نظر املا، دستور زبان، روانی و نشانه‌گذاری اصلاح کن. معنی و اطلاعات را تغییر نده و هیچ جمله یا اطلاعات تازه‌ای اضافه نکن. فقط متن نهایی را برگردان."
+    : "Proofread the text for spelling, grammar, clarity and punctuation only. Preserve its meaning and facts. Do not add any new sentence or information. Return only the corrected text.";
   try {
     const preferred = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-    const modelKey = chooseWolfModel(preferred, "ویرایش و بازنویسی متن");
+    const modelKey = chooseWolfModel(preferred, "ویرایش متن");
     const payload = {
       messages: [
         { role: "system", content: instruction },
@@ -290,13 +337,27 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
     const { result } = await runWolfModel(env, payload, modelKey);
     const polished = String(result?.choices?.[0]?.message?.content || "").trim();
     if (!polished) throw new Error("مدل نسخه ویرایش‌شده‌ای برنگرداند.");
-    await reply(env, chatId, "پیشنهاد ویرایش‌شده:\n\n" + polished + "\n\nاین نسخه پیشنهادی است و هنوز برای کسی ارسال نشده.");
+
+    if (sourceMessage?.from?.is_bot && sourceMessage.message_id) {
+      try {
+        await telegram(env, "editMessageText", {
+          chat_id: chatId,
+          message_id: sourceMessage.message_id,
+          text: polished
+        });
+        return;
+      } catch (error) {
+        console.warn("Bot message edit failed; returning corrected text as a new message", String(error?.message || error));
+      }
+    }
+    await reply(env, chatId, sourceMessage
+      ? "نسخه اصلاح‌شده:\n\n" + polished + "\n\nپیام اصلی متعلق به شماست و ربات نمی‌تواند آن را مستقیماً ویرایش کند."
+      : "نسخه اصلاح‌شده:\n\n" + polished);
   } catch (error) {
     console.error("Text editing failed", error);
     await reply(env, chatId, "ویرایش متن انجام نشد: " + String(error?.message || error).slice(0, 300));
   }
 }
-
 async function reply(env, chatId, text, extra = {}) {
   const body = String(text ?? "");
   const limit = 3800;
