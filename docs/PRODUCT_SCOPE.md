@@ -58,17 +58,19 @@ WOLF AI is a private, owner-only, general-purpose personal agent. This document 
 
 ## Voice, messaging and calling
 
-These are required interaction capabilities, with messaging/calling delivery implemented after the general agent foundation:
+These are first-class interaction capabilities. Ordinary conversation and voice input/output are core product behavior, not merely a command interface. Messaging/calling delivery follows the general agent foundation:
 
-1. Accept voice notes and convert speech to text.
-2. Keep text, voice-input/text-output and two-way voice modes consistent with the owner's response-language setting.
-3. For a request such as “message Ali”, resolve the recipient from verified contacts and ask for clarification if ambiguous.
-4. Draft the exact message and show recipient, service and content.
-5. Send only after the owner explicitly approves that exact draft.
-6. Support connected messaging services such as Telegram and WhatsApp only to the extent their official APIs and account permissions allow.
-7. Support initiating a phone call through a companion Android app and OS-supported intents/permissions. A Cloudflare Worker or ordinary Telegram bot cannot directly control the handset or silently place arbitrary calls.
-8. Before calling, show the contact, phone number, call type and ask for approval. Report whether the call was initiated; never claim the other person answered unless confirmed.
-9. Any recording, transcription or analysis of another person's call audio requires appropriate consent and legal compliance.
+1. Support ordinary, open-ended spoken conversation that is not limited to commands.
+2. Support voice notes and speech-to-text, plus spoken answers using text-to-speech.
+3. Support a live, turn-taking voice conversation in the Android companion app, including interruption/stop-speaking controls where the platform permits.
+4. Keep text, voice-input/text-output and two-way voice modes consistent with the owner's response-language setting.
+5. For a request such as “message Ali”, resolve the recipient from verified contacts and ask for clarification if ambiguous.
+6. Draft the exact message and show recipient, service and content.
+7. Send only after the owner explicitly approves that exact draft.
+8. Support connected messaging services such as Telegram and WhatsApp only to the extent their official APIs and account permissions allow.
+9. Support initiating a phone call through a companion Android app and OS-supported intents/permissions. A Cloudflare Worker or ordinary Telegram bot cannot directly control the handset or silently place arbitrary calls.
+10. Before calling, show the contact, phone number, call type and ask for approval. Report whether the call was initiated; never claim the other person answered unless confirmed.
+11. Any recording, transcription or analysis of another person's call audio requires appropriate consent and legal compliance.
 
 ## Delivery order
 
@@ -77,8 +79,10 @@ These are required interaction capabilities, with messaging/calling delivery imp
 3. Personal operations and communication connectors: email, calendar, contacts and task management.
 4. Research/browser, everyday services, content and finance reporting.
 5. Automation scheduler, monitoring and proactive task execution.
-6. Voice input and output, then messaging draft/approval/send.
-7. Companion Android app for handset functions and supported calling.
+6. Browser automation and service connectors beyond the initial infrastructure integrations.
+7. Voice as a first-class interaction: ordinary conversation, speech input, spoken output and turn-taking voice sessions.
+8. Companion Android app for handset functions, voice sessions and supported calling.
+9. Messaging draft/approval/send and broader service integrations.
 
 Each integration is delivered as a working, tested vertical slice. A capability is marked **active** only after an end-to-end test against the real connected service. A database table, prompt, mock or planned connector does not count as an active capability.
 
