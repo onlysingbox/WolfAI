@@ -723,8 +723,17 @@ function directSearchQuery(value) {
     .replace(/فقط\s+(?:لینک|لینک.?های)\s+(?:مستقیم\s+)?(?:سایت.?ها|آن.?ها|اونا)\s+را\s+بده/gi, " ")
     .replace(/(?:پیدا\s+کن(?:ید)?|جست.?وجو\s+کن(?:ید)?|سرچ\s+کن(?:ید)?|بگرد|معرفی\s+کن(?:ید)?)/gi, " ")
     .replace(/\b\d+\s*(?:سایت|وب.?سایت|منبع)\s+(?:معتبر\s+)?/gi, " ")
+    .replace(/(?:یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|شانزده|هفده|هجده|نوزده|بیست)\s*(?:تا)?\s*(?:سایت|وب.?سایت|منبع)\s*/gi, " ")
     .replace(/\b(?:فقط|معتبر|مستقیم)\b/gi, " ")
     .replace(/\s+/g, " ").trim().slice(0, 240);
+}
+
+function requestedWolfSearchCount(value, fallback = 5) {
+  const text = String(value || "").replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+  const words = {یک:1,دو:2,سه:3,چهار:4,پنج:5,شش:6,هفت:7,هشت:8,نه:9,ده:10,یازده:11,دوازده:12,سیزده:13,چهارده:14,پانزده:15,شانزده:16,هفده:17,هجده:18,نوزده:19,بیست:20};
+  const match = text.match(/(?:^|\s)(\d{1,2}|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|شانزده|هفده|هجده|نوزده|بیست)(?=\s*(?:تا\s*)?(?:سایت|وب.?سایت|منبع|لینک))/i);
+  const valueFound = match ? (words[match[1]] || Number(match[1])) : fallback;
+  return Math.max(1, Math.min(20, Number(valueFound) || fallback));
 }
 
 function isResearchFollowUp(history, currentText) {
@@ -1154,7 +1163,7 @@ function decodeResearchHtml(value) {
     .replace(/\s+/g, " ").trim();
 }
 
-async function executeResearchSearch(query, env = {}) {
+async function executeResearchSearch(query, env = {}, requestedCount = 10) {
   const original = String(query || "").trim().slice(0, 300);
   if (!original) throw new Error("عبارت جست‌وجو خالی است.");
 
@@ -1456,15 +1465,21 @@ async function executeResearchSearch(query, env = {}) {
   // returning a dead-end error or irrelevant magazine articles.
   if (movieStreamingQuery) {
     const curatedMoviePlatforms = [
-      { title: "فیلیمو | تماشای آنلاین فیلم و سریال", url: "https://www.filimo.com/", snippet: "پلتفرم تماشای آنلاین فیلم و سریال" },
-      { title: "نماوا | تماشای آنلاین فیلم و سریال", url: "https://www.namava.ir/", snippet: "سرویس تماشای آنلاین فیلم و سریال" },
-      { title: "فیلم‌نت | تماشای آنلاین فیلم و سریال", url: "https://filmnet.ir/", snippet: "پلتفرم پخش آنلاین فیلم و سریال" },
+      { title: "فیلیمو | تماشای آنلاین فیلم و سریال", url: "https://www.filimo.com/", snippet: "پلتفرم ایرانی تماشای آنلاین فیلم و سریال" },
+      { title: "نماوا | تماشای آنلاین فیلم و سریال", url: "https://www.namava.ir/", snippet: "سرویس ایرانی تماشای آنلاین فیلم و سریال" },
+      { title: "فیلم‌نت | تماشای آنلاین فیلم و سریال", url: "https://filmnet.ir/", snippet: "پلتفرم ایرانی پخش آنلاین فیلم و سریال" },
       { title: "هاشور | تماشای آنلاین مستند و فیلم", url: "https://hashure.com/", snippet: "پلتفرم تماشای مستند و فیلم‌های داستانی" },
-      { title: "تلوبیون | پخش آنلاین و آرشیو برنامه‌ها", url: "https://telewebion.com/", snippet: "سرویس پخش زنده و آرشیو محتوای تصویری" }
+      { title: "تلوبیون | پخش آنلاین و آرشیو برنامه‌ها", url: "https://telewebion.com/", snippet: "سرویس پخش زنده و آرشیو محتوای تصویری" },
+      { title: "Netflix | تماشای آنلاین فیلم و سریال", url: "https://www.netflix.com/", snippet: "سرویس بین‌المللی اشتراکی؛ دسترسی ممکن است به منطقه جغرافیایی وابسته باشد" },
+      { title: "Prime Video | فیلم و سریال آنلاین", url: "https://www.primevideo.com/", snippet: "سرویس بین‌المللی پخش فیلم و سریال؛ محدودیت منطقه‌ای ممکن است اعمال شود" },
+      { title: "Disney+ | فیلم و سریال آنلاین", url: "https://www.disneyplus.com/", snippet: "سرویس اشتراکی بین‌المللی با محدودیت دسترسی منطقه‌ای" },
+      { title: "Apple TV | فیلم و سریال", url: "https://tv.apple.com/", snippet: "سرویس پخش و خرید محتوای تصویری اپل؛ دسترسی وابسته به کشور" },
+      { title: "Tubi | تماشای رایگان فیلم و سریال", url: "https://tubitv.com/", snippet: "سرویس رایگان دارای تبلیغات؛ در همه کشورها در دسترس نیست" }
     ];
+    const targetCount = Math.max(1, Math.min(20, Number(requestedCount) || 10));
     const existingHosts = new Set(results.map(item => hostOf(item.url)));
     for (const item of curatedMoviePlatforms) {
-      if (results.length >= 5) break;
+      if (results.length >= targetCount) break;
       const host = hostOf(item.url);
       if (existingHosts.has(host)) continue;
       results.push({ ...item, provider: "curated-official-platforms" });
@@ -1996,11 +2011,10 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   // Explicit website/source discovery must call search directly, not depend on model tool selection.
   if (isDirectSearchRequest(userText)) {
     try {
+      const requestedCount = requestedWolfSearchCount(userText, 5);
       const query = directSearchQuery(userText) || userText;
-      const search = await executeResearchSearch(query, env);
-      const countText = String(userText).match(/[0-9۰-۹]+/);
-      const requestedCount = countText ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)))) : 5;
-      const limit = Math.max(1, Math.min(10, requestedCount || 5));
+      const search = await executeResearchSearch(query, env, requestedCount);
+      const limit = requestedCount;
       const links = (search.results || []).filter(item => item?.url).slice(0, limit);
       if (!links.length) throw new Error("جست‌وجو نتیجه قابل‌استفاده‌ای برنگرداند.");
       const answer = links.map((item, index) => (index + 1) + ". " + item.url).join("\n");
@@ -2264,17 +2278,10 @@ async function processQueuedDirectSearch(env, update) {
   const text = String(message?.text || "").trim();
   if (!chatId || !text || String(message?.from?.id || "") !== String(env.ADMIN_TELEGRAM_ID) || message?.chat?.type !== "private") return;
   try {
+    const requestedCount = requestedWolfSearchCount(text, 5);
     const query = directSearchQuery(text) || text;
-    const search = await executeResearchSearch(query, env);
-    const countText = text.match(/[0-9۰-۹]+/);
-    const wordCounts = { "یک": 1, "دو": 2, "سه": 3, "چهار": 4, "پنج": 5, "شش": 6, "هفت": 7, "هشت": 8, "نه": 9, "ده": 10 };
-    const wordCount = Object.entries(wordCounts).find(([word]) =>
-      new RegExp("(?:^|\\s)" + word + "(?=\\s*(?:سایت|وب.?سایت|منبع))").test(text)
-    )?.[1];
-    const requestedCount = countText
-      ? Number(countText[0].replace(/[۰-۹]/g, d => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d))))
-      : (wordCount || 5);
-    const limit = Math.max(1, Math.min(10, requestedCount || 5));
+    const search = await executeResearchSearch(query, env, requestedCount);
+    const limit = requestedCount;
     const seen = new Set();
     const links = (search.results || []).filter(item => {
       if (!item?.url || seen.has(item.url)) return false;
