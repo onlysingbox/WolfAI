@@ -551,6 +551,35 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
   }
   const history = await loadConversation(env, chatId);
   const language = await responseLanguage(env, userText);
+
+  // Simple Google-style search mode: every normal message is searched directly.
+  // No model tool-planning, multi-step research, or editorial pass is involved.
+  const searchLabel = language === "fa" ? "نتایج جست‌وجو برای" : "Search results for";
+  try {
+    const searchData = await executeResearchSearch(userText, env);
+    const items = (searchData.results || []).slice(0, 8);
+    const resultLines = items.map((item, index) => {
+      const title = escapeHtml(String(item.title || "بدون عنوان").slice(0, 180));
+      const url = escapeHtml(String(item.url || ""));
+      const snippet = escapeHtml(String(item.snippet || "").slice(0, 360));
+      const host = escapeHtml((() => { try { return new URL(item.url).hostname.replace(/^www\\./, ""); } catch { return ""; } })());
+      return (index + 1) + '. <a href="' + url + '">' + title + '</a>' +
+        (host ? "\\n<code>" + host + "</code>" : "") +
+        (snippet ? "\\n" + snippet : "");
+    });
+    const answer = "<b>" + searchLabel + ":</b> " + escapeHtml(userText.slice(0, 250)) +
+      (resultLines.length ? "\\n\\n" + resultLines.join("\\n\\n") : (language === "fa" ? "\\nنتیجه‌ای پیدا نشد." : "\\nNo results found."));
+    await saveConversation(env, chatId, history, userText, answer.replace(/<[^>]+>/g, ""));
+    await reply(env, chatId, answer, { parse_mode: "HTML", disable_web_page_preview: true });
+  } catch (error) {
+    console.error("WOLF simple web search failed", error);
+    const failure = language === "fa"
+      ? "جست‌وجوی وب فعلاً نتیجه قابل‌استفاده‌ای نداد. چند لحظه دیگر دوباره تلاش کن."
+      : "Web search returned no usable results. Please try again shortly.";
+    await saveConversation(env, chatId, history, userText, failure);
+    await reply(env, chatId, failure);
+  }
+  return;
   // Resolve short replies to the immediately preceding clarification instead of
   // treating them as context-free messages (e.g. "همه چیز" after asking for a ranking criterion).
   let contextualUserText = userText;
