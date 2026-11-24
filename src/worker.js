@@ -327,7 +327,22 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
     "ناموفق: " + failed
   ];
   if (tooOld) summary.push("بیشتر از ۴۸ ساعت و خارج از محدودیت تلگرام: " + tooOld);
-  await reply(env, chatId, summary.join("\n"));
+  const report = await reply(env, chatId, summary.join("\n"));
+  const reportMessageId = Number(report?.result?.message_id || report?.message_id || 0);
+  if (reportMessageId && env.TELEGRAM_UPDATES?.send) {
+    try {
+      await env.TELEGRAM_UPDATES.send({
+        internal_task: "delete_message_after_delay",
+        chat_id: chatId,
+        message_id: reportMessageId
+      }, { delaySeconds: 120 });
+    } catch (error) {
+      console.warn("Could not schedule deletion report cleanup", {
+        messageId: reportMessageId,
+        error: String(error?.message || error)
+      });
+    }
+  }
 }
 function isTextEditRequest(value) {
   const text = String(value || "");
@@ -2359,6 +2374,14 @@ export default {
   async queue(batch, env, ctx) {
     for (const message of batch.messages) {
       try {
+        if (message.body?.internal_task === "delete_message_after_delay") {
+          await telegram(env, "deleteMessage", {
+            chat_id: message.body.chat_id,
+            message_id: message.body.message_id
+          });
+          message.ack();
+          continue;
+        }
         const internalRequest = new Request("https://wolfai.onlysingbox.workers.dev/telegram/webhook", {
           method: "POST",
           headers: { "X-Telegram-Bot-Api-Secret-Token": env.TELEGRAM_WEBHOOK_SECRET }
