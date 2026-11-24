@@ -440,19 +440,14 @@ async function handleTextEditRequest(env, chatId, message, requestText) {
     }
     let position = sourceText.indexOf(replacementPair.from);
     let matchedLength = replacementPair.from.length;
-    // Accept small natural-language fillers such as «هم» between words.
-    // Example: request «وقت شما بخیر» should match source «وقت شما هم بخیر».
+    // Accept natural fillers such as «هم» between words.
     if (position < 0) {
-      const words = replacementPair.from.trim().split(/\\s+/).filter(Boolean);
+      const words = replacementPair.from.trim().split(/\s+/).filter(Boolean);
       if (words.length > 1) {
-        const escaped = words.map(word => word.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\    const position = sourceText.indexOf(replacementPair.from);
-    if (position < 0) {
-      await reply(env, chatId, "عبارت «" + replacementPair.from + "» در پیام اصلی پیدا نشد؛ چیزی را تغییر ندادم.");
-      return;
-    }
-    explicitReplacement = sourceText.slice(0, position) + replacementPair.to +
-      sourceText.slice(position + replacementPair.from.length);"));
-        const flexible = new RegExp(escaped.join("[\\\\s،,:؛.!؟?]+(?:هم[\\\\s،,:؛.!؟?]+)?"), "i");
+        const escaped = words.map(word => [...word].map(ch =>
+          ".^$*+?()[]{}|\\\\".includes(ch) ? "\\\\" + ch : ch
+        ).join(""));
+        const flexible = new RegExp(escaped.join("[\\s،,:؛.!؟?]+(?:هم[\\s،,:؛.!؟?]+)?"), "i");
         const match = flexible.exec(sourceText);
         if (match) {
           position = match.index;
