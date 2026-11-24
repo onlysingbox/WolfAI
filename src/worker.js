@@ -1375,7 +1375,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       }).join("\n\n") : "";
       await saveConversation(env, chatId, history, userText, preface + " " + approvalText);
       const previewChunks = [];
-      for (let offset = 0; offset < preview.length; offset += 3200) previewChunks.push(preview.slice(offset, offset + 3200));
+      for (let offset = 0; offset < preview.length; offset += 8500) previewChunks.push(preview.slice(offset, offset + 8500));
       for (let index = 0; index < previewChunks.length; index++) {
         await reply(env, chatId, "جزئیات دقیق تغییرات (" + (index + 1) + "/" + previewChunks.length + "):\n" + previewChunks[index]);
       }
@@ -1460,7 +1460,7 @@ async function executeResearchSearch(query, env = {}) {
       const tag = match[0];
       const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1];
       if (!href) continue;
-      if (mode === "ddg" && !/result__a/.test(tag)) continue;
+      if (mode === "ddg" && !/result__a|result-link|result__title/.test(tag)) continue;
       if (mode === "google" && !/(?:href=["']https:\/\/|href=["']\/url\?)/i.test(tag)) continue;
       if (mode === "yahoo" && !/(?:href=["']https:\/\/|href=["']\/RU=)/i.test(tag)) continue;
       const url = decodeLink(href);
@@ -1547,7 +1547,7 @@ async function executeResearchSearch(query, env = {}) {
   const jobs = [
     ...providers.flatMap(provider => queryVariants.map(async q => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3200);
+      const timeout = setTimeout(() => controller.abort(), 8500);
       try {
         const response = await fetch(provider.url(q).toString(), { headers, redirect: "follow", signal: controller.signal });
         if (!response.ok) throw new Error(provider.name + " HTTP " + response.status);
@@ -1558,7 +1558,7 @@ async function executeResearchSearch(query, env = {}) {
     })),
     ...apiProviders.flatMap(provider => queryVariants.map(async q => {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3200);
+      const timeout = setTimeout(() => controller.abort(), 8500);
       try {
         const results = await provider.run(q, controller.signal);
         if (!results.length) throw new Error(provider.name + " returned no results");
@@ -2101,7 +2101,7 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
     if (!arg) return reply(env, chatId, "شناسه وظیفه را وارد کن.");
     const result = await decideTask(env, arg, userId, command === "/approve" ? "approve" : "reject");
     let detail = result.error || (command === "/approve" ? "طرح تأیید شد؛ این وظیفه فقط برنامه‌ریزی بود و ابزار اجرایی نداشت." : "وظیفه رد شد.");
-    if (result.execution) detail += "\n\nنتیجه اجرا:\n" + JSON.stringify(result.execution, null, 2).slice(0,3200);
+    if (result.execution) detail += "\n\nنتیجه اجرا:\n" + JSON.stringify(result.execution, null, 2).slice(0,8500);
     if (result.execution_error) detail += "\n\nخطای اجرا: " + result.execution_error;
     await reply(env, chatId, detail);
   } else if (text.startsWith("/")) {
