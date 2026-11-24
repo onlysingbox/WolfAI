@@ -1089,7 +1089,7 @@ function wolfMiniAppKeyboard(items, language) {
   const bytes = new TextEncoder().encode(JSON.stringify(safe));
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  const encoded = btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  const encoded = btoa(binary).split("+").join("-").split("/").join("_").replace(/=+$/, "");
   const appUrl = "https://wolfai.onlysingbox.workers.dev/open?d=" + encoded;
   return {
     inline_keyboard: [[{
