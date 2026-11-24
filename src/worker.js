@@ -209,7 +209,7 @@ function detectMessageLanguage(value) {
 }
 
 function isSimpleGreeting(value) {
-  return /^(?:سلام(?:\\s+علیک(?:م)?)?|درود|صبح\\s+بخیر|عصر\\s+بخیر|شب\\s+بخیر|hi|hello|hey|good\\s+(?:morning|afternoon|evening))[\\s!.،,؟?]*$/i.test(String(value || "").trim());
+  return /^(?:سلام(?:\s+علیک(?:م)?)?|درود|صبح\s+بخیر|عصر\s+بخیر|شب\s+بخیر|hi|hello|hey|good\s+(?:morning|afternoon|evening))[\s!.،,؟?]*$/i.test(String(value || "").trim());
 }
 
 async function responseLanguage(env, inputText = "") {
