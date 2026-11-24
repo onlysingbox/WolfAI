@@ -210,7 +210,19 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
   }
 
   const listed = await env.MESSAGE_ARCHIVE.list({ prefix: "chat:" + String(chatId) + ":", limit: 1000 });
-  let records = (listed.keys || []).map(item => ({ name: item.name, ...(item.metadata || {}) }));
+  const currentId = Number(message?.message_id || 0);
+  // Never select the deletion command currently being processed.
+  let records = (listed.keys || [])
+    .map(item => ({ name: item.name, ...(item.metadata || {}) }))
+    .filter(item => !currentId || Number(item.messageId) < currentId);
+
+  // Detect requests such as: "سه پیام دادم که نوشتم پاک را پاک کن".
+  const keywordMatch = text.match(/(?:نوشتم|نوشته‌ام|کلمه(?:‌ی)?|عبارت(?:ی)?)\s*[«"“']?(.+?)[»"”']?\s*(?:را|رو)\s*(?:پاک|حذف)/i);
+  const keyword = keywordMatch ? keywordMatch[1].trim().replace(/[«»“”"']/g, "") : "";
+  const countMatch = text.match(/(?:^|\\s)(\\d+|[۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\\s+پیام/i);
+  const countWords = { "یک":1,"دو":2,"سه":3,"چهار":4,"پنج":5,"شش":6,"هفت":7,"هشت":8,"نه":9,"ده":10 };
+  const countRaw = countMatch?.[1] || "";
+  const count = countRaw ? (countWords[countRaw] || Number(countRaw.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))) || 1) : 1;
 
   // A Telegram reply is the strongest and safest target.
   if (repliedId) {
@@ -222,6 +234,17 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
       if (String(archived?.text || "").toLocaleLowerCase().includes(quotedText.toLocaleLowerCase())) matches.push(item);
     }
     records = matches;
+  } else if (keyword) {
+    // Search encrypted message bodies and select the requested number of the
+    // user's own matching messages, newest first.
+    records = records.filter(item => item.role === "user");
+    const matches = [];
+    for (const item of records) {
+      const archived = await readArchivedTelegramMessage(env, chatId, item.messageId);
+      if (String(archived?.text || "").toLocaleLowerCase().includes(keyword.toLocaleLowerCase())) matches.push(item);
+    }
+    matches.sort((a,b) => Number(b.messageId || 0) - Number(a.messageId || 0));
+    records = matches.slice(0, Math.min(count, 20));
   } else if (ordinal) {
     if (wantsBot) records = records.filter(item => item.role === "assistant");
     else if (wantsUser) records = records.filter(item => item.role === "user");
@@ -1844,10 +1867,11 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
     .bind(userId, message.from.username || null, message.from.first_name || null).run();
   const text = message.text.trim();
   const deleteIntent = isMessageDeleteRequest(text);
-  if (!deleteIntent) {
-    try { await archiveTelegramMessage(env, chatId, message, "user"); }
-    catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
-  }
+  // Archive every incoming text message, including deletion commands. The
+  // deletion handler excludes the current command by message_id, while these
+  // archived commands remain available for later "my messages" cleanup.
+  try { await archiveTelegramMessage(env, chatId, message, "user"); }
+  catch (error) { console.warn("Private message archive write failed", String(error?.message || error)); }
   if (deleteIntent) {
     await handleMessageDeleteRequest(env, chatId, message, text);
     return json({ ok: true });
