@@ -1481,7 +1481,7 @@ async function executeResearchSearch(query, env = {}) {
   const providers = [
     {
       name: "DuckDuckGo",
-      url: q => { const u = new URL("https://html.duckduckgo.com/html/"); u.searchParams.set("q", q); return u; },
+      url: q => { const u = new URL("https://lite.duckduckgo.com/lite/"); u.searchParams.set("q", q); return u; },
       parse: response => parseHtmlLinks(response, "ddg")
     },
     {
@@ -1583,7 +1583,7 @@ async function executeResearchSearch(query, env = {}) {
   }));
   const settled = await Promise.allSettled(searchPlan.map(async provider => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const results = await provider.run(searchQuery, controller.signal);
       return { name: provider.name, results };
