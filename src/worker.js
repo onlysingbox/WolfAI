@@ -1098,7 +1098,7 @@ function formatWolfSearchResults(execution, request, language) {
     const snippet = item.snippet ? "\n" + escapeHtml(item.snippet) : "";
     messages.push({
       text: "✨ <b>" + number + ". " + title + "</b>\n<code>🌐 " + host + "</code>" + snippet,
-      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
+      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url, style: "primary" }]] }
     });
   });
   if (!selected.length) messages.push({ text: language === "fa" ? "نتیجه معتبری پیدا نشد." : "No usable results found." });
@@ -1132,7 +1132,7 @@ function formatWolfLinkDirectory(execution, request, language) {
     const snippet = item.snippet ? "\n" + escapeHtml(item.snippet) : "";
     messages.push({
       text: "✨ <b>" + number + ". " + escapeHtml(item.title) + "</b>\n<code>🌐 " + escapeHtml(item.host) + "</code>" + snippet,
-      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url }]] }
+      reply_markup: { inline_keyboard: [[{ text: (language === "fa" ? number + ") سایت " : number + ") Website ") + item.host, url: item.url, style: "primary" }]] }
     });
   });
   if (selected.length < expected) messages.push({ text: language === "fa" ? "📌 نتیجه معتبر: " + selected.length + " از " + expected : "📌 Valid results: " + selected.length + " of " + expected });
@@ -2296,7 +2296,7 @@ async function processQueuedDirectSearch(env, update) {
       await reply(env, chatId, body, {
         parse_mode: "HTML",
         disable_web_page_preview: true,
-        reply_markup: { inline_keyboard: [[{ text: number + ") سایت " + (host || number), url: item.url }]] }
+        reply_markup: { inline_keyboard: [[{ text: number + ") سایت " + (host || number), url: item.url, style: "primary" }]] }
       });
     }
   } catch (error) {
