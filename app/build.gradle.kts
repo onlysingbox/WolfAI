@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
-    namespace = "com.onlys ingbox.wolfai".replace(" ", "")
+    namespace = "com.onlysingbox.wolfai"
     compileSdk = 35
     defaultConfig {
         applicationId = "com.onlys ingbox.wolfai".replace(" ", "")
