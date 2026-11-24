@@ -169,7 +169,7 @@ function isAmbiguousTopCountriesRequest(value) {
   const text = String(value || "").trim();
   const asksCountries = /(?:کشور(?:ها)?|countries?)/i.test(text);
   const asksTop = /(?:برتر|بهترین|تاپ|رتبه.?بندی|top|best|leading)/i.test(text);
-  const asksCount = /(?:ده|۱۰|10|پنج|۵|5|بیست|۲۰|20)\s*(?:کشور|countries?)/i.test(text);
+  const asksCount = /(?:^|\s)(?:\d{1,2}|[۰-۹]{1,2}|ده|یازده|دوازده|پانزده|بیست)\s*(?:تا\s*)?(?:کشور|countries?)(?=\s|$)/i.test(text);
   const hasCriterion = /(?:از نظر|از لحاظ|بر اساس|معیار|شاخص|اقتصاد|درآمد|تولید ناخالص|امنیت|آموزش|سلامت|کیفیت زندگی|گردشگری|جمعیت|قدرت نظامی|پاسپورت|hdi|gdp|econom|safest|education|health|quality of life|tourism|population|military|passport|by\s+(?:gdp|income|safety|education|health|quality))/i.test(text);
   return asksCountries && asksTop && asksCount && !hasCriterion;
 }
@@ -399,9 +399,10 @@ function inspectWolfAnswer(value, language, userRequest = "") {
   }
   const numeralMap = { "۰":"0","۱":"1","۲":"2","۳":"3","۴":"4","۵":"5","۶":"6","۷":"7","۸":"8","۹":"9" };
   const request = String(userRequest || "");
-  const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2})\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|universit(?:y|ies)|items|options|sources)(?=\s|$)/i);
+  const countMatch = request.match(/(?:^|\s)(\d{1,2}|[۰-۹]{1,2}|ده|یازده|دوازده|پانزده|بیست)\s+(?:دانشگاه|مورد|گزینه|منبع|کتاب|کشور|universit(?:y|ies)|items|options|sources|countries?)(?=\s|$)/i);
+  const wordCounts = { ده:10,یازده:11,دوازده:12,پانزده:15,بیست:20 };
   if (countMatch) {
-    const expected = Number(countMatch[1].replace(/[۰-۹]/g, d => numeralMap[d]));
+    const expected = wordCounts[countMatch[1]] || Number(countMatch[1].replace(/[۰-۹]/g, d => numeralMap[d]));
     const numbered = (text.match(/^\s*(?:\|\s*)?(?:\*\*)?[0-9۰-۹]{1,2}[.)،-]\s+/gm) || []).length;
     const tableRows = separatorIndex > 0 ? lines.slice(separatorIndex + 1).filter(line => line.trim().startsWith("|") && !/^\s*\|?\s*:?-{3,}/.test(line)).length : 0;
     if (expected > 1 && Math.max(numbered, tableRows) < expected) issues.push("requested_item_count_not_met");
@@ -420,15 +421,9 @@ function inspectWolfAnswer(value, language, userRequest = "") {
 async function polishWolfAnswer(env, draft, language, userRequest = "") {
   const original = cleanupWolfMarkdown(draft);
   if (!original || !env.AI?.run) return original;
-  const researchHeavy = /(?:تحقیق|بررسی|دانشگاه|پذیرش|کشور|رتبه|منابع|منبع|آمار|گزارش|research|university|universit|admission|country|countries|ranking|sources|statistics|report)/i.test(String(userRequest || ""));
-  if (researchHeavy) {
-    const issues = inspectWolfAnswer(original, language, userRequest);
-    if (!issues.length) return original;
-    console.warn("WOLF AI research draft failed deterministic validation", {issues,language,chars:original.length});
-    return language === "fa"
-      ? "پیش‌نویس تحقیق از کنترل‌های ساختاری عبور نکرد. پاسخ ناقص یا نامعتبر ارسال نشد. علت‌های تشخیص‌داده‌شده: " + issues.join("، ")
-      : "The research draft failed deterministic structural checks and was withheld. Detected issues: " + issues.join(", ");
-  }
+  // Research answers receive the same editorial repair pass as other answers.
+  // The editor may only repair presentation from the supplied draft; deterministic
+  // validation still runs afterward and can reject genuinely incomplete output.
   try {
     const instruction = language === "fa"
       ? "تو ویراستار و کنترل‌کننده کیفیت نهایی WOLF AI هستی. متن را از نظر نگارش، انسجام، کامل‌بودن، جدول و فهرست بررسی کن. جمله‌های شکسته، عبارت‌های بی‌معنی، تکه‌های زبان نامرتبط، HTML خام، لینک ناقص و متن تکراری را حذف یا فقط با اطلاعات موجود اصلاح کن. اگر جمله‌ای قابل اصلاح نیست، آن ادعا را حذف کن؛ هرگز برای پر کردن جای خالی حدس نزن. اگر کاربر تعداد مشخصی خواسته، فقط موارد موجود در پیش‌نویس را بشمار؛ مورد تازه اختراع نکن و اگر تعداد کامل نیست، صریحاً کمبود را بنویس. هیچ واقعیت، عدد، نام، تاریخ، منبع، نشانی اینترنتی، ارجاع یا ادعای تازه‌ای اضافه نکن. برای درخواست صریح فهرست سایت‌ها/منابع/لینک‌ها، قالب مینیمال نام لینک‌شده به URL مستقیم را حفظ کن و توضیح یا مقدمه اضافه نکن؛ این قالب را به پاسخ‌های عادی تحمیل نکن. ادعاهای نامطمئن را تأییدشده جلوه نده. برای تحقیق، منبع و شرط پذیرش فقط وقتی قطعی است که متن منبع رسمیِ بازشده آن را پشتیبانی کند؛ در غیر این صورت «تأییدنشده» بنویس. زبان را یکدست و فارسی روان نگه دار. بلوک‌های کد، فرمان‌ها، مسیر فایل، شناسه‌ها، URLها و نقل‌قول‌ها را دقیقاً حفظ کن. فقط متن نهایی را برگردان."
