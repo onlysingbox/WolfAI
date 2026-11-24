@@ -387,6 +387,7 @@ function inspectWolfAnswer(value, language, userRequest = "") {
   const fence = String.fromCharCode(96, 96, 96);
   if ((text.split(fence).length - 1) % 2 !== 0) issues.push("unclosed_code_fence");
   if (language === "fa" && /[\u3040-\u30ff\u3400-\u9fff]/.test(text)) issues.push("unexpected_cjk_script");
+  if (/(?:توضیحات، معیار و عملیات‌های ذکر شده در متن پیش‌نویس|متن پیش‌نویس صحیح|قابل ویرایش هستند|من ویراستار|the draft is|as an editor|editorial instruction)/i.test(text)) issues.push("editorial_meta_leak");
   if (/<\/?(?:a|div|span|table|tr|td|th)\b[^>]*>/i.test(text)) issues.push("raw_html_markup");
   const lines = text.split("\n");
   const separatorIndex = lines.findIndex(line => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line));
@@ -724,7 +725,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       return;
     }
     const draftAnswer = String(assistant?.content || "").trim() || (language === "fa" ? "پیامت را دریافت کردم، اما نتوانستم پاسخ مناسبی بسازم. دوباره بگو." : "I received your message, but couldn't form a useful reply. Please try again.");
-    const answer = await polishWolfAnswer(env, draftAnswer, language, userText);
+    const answer = await polishWolfAnswer(env, draftAnswer, language, contextualUserText);
     await saveConversation(env, chatId, history, userText, answer);
     await reply(env, chatId, answer);
   } catch (error) {
