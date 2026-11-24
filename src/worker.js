@@ -216,13 +216,37 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
     .map(item => ({ name: item.name, ...(item.metadata || {}) }))
     .filter(item => !currentId || Number(item.messageId) < currentId);
 
-  // Detect requests such as: "سه پیام دادم که نوشتم پاک را پاک کن".
-  const keywordMatch = text.match(/(?:نوشتم|نوشته‌ام|کلمه(?:‌ی)?|عبارت(?:ی)?)\s*[«"“']?(.+?)[»"”']?\s*(?:را|رو)\s*(?:پاک|حذف)/i);
-  const keyword = keywordMatch ? keywordMatch[1].trim().replace(/[«»“”"']/g, "") : "";
+  // Keyword targeting supports natural Persian forms:
+  // "پیام‌هایی که کلمه X توشون هست"، "کلمه X داره"، and "نوشتم X را پاک کن".
+  let keyword = "";
+  const keywordPatterns = [
+    /(?:کلمه(?:‌ی)?|عبارت(?:ِ)?|واژه(?:‌ی)?)\s*[«"“']?([^\s،؛.!؟?"”»']+)[»"”']?\s*(?:توش(?:ون)?\s*(?:هست|باشد)?|داخلش(?:ون)?\s*(?:هست|باشد)?|داره|دارد|هست|باشد)/i,
+    /(?:نوشتم|نوشته‌ام)\s*[«"“']?(.+?)[»"”']?\s*(?:را|رو)\s*(?:پاک|حذف)/i,
+    /(?:که|حاوی)\s*[«"“']?([^\s،؛.!؟?"”»']+)[»"”']?\s*(?:توش(?:ون)?\s*(?:هست|باشد)?|داره|دارد)/i
+  ];
+  for (const pattern of keywordPatterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) { keyword = match[1].trim().replace(/[«»“”"']/g, ""); break; }
+  }
   const countMatch = text.match(/(?:^|\s)(\d+|[۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده)\s+پیام/i);
   const countWords = { "یک":1,"دو":2,"سه":3,"چهار":4,"پنج":5,"شش":6,"هفت":7,"هشت":8,"نه":9,"ده":10 };
   const countRaw = countMatch?.[1] || "";
   const count = countRaw ? (countWords[countRaw] || Number(countRaw.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))) || 1) : 1;
+
+  // Optional time scope: last N hours, last day, or today.
+  let sinceTimestamp = 0;
+  const hoursMatch = text.match(/(\d+|[۰-۹]+|یک|دو|سه|چهار|شش|دوازده|بیست.?و.?چهار)\s*ساعت\s*(?:اخیر|گذشته)/i);
+  if (hoursMatch) {
+    const raw = hoursMatch[1];
+    const words = { "یک":1,"دو":2,"سه":3,"چهار":4,"شش":6,"دوازده":12,"بیست‌وچهار":24,"بیست و چهار":24,"بیست.و.چهار":24 };
+    const hours = words[raw] || Number(raw.replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))) || 24;
+    sinceTimestamp = Math.floor(Date.now() / 1000) - hours * 3600;
+  } else if (/(?:یک\s*روز|۲۴\s*ساعت|24\s*ساعت)\s*(?:اخیر|گذشته)/i.test(text)) {
+    sinceTimestamp = Math.floor(Date.now() / 1000) - 24 * 3600;
+  } else if (/امروز|today/i.test(text)) {
+    const now = new Date();
+    sinceTimestamp = Math.floor(new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000);
+  }
 
   // A Telegram reply is the strongest and safest target.
   if (repliedId) {
@@ -235,16 +259,15 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
     }
     records = matches;
   } else if (keyword) {
-    // Search encrypted message bodies and select the requested number of the
-    // user's own matching messages, newest first.
-    records = records.filter(item => item.role === "user");
+    // Search message bodies across the requested sender scope; sender and
+    // language filters are applied below, after the keyword match.
     const matches = [];
     for (const item of records) {
       const archived = await readArchivedTelegramMessage(env, chatId, item.messageId);
       if (String(archived?.text || "").toLocaleLowerCase().includes(keyword.toLocaleLowerCase())) matches.push(item);
     }
     matches.sort((a,b) => Number(b.messageId || 0) - Number(a.messageId || 0));
-    records = matches.slice(0, Math.min(count, 20));
+    records = countMatch ? matches.slice(0, Math.min(count, 20)) : matches;
   } else if (ordinal) {
     if (wantsBot) records = records.filter(item => item.role === "assistant");
     else if (wantsUser) records = records.filter(item => item.role === "user");
@@ -268,6 +291,7 @@ async function handleMessageDeleteRequest(env, chatId, message, requestText) {
     return;
   }
 
+  if (sinceTimestamp) records = records.filter(item => Number(item.date || 0) >= sinceTimestamp);
   if (wantsFa) records = records.filter(item => item.language === "fa");
   if (wantsEn) records = records.filter(item => item.language === "en");
   if (wantsUser) records = records.filter(item => item.role === "user");
