@@ -1312,6 +1312,32 @@ async function githubOverview(request, env, url) {
   }
 }
 
+
+async function recordStartBoundary(env, update) {
+  const message = update?.message;
+  const text = String(message?.text || "").trim();
+  if (!/^\/start(?:@\w+)?(?:\s|$)/i.test(text)) return;
+  const chatId = String(message?.chat?.id || "");
+  const updateId = Number(update?.update_id);
+  if (!chatId || !Number.isSafeInteger(updateId)) return;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS telegram_start_boundaries (chat_id TEXT PRIMARY KEY, update_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare("INSERT INTO telegram_start_boundaries (chat_id, update_id) VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET update_id = MAX(update_id, excluded.update_id), created_at = CURRENT_TIMESTAMP")
+    .bind(chatId, updateId).run();
+}
+
+async function isOlderThanLatestStart(env, update) {
+  const chatId = String(update?.message?.chat?.id || "");
+  const updateId = Number(update?.update_id);
+  if (!chatId || !Number.isSafeInteger(updateId)) return false;
+  try {
+    const row = await env.DB.prepare("SELECT update_id FROM telegram_start_boundaries WHERE chat_id = ?").bind(chatId).first();
+    return !!row && updateId < Number(row.update_id);
+  } catch (error) {
+    console.error("Could not check Telegram /start boundary", error);
+    return false;
+  }
+}
+
 async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   const missingTelegramConfig = ["BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "ADMIN_TELEGRAM_ID"].filter(key => !env[key]);
   if (missingTelegramConfig.length) {
@@ -1386,6 +1412,8 @@ async function handleTelegramUpdate(request, env, parsedUpdate = null) {
   const command = rawCommand.split("@")[0].toLowerCase();
   const arg = rest.join(" ");
   if (command === "/start") {
+    // A fresh start begins a clean conversation and must produce exactly one welcome message.
+    await putSetting(env, "conversation:" + String(chatId), "[]");
     await reply(env, chatId, "🐺 سلام! من WOLF AI هستم. با من عادی و به زبان خودت صحبت کن؛ لازم نیست دستور فنی حفظ کنی.\n\nمی‌توانم گفتگو کنم، مأموریت‌ها را ثبت کنم و ابزارهای متصل را با تأیید تو اجرا کنم. خواندن و ایجاد/ویرایش فایل متنی در GitHub پس از تأیید فعال است.\nبرای انتخاب زبان پاسخ /language و مدل هوش مصنوعی /model را بزن.");
   } else if (command === "/language") {
     const current = await getSetting(env, "response_language", "auto");
@@ -1532,6 +1560,8 @@ export default {
       // Keep Telegram commands and callbacks on the immediate request path.
       // They are short and must never depend on background queue delivery.
       const incomingText = String(update.message?.text || "").trim();
+      // Mark /start as a boundary so delayed, older queued messages cannot answer after the welcome.
+      await recordStartBoundary(env, update);
       const isCommand = incomingText.startsWith("/");
       const isGreeting = isSimpleGreeting(incomingText);
       const isCasualChat = isCasualChatMessage(incomingText);
@@ -1567,6 +1597,14 @@ export default {
           method: "POST",
           headers: { "X-Telegram-Bot-Api-Secret-Token": env.TELEGRAM_WEBHOOK_SECRET }
         });
+        if (await isOlderThanLatestStart(env, message.body)) {
+          console.log("Skipping Telegram update queued before the latest /start", {
+            updateId: message.body?.update_id,
+            chatId: message.body?.message?.chat?.id
+          });
+          message.ack();
+          continue;
+        }
         const result = await handleTelegramUpdate(internalRequest, env, message.body);
         if (result instanceof Response && result.status >= 400) {
           throw new Error("Telegram update handler returned HTTP " + result.status);
