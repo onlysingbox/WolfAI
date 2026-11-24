@@ -129,7 +129,7 @@ async function archiveTelegramMessage(env, chatId, message, role) {
   const value = JSON.stringify({ v: 1, iv: archiveBase64(iv), data: archiveBase64(ciphertext) });
   const kvKey = "chat:" + String(chatId) + ":" + String(id);
   await env.MESSAGE_ARCHIVE.put(kvKey, value, {
-    expirationTtl: 7 * 24 * 60 * 60,
+    expirationTtl: 48 * 60 * 60,
     metadata: { chatId: String(chatId), messageId: id, role, language, date, kind }
   });
 
