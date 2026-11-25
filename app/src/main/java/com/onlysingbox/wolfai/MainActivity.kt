@@ -43,13 +43,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.TextRecognizer
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.googlecode.tesseract.android.TessBaseAPI
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -82,23 +76,55 @@ private fun readPdfText(file: File, context: Context): String {
     }
 }
 
-private suspend fun recognizePdfBitmap(bitmap: Bitmap, recognizer: TextRecognizer): String =
-    suspendCancellableCoroutine { continuation ->
-        recognizer.process(InputImage.fromBitmap(bitmap, 0))
-            .addOnSuccessListener { result -> if (continuation.isActive) continuation.resume(result.text) }
-            .addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
-    }
+private fun ensureOcrModel(context: Context, language: String): File {
+    val root = File(context.filesDir, "wolf_ocr")
+    val dataDir = File(root, "tessdata")
+    if (!dataDir.exists() && !dataDir.mkdirs()) error("ساخت پوشه مدل OCR ممکن نشد")
+    val target = File(dataDir, "$language.traineddata")
+    if (target.exists() && target.length() > 100_000L) return target
 
-private suspend fun readScannedPdfText(file: File): String = withContext(Dispatchers.IO) {
-    val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-    val renderer = PdfRenderer(descriptor)
-    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    val url = URL("https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/$language.traineddata")
+    val connection = (url.openConnection() as HttpURLConnection).apply {
+        connectTimeout = 20000
+        readTimeout = 60000
+        requestMethod = "GET"
+        setRequestProperty("User-Agent", "WOLF-AI-Android")
+    }
+    val temporary = File(dataDir, "$language.traineddata.part")
     try {
+        if (connection.responseCode != HttpURLConnection.HTTP_OK) {
+            error("دریافت مدل OCR $language ناموفق بود: HTTP ${connection.responseCode}")
+        }
+        connection.inputStream.use { input ->
+            temporary.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (temporary.length() < 100_000L) error("فایل مدل OCR ناقص دریافت شد")
+        if (target.exists()) target.delete()
+        if (!temporary.renameTo(target)) error("ذخیره مدل OCR ممکن نشد")
+    } finally {
+        connection.disconnect()
+        if (temporary.exists()) temporary.delete()
+    }
+    return target
+}
+
+private suspend fun readScannedPdfText(file: File, context: Context): String = withContext(Dispatchers.IO) {
+    val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+    var renderer: PdfRenderer? = null
+    val api = TessBaseAPI()
+    try {
+        val root = File(context.filesDir, "wolf_ocr")
+        ensureOcrModel(context, "fas")
+        ensureOcrModel(context, "eng")
+        if (!api.init(root.absolutePath, "fas+eng")) {
+            error("موتور OCR نتوانست مدل‌های فارسی و انگلیسی را بارگذاری کند")
+        }
+        renderer = PdfRenderer(descriptor)
         val output = StringBuilder()
         val pageLimit = minOf(renderer.pageCount, 8)
         for (index in 0 until pageLimit) {
             val page = renderer.openPage(index)
-            val scale = minOf(1.5f, 1800f / page.width.toFloat())
+            val scale = minOf(1.7f, 2200f / page.width.toFloat())
             val bitmap = Bitmap.createBitmap(
                 (page.width * scale).toInt().coerceAtLeast(1),
                 (page.height * scale).toInt().coerceAtLeast(1),
@@ -106,10 +132,11 @@ private suspend fun readScannedPdfText(file: File): String = withContext(Dispatc
             )
             try {
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                val text = recognizePdfBitmap(bitmap, recognizer)
-                if (text.isNotBlank()) {
-                    if (output.isNotEmpty()) output.append("\\n")
-                    output.append("Page ").append(index + 1).append("\\n").append(text)
+                api.setImage(bitmap)
+                val text = api.uT F8Text()
+                if (!text.isNullOrBlank()) {
+                    if (output.isNotEmpty()) output.append("\n\n")
+                    output.append("--- صفحه ").append(index + 1).append(" ---\n").append(text.trim())
                 }
             } finally {
                 bitmap.recycle()
@@ -117,11 +144,11 @@ private suspend fun readScannedPdfText(file: File): String = withContext(Dispatc
             }
             if (output.length >= 12000) break
         }
-        if (output.isEmpty()) "No text was detected. The current OCR engine supports Latin-script text, not Persian."
-        else output.toString().take(12000) + if (renderer.pageCount > pageLimit) "\\n\\nOnly the first 8 pages were processed." else ""
+        if (output.isEmpty()) "در صفحات اسکن‌شده متن قابل تشخیصی پیدا نشد."
+        else output.toString().take(12000) + if (renderer.pageCount > pageLimit) "\n\nفقط ۸ صفحه اول پردازش شد." else ""
     } finally {
-        recognizer.close()
-        renderer.close()
+        api.recycle()
+        renderer?.close()
         descriptor.close()
     }
 }
@@ -808,7 +835,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                 val embedded = runCatching { withContext(Dispatchers.IO) { readPdfText(file, context) } }
                                                     .getOrElse { "استخراج PDF ناموفق بود: ${it.message}" }
                                                 previewText = if (embedded.contains("متن قابل استخراج پیدا نشد")) {
-                                                    runCatching { readScannedPdfText(file) }.getOrElse { "OCR ناموفق بود: ${it.message}" }
+                                                    runCatching { readScannedPdfText(file, context) }.getOrElse { "OCR ناموفق بود: ${it.message}" }
                                                 } else embedded
                                                 fileStatus = "نتیجه خواندن: ${file.name}"
                                             }
