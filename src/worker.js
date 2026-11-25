@@ -1066,11 +1066,23 @@ async function prepareCompanionMissionStep(request, env, missionId) {
     const updated=await env.DB.prepare("UPDATE agent_steps SET input_json=?,status='awaiting_execution_approval' WHERE id=? AND run_id=? AND status='approved_pending_execution'")
       .bind(JSON.stringify({details:input.details||"",prepared_action:prepared}),step.id,missionId).run();
     if(!updated?.meta?.changes) return json({ok:false,error:"وضعیت مرحله هم‌زمان تغییر کرده است."},409);
-    await log(env,device.owner_id,"companion.mission_step_prepared","agent_step",step.id,{action_type:type});
+    await log(env,device.owner_id,"companion.mission_step_prepared","agent_step",step.id,{action_type:prepared.type});
     return json({ok:true,mission_id:missionId,step_no:stepNo,status:"awaiting_execution_approval",prepared_action:prepared,executed:false});
   } catch(error) {
     return json({ok:false,error:"آماده‌سازی امن مرحله انجام نشد: "+String(error?.message||error).slice(0,220)},422);
   }
+}
+
+async function executeCompanionReadOnlyAction(env, capability, action, ownerId) {
+  const validated = validateCompanionReadOnlyAction(capability, action);
+  if (await getSetting(env, "companion_master_enabled", "true") !== "true") {
+    throw new Error("MASTER OFF است؛ عملیات اجرا نشد.");
+  }
+  // This wrapper deliberately accepts only a single validated read-only action.
+  // It never accepts agent.sequence or any write-capable action type.
+  const allowedTypes = new Set(["research.search", "research.open", "memory.search", "artifact.search", "finance.summary", "github.get_file"]);
+  if (!allowedTypes.has(validated.type)) throw new Error("این عملیات در موتور خواندنی مجاز نیست.");
+  return await executeApprovedAction(env, validated, null, 1, ownerId);
 }
 
 async function executeCompanionMissionStep(request, env, missionId) {
@@ -1095,7 +1107,7 @@ async function executeCompanionMissionStep(request, env, missionId) {
   await env.DB.prepare("UPDATE agent_runs SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running')").bind(missionId,String(device.owner_id)).run();
   try{
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
-    const output=await executeApprovedAction(env,action,missionId,stepNo,String(device.owner_id));
+    const output=await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF هنگام اجرا فعال شد؛ نتیجه برای ادامه مأموریت نادیده گرفته شد.");
     await env.DB.prepare("UPDATE agent_steps SET status='completed',output_json=?,completed_at=CURRENT_TIMESTAMP,error_text=NULL WHERE id=? AND status='running'").bind(JSON.stringify(output).slice(0,12000),step.id).run();
     const pending=await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND status NOT IN ('completed','rejected')").bind(missionId).first();
@@ -3106,4 +3118,4 @@ export default {
     }
   }
 };
-export { validateCompanionReadOnlyAction };
+export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction };
