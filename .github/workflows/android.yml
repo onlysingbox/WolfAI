@@ -15,6 +15,11 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      WOLF_KEYSTORE_PASSWORD: ${{ secrets.WOLF_KEYSTORE_PASSWORD }}
+      WOLF_KEY_ALIAS: wolfai
+      WOLF_KEY_PASSWORD: ${{ secrets.WOLF_KEYSTORE_PASSWORD }}
+      WOLF_KEYSTORE_FILE: ${{ github.workspace }}/wolf-release.jks
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -31,9 +36,25 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
+      - name: Prepare stable release signing key
+        if: ${{ secrets.WOLF_KEYSTORE_BASE64 != '' && secrets.WOLF_KEYSTORE_PASSWORD != '' }}
+        env:
+          WOLF_KEYSTORE_BASE64: ${{ secrets.WOLF_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$WOLF_KEYSTORE_BASE64" | base64 --decode > "$WOLF_KEYSTORE_FILE"
+          test -s "$WOLF_KEYSTORE_FILE"
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+      - name: Build stable signed release APK
+        if: ${{ secrets.WOLF_KEYSTORE_BASE64 != '' && secrets.WOLF_KEYSTORE_PASSWORD != '' }}
+        run: gradle --no-daemon assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: wolf-ai-agent-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Upload stable signed release APK
+        if: ${{ secrets.WOLF_KEYSTORE_BASE64 != '' && secrets.WOLF_KEYSTORE_PASSWORD != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolf-ai-agent-release
+          path: app/build/outputs/apk/release/app-release.apk
