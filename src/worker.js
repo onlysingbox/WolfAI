@@ -2665,7 +2665,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first();
-        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
+        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.OPENROUTER_API_KEY), ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
