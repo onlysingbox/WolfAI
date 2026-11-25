@@ -433,6 +433,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var showNotifications by remember { mutableStateOf(false) }
     var notificationRefresh by remember { mutableIntStateOf(0) }
     var eventTitle by remember { mutableStateOf("") }
+    var eventDate by remember { mutableStateOf(java.time.LocalDate.now().plusDays(1).toString()) }
+    var eventTime by remember { mutableStateOf("09:00") }
+    var eventLocation by remember { mutableStateOf("") }
     var eventNotes by remember { mutableStateOf("") }
     var plannerStatus by remember { mutableStateOf("برای ساخت رویداد، عنوان و توضیحات را وارد کن.") }
     var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
@@ -853,20 +856,31 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("این بخش تاریخچه پیام‌های خصوصی را از برنامه‌ها استخراج نمی‌کند؛ فقط اعلان‌هایی را می‌بیند که اندروید پس از فعال‌سازی دسترسی به WOLF تحویل می‌دهد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 } else if(showPlanner) {
                     Text("تقویم و برنامه‌ریزی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
-                    Text("رویداد و قرار را آماده کن؛ ثبت نهایی در تقویم گوشی با تأیید خودت انجام می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    Text("عنوان، تاریخ، ساعت و مکان را مشخص کن. ذخیره نهایی در تقویم گوشی فقط پس از تأیید خودت انجام می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     OutlinedTextField(eventTitle,{eventTitle=it},modifier=Modifier.fillMaxWidth(),label={Text("عنوان رویداد")},singleLine=true)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(eventDate,{eventDate=it.filter { ch -> ch.isDigit() || ch == '-' }.take(10)},modifier=Modifier.weight(1.2f),label={Text("تاریخ YYYY-MM-DD")},singleLine=true)
+                        OutlinedTextField(eventTime,{eventTime=it.filter { ch -> ch.isDigit() || ch == ':' }.take(5)},modifier=Modifier.weight(0.8f),label={Text("ساعت HH:MM")},singleLine=true)
+                    }
+                    OutlinedTextField(eventLocation,{eventLocation=it},modifier=Modifier.fillMaxWidth(),label={Text("مکان (اختیاری)")},singleLine=true)
                     OutlinedTextField(eventNotes,{eventNotes=it},modifier=Modifier.fillMaxWidth(),label={Text("توضیحات")},minLines=3)
                     Button(enabled=eventTitle.isNotBlank(),onClick={
-                        val begin=System.currentTimeMillis()+60L*60L*1000L
-                        val finish=begin+60L*60L*1000L
-                        val intent=Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
-                            .putExtra(CalendarContract.Events.TITLE,eventTitle.trim())
-                            .putExtra(CalendarContract.Events.DESCRIPTION,eventNotes.trim())
-                            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,begin)
-                            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME,finish)
-                        if(intent.resolveActivity(context.packageManager)!=null){context.startActivity(intent);plannerStatus="فرم رویداد در تقویم باز شد؛ تاریخ و ساعت را بررسی و ذخیره کن."}
-                        else plannerStatus="برنامه تقویم سازگار پیدا نشد."
-                    },modifier=Modifier.fillMaxWidth()){Text("افزودن به تقویم")}
+                        runCatching {
+                            val date = java.time.LocalDate.parse(eventDate)
+                            val time = java.time.LocalTime.parse(eventTime)
+                            val begin = java.time.ZonedDateTime.of(date,time,java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                            require(begin > System.currentTimeMillis()) { "زمان رویداد باید در آینده باشد." }
+                            val finish = begin + 60L*60L*1000L
+                            val intent=Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
+                                .putExtra(CalendarContract.Events.TITLE,eventTitle.trim())
+                                .putExtra(CalendarContract.Events.DESCRIPTION,eventNotes.trim())
+                                .putExtra(CalendarContract.Events.EVENT_LOCATION,eventLocation.trim())
+                                .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,begin)
+                                .putExtra(CalendarContract.EXTRA_EVENT_END_TIME,finish)
+                            if(intent.resolveActivity(context.packageManager)!=null){context.startActivity(intent);plannerStatus="فرم رویداد با تاریخ و ساعت انتخابی باز شد؛ برای ثبت نهایی در تقویم ذخیره را بزن."}
+                            else plannerStatus="برنامه تقویم سازگار پیدا نشد."
+                        }.onFailure { plannerStatus = it.message ?: "تاریخ یا ساعت معتبر نیست؛ قالب YYYY-MM-DD و HH:MM را بررسی کن." }
+                    },modifier=Modifier.fillMaxWidth()){Text("افزودن رویداد به تقویم")}
                     OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("تنظیم دسترسی اعلان‌ها")}
                     HorizontalDivider()
                     Text("رویدادهای تقویم",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
