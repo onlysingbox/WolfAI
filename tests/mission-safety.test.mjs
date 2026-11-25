@@ -178,3 +178,32 @@ test("D1 claim gate rejects another owner's approval and a running mission step"
   ] });
   assert.equal(await claimCompanionMissionStep({ DB: active }, { stepId: "s1", missionId: "m1", stepNo: 1, ownerId: "owner-A" }), false);
 });
+
+
+import { wolfProviderCatalog, wolfProviderOrder, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS } from "../src/worker.js";
+
+test("provider catalog reports only actually configured engines", () => {
+  const env = { AI: { run() {} }, GEMINI_API_KEY: "configured", GROQ_API_KEY: "", OPENROUTER_API_KEY: "configured" };
+  const catalog = wolfProviderCatalog(env);
+  assert.equal(catalog.find(x => x.id === "glm").configured, true);
+  assert.equal(catalog.find(x => x.id === "gemma").configured, true);
+  assert.equal(catalog.find(x => x.id === "gemini").configured, true);
+  assert.equal(catalog.find(x => x.id === "groq").configured, false);
+  assert.equal(catalog.find(x => x.id === "openrouter").configured, true);
+  assert.ok(catalog.filter(x => ["glm","gemma","gemini","groq","openrouter"].includes(x.id)).every(x => x.freeOnly));
+});
+
+test("automatic routing falls back only across configured free engines", () => {
+  const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", OPENROUTER_API_KEY: "o" };
+  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["gemma","glm","gemini","openrouter"].filter(x => x !== "gemma").length ? ["glm","gemini","openrouter"] : []);
+  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["gemini","openrouter","gemma","glm"].filter(x => x !== "gemma").length ? ["gemini","glm","openrouter"] : []);
+  assert.throws(() => wolfProviderOrder(env, "groq", false), /هنوز کلید API/);
+});
+
+test("provider model identifiers are current and never select the retired Groq Llama model", () => {
+  assert.equal(WOLF_AI_MODELS.glm, "@cf/zai-org/glm-4.7-flash");
+  assert.equal(WOLF_AI_MODELS.gemma, "@cf/google/gemma-4-26b-a4b-it");
+  assert.equal(WOLF_EXTERNAL_PROVIDERS.gemini.model, "gemini-2.5-flash");
+  assert.equal(WOLF_EXTERNAL_PROVIDERS.groq.model, "openai/gpt-oss-120b");
+  assert.equal(WOLF_EXTERNAL_PROVIDERS.openrouter.model, "meta-llama/llama-3.3-70b-instruct:free");
+});
