@@ -1998,7 +1998,31 @@ async function executeResearchOpen(rawUrl) {
   const contentType = response.headers.get("content-type") || "";
   if (!/text\/html|text\/plain|application\/xhtml\+xml/i.test(contentType)) throw new Error("این ابزار فقط متن و HTML را می‌خواند.");
   if (Number(response.headers.get("content-length") || 0) > 1500000) throw new Error("حجم صفحه برای خواندن بیش از حد مجاز است.");
-  const raw = (await response.text()).slice(0, 1500000);
+  let raw = "";
+  if (response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let total = 0;
+    try {
+      while (total < 1500000) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const remaining = 1500000 - total;
+        const chunk = value.byteLength > remaining ? value.subarray(0, remaining) : value;
+        raw += decoder.decode(chunk, { stream: true });
+        total += chunk.byteLength;
+        if (value.byteLength > remaining) {
+          await reader.cancel("WOLF page size limit reached");
+          break;
+        }
+      }
+      raw += decoder.decode();
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+  } else {
+    raw = (await response.text()).slice(0, 1500000);
+  }
   const title = decodeResearchHtml(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || url.hostname).slice(0, 240);
   const main = raw.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1] || raw.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] || raw;
   const content = decodeResearchHtml(main).slice(0, 9000);
