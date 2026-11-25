@@ -32,10 +32,10 @@ This file records verified implementation, not planned features.
 - For supported read-only steps, Android can request an exact prepared action, display its JSON details, and require a second explicit tap before executing that action. It refreshes per-step status and displays the result/error. Unsupported capabilities remain unexecutable and require manual review.
 
 ## CI verification
-- GitHub Actions run `45546196445` for commit `f14bfb303afa6dd3e2adcbcb888b21f06cfc8009` completed successfully on 2026-11-25. The newer secure-execution and Android UI changes are still awaiting their CI result.
-- The workflow passed `node --check src/worker.js` and the Android `assembleDebug` build.
-- An earlier run for the preceding Android mission UI commit failed Kotlin compilation due to malformed newline escaping; the source was corrected in the later commit and the subsequent CI run passed.
-- CI verifies syntax and compilation only. It does not run Worker/D1 integration tests or device-level acceptance tests.
+- Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
+- A Node built-in test suite now covers the mission action allowlist, capability matching, HTTPS/local-target rejection, finance date/currency validation, GitHub path traversal, and extra-parameter rejection. The workflow runs these tests before the Android build.
+- The new hardened executor and test workflow are committed; their latest CI run must pass before these changes are considered verified.
+- CI does not run live Worker/D1 integration tests or device-level acceptance tests.
 
 ## Not implemented or not end-to-end verified
 - Standalone pairing that does not require Telegram.
