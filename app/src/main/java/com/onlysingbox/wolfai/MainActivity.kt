@@ -1,6 +1,7 @@
 package com.onlysingbox.wolfai
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.provider.ContactsContract
 import android.provider.AlarmClock
@@ -302,6 +303,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     }
     fun runLocalCommand(raw: String): String? {
         val command = raw.trim().lowercase(Locale.ROOT)
+        val addressMatch = Regex("(https?://[^\\s]+|www\\.[^\\s]+)").find(command)
+        if (addressMatch != null && (command.contains("باز") || command.contains("open") || command.contains("chrome") || command.contains("firefox") || command.contains("سایت"))) {
+            val address = if (addressMatch.value.startsWith("http")) addressMatch.value else "https://" + addressMatch.value
+            val browser = Intent(Intent.ACTION_VIEW, Uri.parse(address))
+            if (command.contains("firefox")) browser.setPackage("org.mozilla.firefox") else if (command.contains("chrome")) browser.setPackage("com.android.chrome")
+            if (browser.resolveActivity(context.packageManager) != null) { context.startActivity(browser); return "صفحه در مرورگر باز شد: " + address }
+            return "مرورگر انتخاب‌شده نصب نیست یا پیوند را باز نمی‌کند."
+        }
+        if (command.contains("تماس با") || command.contains("شماره گیری")) {
+            val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
+            if (number != null) { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))); return "صفحه تماس باز شد؛ تماس نهایی با تأیید خودت انجام می‌شود." }
+        }
         if (command.contains("vpn")) {
             context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
             return "تنظیمات VPN باز شد؛ روشن‌کردن تونل به اتصال رسمی سرویس نیاز دارد."
