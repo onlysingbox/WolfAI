@@ -34,9 +34,9 @@ This file records verified implementation, not planned features.
 
 ## CI verification
 - Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
-- A Node built-in test suite now covers the mission action allowlist, capability matching, HTTPS/local-target rejection, finance date/currency validation, GitHub path traversal, and extra-parameter rejection. The workflow runs these tests before the Android build.
-- The new hardened executor and test workflow are committed; their latest CI run must pass before these changes are considered verified.
-- CI does not run live Worker/D1 integration tests or device-level acceptance tests.
+- A Node built-in safety suite covers the mission action allowlist, capability matching, HTTPS/local-target rejection, finance date/currency validation, GitHub path traversal, extra-parameter rejection, MASTER OFF rejection, and owner-scoped lookup.
+- A separate Node 22 `node:sqlite` integration suite executes the actual D1-compatible SQL statements against an in-memory SQLite database. It checks owner isolation, duplicate concurrent claims, sequential step ordering, wrong-owner approvals, active sibling steps, and stopped missions. The workflow runs both suites before the Android build.
+- These tests exercise the SQL and state-transition contract locally; they do not contact the production Cloudflare D1 database or deploy the Worker. Live Cloudflare integration and device-level acceptance tests remain pending.
 
 ## Not implemented or not end-to-end verified
 - Standalone pairing that does not require Telegram.
