@@ -863,9 +863,6 @@ async function companionMaster(request, env) {
 async function companionMissions(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
-  const enabled = await getSetting(env, "companion_master_enabled", "true");
-  if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ ثبت مأموریت هوشمند متوقف است." }, 423);
-
   if (request.method === "GET") {
     const rows = await env.DB.prepare(
       "SELECT id, request_text, status, plan_json, created_at, updated_at FROM agent_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50"
@@ -891,6 +888,8 @@ async function companionMissions(request, env) {
     return json({ ok: true, missions });
   }
 
+  const enabled = await getSetting(env, "companion_master_enabled", "true");
+  if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ ثبت مأموریت هوشمند متوقف است." }, 423);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
   const requestText = String(body?.text || "").trim().slice(0, 8000);
@@ -972,6 +971,75 @@ async function decideCompanionMission(request, env, missionId) {
   });
 }
 
+function validateCompanionReadOnlyAction(capability, action) {
+  if (!action || typeof action !== "object" || Array.isArray(action) ||
+      typeof action.type !== "string" || !action.args || typeof action.args !== "object" ||
+      Array.isArray(action.args)) throw new Error("ساختار عملیات نامعتبر است.");
+  const args = action.args;
+  const allowed = {
+    web_research: ["research.search", "research.open"],
+    personal_memory: ["memory.search"],
+    files_documents: ["artifact.search", "github.get_file"],
+    finance: ["finance.summary"]
+  };
+  if (!(allowed[capability] || []).includes(action.type)) {
+    throw new Error("نوع عملیات با قابلیت تأییدشده این مرحله مطابقت ندارد.");
+  }
+  const onlyKeys = keys => Object.keys(args).every(key => keys.includes(key));
+  const requiredText = (key, max) => {
+    const value = String(args[key] ?? "").trim();
+    if (!value || value.length > max) throw new Error("پارامتر " + key + " معتبر نیست.");
+    return value;
+  };
+  if (action.type === "research.search") {
+    if (!onlyKeys(["query"])) throw new Error("پارامتر اضافی در جست‌وجوی وب مجاز نیست.");
+    return { type: action.type, args: { query: requiredText("query", 300) } };
+  }
+  if (action.type === "research.open") {
+    if (!onlyKeys(["url"])) throw new Error("پارامتر اضافی در خواندن صفحه مجاز نیست.");
+    const raw = requiredText("url", 2048);
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const privateHost = !host.includes(".") || host === "localhost" ||
+      /\.(?:local|localhost|internal|home|lan|test)$/i.test(host) ||
+      /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) || /^\[[0-9a-f:]+\]$/i.test(host);
+    if (url.protocol !== "https:" || url.username || url.password || privateHost ||
+        (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی و بدون پورت سفارشی مجاز است.");
+    return { type: action.type, args: { url: url.toString() } };
+  }
+  if (action.type === "memory.search" || action.type === "artifact.search") {
+    if (!onlyKeys(["query"])) throw new Error("پارامتر اضافی در جست‌وجوی آرشیو مجاز نیست.");
+    return { type: action.type, args: { query: requiredText("query", 300) } };
+  }
+  if (action.type === "finance.summary") {
+    if (!onlyKeys(["start_date", "end_date", "currency"])) throw new Error("پارامتر اضافی در گزارش مالی مجاز نیست.");
+    const start = requiredText("start_date", 10);
+    const end = requiredText("end_date", 10);
+    const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+      new Date(value + "T00:00:00.000Z").toISOString().slice(0, 10) === value;
+    if (!validDate(start) || !validDate(end) || start > end) throw new Error("بازه تاریخ معتبر نیست.");
+    const argsOut = { start_date: start, end_date: end };
+    if (args.currency !== undefined && args.currency !== null && String(args.currency).trim()) {
+      const currency = String(args.currency).trim().toUpperCase();
+      if (!/^[A-Z]{3,8}$/.test(currency)) throw new Error("واحد پول معتبر نیست.");
+      argsOut.currency = currency;
+    }
+    return { type: action.type, args: argsOut };
+  }
+  if (action.type === "github.get_file") {
+    if (!onlyKeys(["repo", "path"])) throw new Error("پارامتر اضافی در خواندن فایل GitHub مجاز نیست.");
+    const repo = requiredText("repo", 100);
+    const path = requiredText("path", 300);
+    if (!/^[A-Za-z0-9_.-]{1,100}$/.test(repo) || path.startsWith("/") ||
+        path.includes("\\") || /[\u0000-\u001f]/.test(path) ||
+        path.split("/").some(part => !part || part === "." || part === "..")) {
+      throw new Error("مخزن یا مسیر فایل معتبر نیست.");
+    }
+    return { type: action.type, args: { repo, path } };
+  }
+  throw new Error("این عملیات فقط‌خواندنی پشتیبانی نمی‌شود.");
+}
+
 async function prepareCompanionMissionStep(request, env, missionId) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok:false, error:"دستگاه مجاز نیست." },401);
@@ -982,9 +1050,9 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
   if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
   if(run.status!=="approved_pending_execution") return json({ok:false,error:"ابتدا باید طرح مأموریت تأیید شده باشد."},409);
-  const step=await env.DB.prepare("SELECT id,capability,title,input_json,status FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
+  const step=await env.DB.prepare("SELECT id,capability,title,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
   if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
-  if(step.status!=="approved_pending_execution") return json({ok:false,error:"مرحله در وضعیت قابل آماده‌سازی نیست."},409);
+  if(step.status!=="approved_pending_execution" || Number(step.approval_required)!==1 || String(step.approved_by)!==String(device.owner_id)) return json({ok:false,error:"تأیید مالک برای این مرحله معتبر نیست."},409);
   const supported = new Set(["web_research","personal_memory","files_documents","finance"]);
   if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
   const input=safeJson(step.input_json,{});
@@ -994,26 +1062,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
     const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
     const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/i,"").trim();
     const action=JSON.parse(raw);
-    const type=String(action.type||"");
-    const args=action.args&&typeof action.args==="object"&&!Array.isArray(action.args)?action.args:{};
-    const allowedByCapability={
-      web_research:["research.search","research.open"],
-      personal_memory:["memory.search"],
-      files_documents:["artifact.search","github.get_file"],
-      finance:["finance.summary"]
-    };
-    if(!(allowedByCapability[step.capability]||[]).includes(type)) throw new Error("مدل عملیات خواندنی مجاز و متناسب با این مرحله تولید نکرد.");
-    if(type==="research.search" && (!String(args.query||"").trim()||String(args.query).length>300)) throw new Error("عبارت جست‌وجو معتبر نیست.");
-    if(type==="research.open") { const u=new URL(String(args.url||"")); if(u.protocol!=="https:"||u.username||u.password) throw new Error("فقط URL عمومی HTTPS مجاز است."); }
-    if(type==="memory.search"||type==="artifact.search") { if(!String(args.query||"").trim()||String(args.query).length>300) throw new Error("عبارت جست‌وجو معتبر نیست."); }
-    if(type==="finance.summary") {
-      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(args.start_date||""))||!/^\d{4}-\d{2}-\d{2}$/.test(String(args.end_date||""))||args.start_date>args.end_date) throw new Error("بازه تاریخ معتبر و صریح نیست.");
-    }
-    if(type==="github.get_file") {
-      if(!/^[A-Za-z0-9_.-]{1,100}$/.test(String(args.repo||""))||!String(args.path||"")||String(args.path).startsWith("/")||String(args.path).split("/").some(p=>!p||p==="."||p==="..")) throw new Error("مخزن یا مسیر فایل معتبر نیست.");
-    }
-    if(type==="github.workflow_runs"&&!/^[A-Za-z0-9_.-]{1,100}$/.test(String(args.repo||""))) throw new Error("نام مخزن معتبر نیست.");
-    const prepared={type,args};
+    const prepared=validateCompanionReadOnlyAction(step.capability,action);
     const updated=await env.DB.prepare("UPDATE agent_steps SET input_json=?,status='awaiting_execution_approval' WHERE id=? AND run_id=? AND status='approved_pending_execution'")
       .bind(JSON.stringify({details:input.details||"",prepared_action:prepared}),step.id,missionId).run();
     if(!updated?.meta?.changes) return json({ok:false,error:"وضعیت مرحله هم‌زمان تغییر کرده است."},409);
@@ -1034,14 +1083,13 @@ async function executeCompanionMissionStep(request, env, missionId) {
   const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
   if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
   if(run.status!=="approved_pending_execution"&&run.status!=="running") return json({ok:false,error:"مأموریت در وضعیت قابل اجرا نیست."},409);
-  const step=await env.DB.prepare("SELECT id,input_json,status FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
+  const step=await env.DB.prepare("SELECT id,capability,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
   if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
-  if(step.status!=="awaiting_execution_approval") return json({ok:false,error:"ابتدا عملیات دقیق این مرحله را جداگانه تأیید کن."},409);
+  if(step.status!=="awaiting_execution_approval" || Number(step.approval_required)!==1 || String(step.approved_by)!==String(device.owner_id)) return json({ok:false,error:"ابتدا عملیات دقیق این مرحله را جداگانه و با حساب مالک تأیید کن."},409);
   const input=safeJson(step.input_json,{});
-  const action=input.prepared_action;
-  if(!action||typeof action.type!=="string") return json({ok:false,error:"عملیات آماده‌شده وجود ندارد."},409);
-  const readOnlyTypes=["research.search","research.open","memory.search","artifact.search","finance.summary","system.health","github.list_repos","github.workflow_runs","github.get_file"];
-  if(!readOnlyTypes.includes(action.type)) return json({ok:false,error:"این نوع عملیات در اجرای خودکار مجاز نیست."},403);
+  let action;
+  try { action=validateCompanionReadOnlyAction(step.capability,input.prepared_action); }
+  catch(error) { return json({ok:false,error:"عملیات ذخیره‌شده از اعتبارسنجی امنیتی عبور نکرد: "+String(error?.message||error).slice(0,180)},403); }
   const claim=await env.DB.prepare("UPDATE agent_steps SET status='running',started_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_execution_approval'").bind(step.id).run();
   if(!claim?.meta?.changes) return json({ok:false,error:"مرحله قبلاً اجرا یا تعیین تکلیف شده است."},409);
   await env.DB.prepare("UPDATE agent_runs SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running')").bind(missionId,String(device.owner_id)).run();
@@ -3058,3 +3106,4 @@ export default {
     }
   }
 };
+export { validateCompanionReadOnlyAction };
