@@ -3168,4 +3168,4 @@ export default {
     }
   }
 };
-export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission };
+export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS };
