@@ -407,6 +407,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 @Composable
 private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
+    var localMode by remember { mutableStateOf(storagePrefs.getBoolean("local_mode", false)) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -771,15 +772,17 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         masterEnabled=!masterEnabled
                         storagePrefs.edit().putBoolean("master_enabled",masterEnabled).apply()
                         if(!masterEnabled){activeRequest?.cancel();activeRequest=null;busy=false;status="WOLF خاموش شد"} else status="WOLF فعال شد"
-                        scope.launch { runCatching { setRemoteMaster(masterEnabled) }.onFailure { status="همگام‌سازی ناموفق: ${it.message}" } }
+                        if (paired) scope.launch { runCatching { setRemoteMaster(masterEnabled) }.onFailure { status="همگام‌سازی ناموفق: ${it.message}" } }
                     }, colors=ButtonDefaults.buttonColors(containerColor=if(masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if(masterEnabled) "خاموش" else "فعال‌سازی") }
                 }
                 androidx.compose.foundation.lazy.LazyRow(horizontalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(vertical=4.dp)) {
                     item { NavigationChip("گفتگو",!showStorage&&!showContacts&&!showDeviceTools&&!showModels&&!showMissions&&!showSettings) { showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("مخاطبین",showContacts) { showContacts=true;showStorage=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false; if(context.checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts=it;contactsStatus="${it.size} شماره مخاطب خوانده شد." }.onFailure { contactsStatus=it.message ?: "خطا در خواندن مخاطبین" } } else contactsPermission.launch(Manifest.permission.READ_CONTACTS) } }
                     item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
-                    item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    if (paired) {
+                        item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
+                        item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    }
                     item { NavigationChip("اعلان‌ها",showNotifications) { showNotifications=true;showPlanner=false;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("تقویم و یادآور",showPlanner) { showPlanner=true;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
@@ -979,6 +982,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("فعال‌سازی کنترل پیشرفته برنامه‌ها")}
                             Text(if(WolfAccessibilityService.active!=null) "کنترل پیشرفته فعال است." else "برای کنترل عناصر داخل برنامه‌ها، این دسترسی را فقط در صورت تمایل از تنظیمات اندروید فعال کن.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                            if (!paired) OutlinedButton(onClick={localMode=false;storagePrefs.edit().putBoolean("local_mode",false).apply();showSettings=false;status="برای اتصال ابری، کد اتصال را وارد کن."},modifier=Modifier.fillMaxWidth()) { Text("رفتن به صفحه اتصال موتور ابری") }
                             Text("حریم خصوصی و کنترل",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                             Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("WOLF AI AGENT • نسخه 0.3",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
@@ -1135,7 +1139,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }
                     Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-                } else if (!paired) {
+                } else if (!paired && !localMode) {
                     Text("اتصال امن به WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true, keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
                     Button(enabled = pairCode.length == 6 && !busy, onClick = {
@@ -1158,7 +1162,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             busy=false
                         }
                     }) { Text(if (busy) "در حال اتصال..." else "اتصال WOLF") }
-                    Text("ابتدا در گفتگوی خصوصی @OnlyWolfbot دستور /pair را بفرست و کد را اینجا وارد کن.", color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("برای اتصال موتور ابری، کد یک‌بارمصرف را از روش اتصال مالک دریافت کن. این اتصال فقط برای قابلیت‌های آنلاین است.", color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedButton(onClick={localMode=true;storagePrefs.edit().putBoolean("local_mode",true).apply();status="حالت محلی فعال است؛ ابزارهای گوشی بدون تلگرام کار می‌کنند."},modifier=Modifier.fillMaxWidth()) { Text("ادامه بدون تلگرام، حالت محلی") }
                 } else {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(status, color=Cyan, modifier = Modifier.weight(1f))
@@ -1205,7 +1210,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 chat.add("تو" to q)
                                 persistChat()
                                 val localResult = runCatching { runLocalCommand(q) }.getOrElse { "اجرای فرمان ناموفق بود: " + (it.message ?: "خطا") }
-                                if (localResult != null) { chat.add("WOLF" to localResult); persistChat(); speak(localResult); status = "فرمان گوشی اجرا شد" } else {
+                                if (localResult != null) { chat.add("WOLF" to localResult); persistChat(); speak(localResult); status = "فرمان گوشی اجرا شد" } else if (!paired) { chat.add("WOLF" to "برای پاسخ هوشمند و مأموریت‌های آنلاین باید اتصال ابری را فعال کنی. فرمان‌های محلی گوشی، فایل‌ها، مخاطبین، هشدار و تقویم بدون تلگرام در دسترس‌اند."); persistChat(); status="حالت محلی: اتصال اینترنتی هوش مصنوعی فعال نیست." } else {
                                 busy = true
                                 status = "WOLF در حال فکر کردن..."
                                 activeRequest = scope.launch {
