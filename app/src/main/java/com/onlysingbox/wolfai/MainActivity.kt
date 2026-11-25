@@ -223,6 +223,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var showStorage by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
     var showPlanner by remember { mutableStateOf(false) }
+    var showNotifications by remember { mutableStateOf(false) }
+    var notificationRefresh by remember { mutableIntStateOf(0) }
     var eventTitle by remember { mutableStateOf("") }
     var eventNotes by remember { mutableStateOf("") }
     var plannerStatus by remember { mutableStateOf("برای ساخت رویداد، عنوان و توضیحات را وارد کن.") }
@@ -449,6 +451,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
                     item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("اعلان‌ها",showNotifications) { showNotifications=true;showPlanner=false;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("تقویم و یادآور",showPlanner) { showPlanner=true;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
@@ -485,7 +488,31 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("بازکردن تنظیمات VPN به معنی روشن‌شدن تونل نیست؛ اتصال واقعی به API رسمی سرویس نیاز دارد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 }
-                if(showPlanner) {
+                if(showNotifications) {
+                    Text("صندوق اعلان‌های گوشی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    Text("اعلان‌های جدید پس از فعال‌سازی دسترسی، فقط روی همین دستگاه نمایش داده می‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Button(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))}){Text("فعال‌سازی دسترسی")}
+                        OutlinedButton(onClick={notificationRefresh++}){Text("به‌روزرسانی")}
+                    }
+                    val notificationItems=remember(notificationRefresh){WolfNotificationListener.recent.toList()}
+                    if(notificationItems.isEmpty()) Text("هنوز اعلانی دریافت نشده است.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        items(notificationItems) { item ->
+                            Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                                Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                                        Text(item.app,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelLarge)
+                                        Text(item.time,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelSmall)
+                                    }
+                                    if(item.title.isNotBlank()) Text(item.title,color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleSmall)
+                                    if(item.text.isNotBlank()) Text(item.text,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                    Text("این بخش تاریخچه پیام‌های خصوصی را از برنامه‌ها استخراج نمی‌کند؛ فقط اعلان‌هایی را می‌بیند که اندروید پس از فعال‌سازی دسترسی به WOLF تحویل می‌دهد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                } else if(showPlanner) {
                     Text("تقویم و برنامه‌ریزی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
                     Text("رویداد و قرار را آماده کن؛ ثبت نهایی در تقویم گوشی با تأیید خودت انجام می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     OutlinedTextField(eventTitle,{eventTitle=it},modifier=Modifier.fillMaxWidth(),label={Text("عنوان رویداد")},singleLine=true)
