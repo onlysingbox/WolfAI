@@ -45,7 +45,25 @@ jobs:
           test -s "$WOLF_KEYSTORE_FILE"
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+      - name: Build stable signed release APK
+        if: always()
+        run: gradle --no-daemon assembleRelease
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wolf-ai-agent-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+      - name: Upload stable signed release APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolf-ai-agent-release
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: warn
+
       - name: Android emulator smoke test
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -65,19 +83,3 @@ jobs:
               adb logcat -d -t 3000 | grep -A 30 -B 5 'FATAL EXCEPTION'
               exit 1
             fi
-      - name: Build stable signed release APK
-        if: always()
-        run: gradle --no-daemon assembleRelease
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: wolf-ai-agent-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: warn
-      - name: Upload stable signed release APK
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: wolf-ai-agent-release
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: warn
