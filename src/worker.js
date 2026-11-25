@@ -1085,6 +1085,20 @@ async function executeCompanionReadOnlyAction(env, capability, action, ownerId) 
   return await executeApprovedAction(env, validated, null, 1, ownerId);
 }
 
+async function claimCompanionMissionStep(env, {stepId, missionId, stepNo, ownerId}) {
+  // A single conditional UPDATE is the concurrency gate. D1 serializes the
+  // write; the NOT EXISTS predicates prevent parallel steps and out-of-order
+  // execution even when two API requests arrive at nearly the same time.
+  const result = await env.DB.prepare(
+    "UPDATE agent_steps SET status='running',started_at=CURRENT_TIMESTAMP " +
+    "WHERE id=? AND run_id=? AND step_no=? AND status='awaiting_execution_approval' AND approval_required=1 AND approved_by=? " +
+    "AND NOT EXISTS (SELECT 1 FROM agent_steps WHERE run_id=? AND status='running') " +
+    "AND NOT EXISTS (SELECT 1 FROM agent_steps WHERE run_id=? AND step_no<? AND status<>'completed') " +
+    "AND EXISTS (SELECT 1 FROM agent_runs WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running'))"
+  ).bind(stepId,missionId,stepNo,ownerId,missionId,missionId,stepNo,missionId,ownerId).run();
+  return Number(result?.meta?.changes || 0) === 1;
+}
+
 async function executeCompanionMissionStep(request, env, missionId) {
   const device=await authorizeCompanion(request,env);
   if(!device) return json({ok:false,error:"دستگاه مجاز نیست."},401);
@@ -1102,9 +1116,15 @@ async function executeCompanionMissionStep(request, env, missionId) {
   let action;
   try { action=validateCompanionReadOnlyAction(step.capability,input.prepared_action); }
   catch(error) { return json({ok:false,error:"عملیات ذخیره‌شده از اعتبارسنجی امنیتی عبور نکرد: "+String(error?.message||error).slice(0,180)},403); }
-  const claim=await env.DB.prepare("UPDATE agent_steps SET status='running',started_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_execution_approval'").bind(step.id).run();
-  if(!claim?.meta?.changes) return json({ok:false,error:"مرحله قبلاً اجرا یا تعیین تکلیف شده است."},409);
-  await env.DB.prepare("UPDATE agent_runs SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running')").bind(missionId,String(device.owner_id)).run();
+  const claim=await claimCompanionMissionStep(env,{
+    stepId:step.id,missionId,stepNo,ownerId:String(device.owner_id)
+  });
+  if(!claim) return json({ok:false,error:"مرحله قبلاً اجرا شده، مرحله قبلی کامل نشده یا مأموریت هم‌زمان در حال اجراست."},409);
+  const runClaim=await env.DB.prepare("UPDATE agent_runs SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running')").bind(missionId,String(device.owner_id)).run();
+  if(!runClaim?.meta?.changes) {
+    await env.DB.prepare("UPDATE agent_steps SET status='failed',error_text='Mission state changed before execution',completed_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'").bind(step.id).run();
+    return json({ok:false,error:"وضعیت مأموریت تغییر کرده است؛ اجرا لغو شد."},409);
+  }
   try{
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
     const output=await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
@@ -3142,4 +3162,4 @@ export default {
     }
   }
 };
-export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction };
+export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep };
