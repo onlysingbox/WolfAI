@@ -180,7 +180,7 @@ test("D1 claim gate rejects another owner's approval and a running mission step"
 });
 
 
-import { wolfProviderCatalog, wolfProviderOrder, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS } from "../src/worker.js";
+import { wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS } from "../src/worker.js";
 
 test("provider catalog reports only actually configured engines", () => {
   const env = { AI: { run() {} }, GEMINI_API_KEY: "configured", GROQ_API_KEY: "", ZAI_API_KEY: "configured", OPENROUTER_API_KEY: "configured" };
@@ -253,4 +253,12 @@ test("all six provider adapters parse successful mocked responses without exposi
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test("chat availability accepts Z.ai as the only configured provider", () => {
+  assert.equal(wolfHasAnyProvider({ ZAI_API_KEY: "configured" }), true);
+  assert.equal(wolfHasAnyProvider({ GROQ_API_KEY: "configured" }), true);
+  assert.equal(wolfHasAnyProvider({ AI: { run() {} } }), true);
+  assert.equal(wolfHasAnyProvider({}), false);
 });
