@@ -870,10 +870,25 @@ async function companionMissions(request, env) {
     const rows = await env.DB.prepare(
       "SELECT id, request_text, status, plan_json, created_at, updated_at FROM agent_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50"
     ).bind(String(device.owner_id)).all();
-    return json({ ok: true, missions: (rows.results || []).map(row => ({
-      id: row.id, request: row.request_text, status: row.status,
-      plan: safeJson(row.plan_json, []), created_at: row.created_at, updated_at: row.updated_at
-    })) });
+    const missions = [];
+    for (const row of rows.results || []) {
+      const stepRows = await env.DB.prepare("SELECT step_no, capability, title, status, input_json, output_json, error_text FROM agent_steps WHERE run_id=? ORDER BY step_no")
+        .bind(row.id).all();
+      missions.push({
+        id: row.id, request: row.request_text, status: row.status,
+        plan: safeJson(row.plan_json, []),
+        steps: (stepRows.results || []).map(step => {
+          const input = safeJson(step.input_json, {});
+          return {
+            step_no: step.step_no, capability: step.capability, title: step.title, status: step.status,
+            prepared_action: input.prepared_action || null,
+            result: safeJson(step.output_json, null), error: step.error_text || null
+          };
+        }),
+        created_at: row.created_at, updated_at: row.updated_at
+      });
+    }
+    return json({ ok: true, missions });
   }
 
   let body;
