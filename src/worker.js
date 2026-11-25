@@ -944,9 +944,7 @@ async function decideCompanionMission(request, env, missionId) {
   if (!["approve", "reject"].includes(decision)) return json({ ok: false, error: "تصمیم باید approve یا reject باشد." }, 400);
   if (!/^[0-9a-f-]{36}$/i.test(missionId)) return json({ ok: false, error: "شناسه مأموریت نامعتبر است." }, 400);
 
-  const mission = await env.DB.prepare(
-    "SELECT id, status FROM agent_runs WHERE id = ? AND owner_id = ? LIMIT 1"
-  ).bind(missionId, String(device.owner_id)).first();
+  const mission = await getOwnedCompanionMission(env,missionId,device.owner_id);
   if (!mission) return json({ ok: false, error: "مأموریت پیدا نشد." }, 404);
   if (mission.status !== "awaiting_approval") return json({ ok: false, error: "این مأموریت قبلاً تعیین تکلیف شده است." }, 409);
 
@@ -1040,6 +1038,12 @@ function validateCompanionReadOnlyAction(capability, action) {
   throw new Error("این عملیات فقط‌خواندنی پشتیبانی نمی‌شود.");
 }
 
+async function getOwnedCompanionMission(env, missionId, ownerId) {
+  return await env.DB.prepare(
+    "SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=? LIMIT 1"
+  ).bind(missionId,String(ownerId)).first();
+}
+
 async function prepareCompanionMissionStep(request, env, missionId) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok:false, error:"دستگاه مجاز نیست." },401);
@@ -1047,7 +1051,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   let body; try { body=await request.json(); } catch { return json({ok:false,error:"Invalid JSON"},400); }
   const stepNo=Number(body?.step_no);
   if (!Number.isInteger(stepNo)||stepNo<1||stepNo>8) return json({ok:false,error:"شماره مرحله نامعتبر است."},400);
-  const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
+  const run=await getOwnedCompanionMission(env,missionId,device.owner_id);
   if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
   if(run.status!=="approved_pending_execution") return json({ok:false,error:"ابتدا باید طرح مأموریت تأیید شده باشد."},409);
   const step=await env.DB.prepare("SELECT id,capability,title,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
@@ -3162,4 +3166,4 @@ export default {
     }
   }
 };
-export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep };
+export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission };
