@@ -7,6 +7,7 @@ import android.provider.ContactsContract
 import android.provider.AlarmClock
 import android.provider.Settings
 import android.provider.OpenableColumns
+import android.provider.CalendarContract
 import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.speech.RecognizerIntent
@@ -219,6 +220,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     val context = androidx.compose.ui.platform.LocalContext.current
     var showStorage by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
+    var showPlanner by remember { mutableStateOf(false) }
+    var eventTitle by remember { mutableStateOf("") }
+    var eventNotes by remember { mutableStateOf("") }
+    var plannerStatus by remember { mutableStateOf("برای ساخت رویداد، عنوان و توضیحات را وارد کن.") }
     var filesRefresh by remember { mutableIntStateOf(0) }
     var fileStatus by remember { mutableStateOf("فایل‌ها را از حافظه گوشی وارد فضای امن WOLF کن.") }
     var showContacts by remember { mutableStateOf(false) }
@@ -432,6 +437,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
                     item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("تقویم و یادآور",showPlanner) { showPlanner=true;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false } }
@@ -467,7 +473,26 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("بازکردن تنظیمات VPN به معنی روشن‌شدن تونل نیست؛ اتصال واقعی به API رسمی سرویس نیاز دارد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 }
-                if(showFiles) {
+                if(showPlanner) {
+                    Text("تقویم و برنامه‌ریزی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    Text("رویداد و قرار را آماده کن؛ ثبت نهایی در تقویم گوشی با تأیید خودت انجام می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(eventTitle,{eventTitle=it},modifier=Modifier.fillMaxWidth(),label={Text("عنوان رویداد")},singleLine=true)
+                    OutlinedTextField(eventNotes,{eventNotes=it},modifier=Modifier.fillMaxWidth(),label={Text("توضیحات")},minLines=3)
+                    Button(enabled=eventTitle.isNotBlank(),onClick={
+                        val begin=System.currentTimeMillis()+60L*60L*1000L
+                        val finish=begin+60L*60L*1000L
+                        val intent=Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI)
+                            .putExtra(CalendarContract.Events.TITLE,eventTitle.trim())
+                            .putExtra(CalendarContract.Events.DESCRIPTION,eventNotes.trim())
+                            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME,begin)
+                            .putExtra(CalendarContract.EXTRA_EVENT_END_TIME,finish)
+                        if(intent.resolveActivity(context.packageManager)!=null){context.startActivity(intent);plannerStatus="فرم رویداد در تقویم باز شد؛ تاریخ و ساعت را بررسی و ذخیره کن."}
+                        else plannerStatus="برنامه تقویم سازگار پیدا نشد."
+                    },modifier=Modifier.fillMaxWidth()){Text("افزودن به تقویم")}
+                    OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("تنظیم دسترسی اعلان‌ها")}
+                    Text("دسترسی اعلان‌ها فقط پس از فعال‌سازی دستی در تنظیمات گوشی کار می‌کند. این دسترسی به معنی خواندن تاریخچه کامل پیام‌رسان‌ها نیست.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    Text(plannerStatus,color=MaterialTheme.colorScheme.primary)
+                } else if(showFiles) {
                     Text("مدیریت فایل‌ها و اسناد",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
                     Text("PDF، Word، Excel، تصویر، صوت و فایل‌های متنی را وارد کن. فایل اصلی در فضای خصوصی WOLF کپی می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
