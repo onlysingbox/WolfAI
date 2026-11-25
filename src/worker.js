@@ -748,6 +748,12 @@ function chooseWolfModel(mode, userText) {
 }
 
 async function runWolfModel(env, messages, requestedMode, userText) {
+  // Enforce MASTER OFF at the shared model boundary so Telegram, Android,
+  // and every future worker feature obey the same server-side kill switch.
+  const masterEnabled = await getSetting(env, "companion_master_enabled", "true");
+  if (masterEnabled !== "true") {
+    throw new Error("MASTER OFF است؛ اجرای درخواست هوش مصنوعی متوقف شده است.");
+  }
   const complex = chooseWolfModel("auto", userText) === "gemma";
   const order = wolfProviderOrder(env, requestedMode, complex);
   if (!order.length) throw new Error("هیچ موتور رایگان و پیکربندی‌شده‌ای در دسترس نیست.");
@@ -2777,6 +2783,18 @@ export default {
           await telegram(env, "deleteMessage", {
             chat_id: message.body.chat_id,
             message_id: message.body.message_id
+          });
+          message.ack();
+          continue;
+        }
+        // MASTER OFF drops queued agent work instead of silently replaying it
+        // when the owner turns WOLF back on. Internal delayed-message cleanup
+        // above remains available and is not an AI task.
+        const masterEnabled = await getSetting(env, "companion_master_enabled", "true");
+        if (masterEnabled !== "true") {
+          console.log("Dropping queued WOLF task while MASTER OFF", {
+            messageId: message.id,
+            updateId: message.body?.update_id
           });
           message.ack();
           continue;
