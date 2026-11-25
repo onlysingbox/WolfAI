@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
             send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },
             createMission = { text -> apiCreateMission(securePrefs.getString("device_token", "") ?: "", text) },
-            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },
+            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },\n            decideMission = { id, decision -> apiMissionDecision(securePrefs.getString("device_token", "") ?: "", id, decision) },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
@@ -99,6 +99,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         } finally { conn.disconnect() }
     }
 
+    private suspend fun apiMissionDecision(token: String, missionId: String, decision: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/missions/$missionId/decision").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("decision", decision).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val body = stream.bufferedReader().use { it.readText() }
+            val obj = JSONObject(body)
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "ثبت تصمیم ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
+    }
+
     private suspend fun apiListMissions(token: String): JSONArray = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/missions").openConnection() as HttpURLConnection)
         try {
@@ -135,7 +151,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, setRemoteMaster: suspend (Boolean)->Unit, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -252,7 +268,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
                                     Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
                                     val steps = plan.optJSONArray("steps") ?: JSONArray()
-                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }
+                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }\n                                    if (mission.optString("status") == "awaiting_approval") {\n                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n                                            Button(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "approve") }.onSuccess { missionStatus = "طرح تأیید شد؛ هنوز اجرا نشده است." }.onFailure { missionStatus = it.message ?: "تأیید ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("تأیید طرح") }\n                                            OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "reject") }.onSuccess { missionStatus = "طرح رد شد." }.onFailure { missionStatus = it.message ?: "رد طرح ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("رد طرح") }\n                                        }\n                                    } else if (mission.optString("status") == "approved_pending_execution") { Text("تأیید شده، اما هنوز اجرا نشده است.", color = Gold) }
                                 }
                             }
                         }
