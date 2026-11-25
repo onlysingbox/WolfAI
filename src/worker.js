@@ -654,14 +654,14 @@ const WOLF_AI_DEFAULT_MODEL = "auto";
 // existing Workers AI binding. No billing fallback is ever attempted.
 const WOLF_EXTERNAL_PROVIDERS = {
   gemini: { key: "GEMINI_API_KEY", model: "gemini-2.5-flash", freeTier: true },
-  groq: { key: "GROQ_API_KEY", model: "llama-3.3-70b-versatile", freeTier: true },
+  groq: { key: "GROQ_API_KEY", model: "openai/gpt-oss-120b", freeTier: true },
   openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
 };
 function wolfProviderCatalog(env) {
   return [
     { id: "auto", label: "خودکار", configured: true, freeOnly: true },
-    { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true },
-    { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true },
+    { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.glm },
+    { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.gemma },
     ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
       id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq Llama 3.3" : "OpenRouter Free",
       configured: !!env[p.key], freeOnly: true, model: p.model,
@@ -673,8 +673,9 @@ function wolfProviderCatalog(env) {
 async function callOpenAICompatible(url, key, model, messages, maxTokens = 900) {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: "Bearer " + key },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.4 })
+    headers: { "content-type": "application/json", authorization: "Bearer " + key, ...(url.includes("openrouter.ai") ? { "HTTP-Referer": "https://wolfai.onlysingbox.workers.dev", "X-Title": "WOLF AI" } : {}) },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.4 }),
+    signal: AbortSignal.timeout(25000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error("provider_http_" + response.status + ": " + String(data.error?.message || data.message || "provider request failed").slice(0, 180));
@@ -691,7 +692,8 @@ async function callGemini(env, messages, maxTokens = 900) {
   }));
   const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 } })
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 } }),
+    signal: AbortSignal.timeout(25000)
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error("gemini_http_" + response.status + ": " + String(data.error?.message || "Gemini request failed").slice(0, 180));
