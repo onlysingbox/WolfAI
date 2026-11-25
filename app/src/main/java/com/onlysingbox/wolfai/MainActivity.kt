@@ -205,6 +205,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
     var pendingDeleteBucket by remember { mutableStateOf<Pair<String, File>?>(null) }
+    var showClearChatConfirm by remember { mutableStateOf(false) }
     var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
     val storageBuckets = remember(storageRefresh) { listOf("history" to "تاریخچه گفتگوها", "memory" to "حافظه بلندمدت", "notes" to "یادداشت‌ها", "files" to "فایل‌ها", "audio" to "صدا و ضبط‌ها").map { (key, label) -> key to (label to File(storageRoot, key).apply { mkdirs() }) } }
     fun folderBytes(file: File): Long = if (!file.exists()) 0L else if (file.isFile) file.length() else (file.listFiles()?.sumOf { folderBytes(it) } ?: 0L)
@@ -281,6 +282,25 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 dismissButton = {
                     TextButton(onClick = { pendingDeleteBucket = null }) { Text("انصراف") }
                 }
+            )
+        }
+        if (showClearChatConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearChatConfirm = false },
+                title = { Text("پاک کردن همه گفتگوها") },
+                text = { Text("تمام پیام‌های گفتگوی این دستگاه از تاریخچه محلی حذف می‌شوند. این کار قابل بازگشت نیست.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        activeRequest?.cancel()
+                        activeRequest = null
+                        busy = false
+                        chat.clear()
+                        persistChat()
+                        showClearChatConfirm = false
+                        status = if (historyFile.exists() && historyFile.length() > 2L) "پاک‌کردن تاریخچه ناموفق بود" else "همه گفتگوها پاک شدند"
+                    }) { Text("پاک کردن", color = Color(0xFFFF7777)) }
+                },
+                dismissButton = { TextButton(onClick = { showClearChatConfirm = false }) { Text("انصراف") } }
             )
         }
         Scaffold(containerColor = Navy) { padding ->
@@ -459,7 +479,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }) { Text(if (busy) "در حال اتصال..." else "اتصال WOLF") }
                     Text("ابتدا در گفتگوی خصوصی @OnlyWolfbot دستور /pair را بفرست و کد را اینجا وارد کن.", color=Color.LightGray)
                 } else {
-                    Text(status, color=Cyan)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(status, color=Cyan, modifier = Modifier.weight(1f))
+                        TextButton(enabled = chat.isNotEmpty(), onClick = { showClearChatConfirm = true }) {
+                            Text("پاک کردن گفتگو", color = Color(0xFFFF7777))
+                        }
+                    }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         items(chat) { item ->
                             Card(colors=CardDefaults.cardColors(containerColor=if(item.first=="تو") Panel else Color(0xFF123B55)), shape=RoundedCornerShape(16.dp)) {
