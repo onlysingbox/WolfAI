@@ -110,6 +110,20 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         } finally { conn.disconnect() }
     }
 
+    private fun findPhoneNumberByName(query: String): String? {
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
+            val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameCol).orEmpty()
+                val number = cursor.getString(numberCol).orEmpty()
+                if (name.contains(query, ignoreCase = true) && number.isNotBlank()) return number
+            }
+        }
+        return null
+    }
+
     private suspend fun readPhoneContacts(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) throw SecurityException("مجوز مخاطبین فعال نیست")
         val result = mutableListOf<Pair<String, String>>()
@@ -237,6 +251,16 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var alarmMinute by remember { mutableStateOf("00") }
     var deviceStatus by remember { mutableStateOf("اجرای برنامه‌ها و تنظیم هشدار گوشی") }
     val launchableApps = remember(showDeviceTools) { if (!showDeviceTools) emptyList() else context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(context.packageManager).toString().lowercase() } }
+    var pendingCallNumber by remember { mutableStateOf<String?>(null) }
+    val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val number = pendingCallNumber
+        pendingCallNumber = null
+        if (granted && !number.isNullOrBlank()) {
+            runCatching { context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))) }
+                .onSuccess { status = "تماس برقرار شد یا در حال برقراری است." }
+                .onFailure { status = "شروع تماس ناموفق بود: ${it.message}" }
+        } else if (!granted) status = "مجوز تماس داده نشد؛ تماس برقرار نشد."
+    }
     var contacts by remember { mutableStateOf<List<Pair<String,String>>>(emptyList()) }
     var contactSearch by remember { mutableStateOf("") }
     var contactsStatus by remember { mutableStateOf("برای مشاهده مخاطبین، مجوز گوشی لازم است.") }
@@ -320,9 +344,37 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             if (browser.resolveActivity(context.packageManager) != null) { context.startActivity(browser); return "صفحه در مرورگر باز شد: " + address }
             return "مرورگر انتخاب‌شده نصب نیست یا پیوند را باز نمی‌کند."
         }
-        if (command.contains("تماس با") || command.contains("شماره گیری")) {
+        val isWhatsappCall = command.contains("واتساپ") || command.contains("whatsapp")
+        val callIntent = command.contains("زنگ بزن") || command.contains("تماس بگیر") || command.contains("تماس با") || command.contains("شماره گیری") || command.contains("call ")
+        if (isWhatsappCall && callIntent) {
+            val target = raw.substringAfter("به ", raw.substringAfter("با واتساپ", raw.substringAfter("با whatsapp", ""))).replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
+            val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
+            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام مخاطب را دقیق بنویس و مجوز مخاطبین را فعال کن."
+            val digits = number.filter { it.isDigit() }
+            val wa = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")).setPackage("com.whatsapp")
+            if (wa.resolveActivity(context.packageManager) == null) return "واتساپ نصب نیست یا لینک مخاطب را باز نمی‌کند."
+            context.startActivity(wa)
+            scope.launch {
+                kotlinx.coroutines.delay(1800)
+                val service = WolfAccessibilityService.active
+                val clicked = service?.clickVisibleText("Voice call") == true ||
+                    service?.clickVisibleText("تماس صوتی") == true ||
+                    service?.clickVisibleText("Call") == true
+                status = if (clicked) "دکمه تماس واتساپ انتخاب شد؛ اگر واتساپ تأیید دیگری خواست آن را بررسی کن." else "گفتگوی مخاطب در واتساپ باز شد؛ دکمه تماس در این نسخه خودکار پیدا نشد."
+            }
+            return "گفتگوی مخاطب در واتساپ باز شد؛ در حال بررسی دکمه تماس."
+        }
+        if (callIntent) {
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
-            if (number != null) { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))); return "صفحه تماس باز شد؛ تماس نهایی با تأیید خودت انجام می‌شود." }
+                ?: raw.substringAfter("با ", raw.substringAfter("به ", "")).let { findPhoneNumberByName(it.replace("زنگ بزن", "").replace("تماس بگیر", "").trim()) }
+            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام یا شماره را دقیق بنویس و مجوز مخاطبین را فعال کن."
+            if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))))
+                return "درخواست تماس مستقیم ارسال شد."
+            }
+            pendingCallNumber = number
+            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+            return "برای برقراری تماس مستقیم، مجوز تماس اندروید درخواست شد."
         }
         if (command.contains("خواندن صفحه") || command.contains("متن صفحه") || command.contains("read screen")) {
             val service = WolfAccessibilityService.active ?: return "برای خواندن صفحه، ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
