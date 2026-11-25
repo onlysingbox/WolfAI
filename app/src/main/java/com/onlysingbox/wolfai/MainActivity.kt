@@ -328,6 +328,13 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val service = WolfAccessibilityService.active ?: return "برای خواندن صفحه، ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
             return service.readVisibleText()
         }
+        if (command.contains("در فیلد") && (command.contains("بنویس") || command.contains("وارد کن"))) {
+            val field = command.substringAfter("در فیلد").substringBefore("بنویس").substringBefore("وارد کن").trim()
+            val value = raw.substringAfter("بنویس", raw.substringAfter("وارد کن", "")).trim()
+            if (field.isBlank() || value.isBlank()) return "نام فیلد و متن موردنظر را مشخص کن."
+            val service = WolfAccessibilityService.active ?: return "ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
+            return if (service.enterText(field, value)) "متن در فیلد موردنظر وارد شد؛ ارسال یا ثبت نهایی با تأیید تو انجام می‌شود." else "فیلد موردنظر در صفحه پیدا نشد یا اجازه ورود متن نداد."
+        }
         if (command.contains("روی ") && (command.contains("بزن") || command.contains("کلیک"))) {
             val target = command.substringAfter("روی ").substringBefore("بزن").substringBefore("کلیک").trim()
             if (target.isBlank()) return "نام دکمه یا گزینه مشخص نیست."
