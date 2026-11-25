@@ -11,7 +11,7 @@ This file records verified implementation, not planned features.
 - Persian push-to-talk speech recognition and Persian text-to-speech.
 - Local JSON chat history stored in the app-private files directory.
 - MASTER OFF immediately cancels the active Android request and suppresses late replies.
-- Server-side companion MASTER OFF endpoint and request gate are implemented in Worker source.
+- Server-side companion MASTER OFF endpoint is enforced at the shared AI model boundary for Android and Telegram AI requests; queued WOLF agent jobs are acknowledged and dropped while OFF, so they do not replay when re-enabled. Internal delayed-message cleanup remains operational.
 - Conversation context is sent from local Android storage; companion chat turns are no longer written to D1 per message.
 - AI model selection UI: automatic, GLM-4.7-Flash, Gemma 4 26B, Gemini 2.5 Flash, Groq Llama 3.3, and OpenRouter free model.\n- Worker provider adapters and free-only fallback routing added for Cloudflare Workers AI, Gemini, Groq, and OpenRouter. External providers remain unavailable until their API keys are configured as Worker secrets. DeepSeek API is deliberately disabled because a reliably free, no-billing API tier has not been verified.\n- Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
@@ -35,6 +35,7 @@ This file records verified implementation, not planned features.
 - Turn-taking live voice with interruption.
 - Logo assets based on the owner's exact wolf image.
 - Full privacy, security, storage, and end-to-end device tests.
+- MASTER OFF is now enforced for model execution and queued WOLF work in source; production behavior remains unverified until the Worker is deployed with owner approval.
 
 ## Release blockers
 1. The first APK was built with the GitHub runner's debug signing key. GitHub-hosted runners generate their debug keystore locally; it was not persisted in the repository or workflow artifact. A later APK signed with a different key cannot update that installation. A stable signing key must be established, and the first installation compatibility issue must be resolved without changing the application ID.
