@@ -184,14 +184,14 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 }
                 if (showModels) {
                     Text("انتخاب موتور", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                    Text("انتخاب خودکار برای کارهای عادی از GLM و برای درخواست‌های پیچیده از Gemma استفاده می‌کند.", color = Color.LightGray)
+                    Text("مسیریابی خودکار بین موتورهای رایگانِ فعال؛ در صورت خطا فقط به سرویس رایگانِ دارای کلید می‌رود. هیچ مسیر پولی فعال نیست.", color = Color.LightGray)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("auto" to "خودکار", "glm" to "GLM", "gemma" to "Gemma").forEach { (key, label) ->
+                        listOf("auto" to "خودکار", "glm" to "GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
                             FilterChip(selected = selectedModel == key, onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
                         }
                     }
-                    Text("سهمیه دقیق مصرف و زمان بازنشانی این مدل‌ها از رابط عمومی Workers AI قابل دریافت نیست؛ عدد ساختگی نمایش داده نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodySmall)
-                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "GLM-4.7-Flash"; "gemma" -> "Gemma 4 26B"; else -> "خودکار" }, color = Cyan)
+                    Text("Gemini، Groq و OpenRouter فقط پس از ثبت کلید API در Cloudflare فعال می‌شوند. سهمیه فقط وقتی API اعلام کند نمایش داده می‌شود؛ در غیر این صورت نامشخص است. DeepSeek API تا تأیید مسیر رایگان فعال نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodySmall)
+                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq Llama 3.3"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 if (showStorage) {
                     Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
