@@ -46,9 +46,6 @@ import java.io.File
 import android.content.SharedPreferences
 import java.util.Locale
 import org.json.JSONArray
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
 private val Navy = Color(0xFF071426)
@@ -711,10 +708,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                 }
                                             }.getOrElse { "استخراج Word ناموفق بود: \${it.message}" }
                                             "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: \${it.message}" }
-                                            "pdf" -> runCatching {
-                                                PDFBoxResourceLoader.init(context)
-                                                PDDocument.load(file).use { doc -> PDFTextStripper().getText(doc).take(12000).ifBlank { "متن قابل استخراج پیدا نشد؛ ممکن است PDF اسکن‌شده باشد." } }
-                                            }.getOrElse { "استخراج PDF ناموفق بود: \${it.message}" }
+                                            "pdf" -> "فایل PDF با موفقیت ذخیره شده است؛ استخراج متن PDF در نسخه بعدی اضافه می‌شود."
                                             else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
                                         }
                                         fileStatus="نتیجه خواندن: ${file.name}"
