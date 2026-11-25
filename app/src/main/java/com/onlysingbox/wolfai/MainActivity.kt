@@ -46,12 +46,58 @@ import java.io.File
 import android.content.SharedPreferences
 import java.util.Locale
 import org.json.JSONArray
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
 private val Navy = Color(0xFF071426)
 private val Panel = Color(0xFF10243D)
 private val Cyan = Color(0xFF18C8FF)
 private val Gold = Color(0xFFFFC928)
+
+
+private fun decodeXmlText(value: String): String = value
+    .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    .replace("&quot;", "\"").replace("&apos;", "'")
+
+private fun readXlsxText(file: File): String {
+    java.util.zip.ZipFile(file).use { zip ->
+        val shared = mutableListOf<String>()
+        zip.getEntry("xl/sharedStrings.xml")?.let { entry ->
+            val xml = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+            Regex("<si\\b[^>]*>(.*?)</si>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { item ->
+                shared.add(Regex("<t\\b[^>]*>(.*?)</t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(item.groupValues[1]).joinToString("") { decodeXmlText(it.groupValues[1]) })
+            }
+        }
+        val sheets = zip.entries().asSequence().filter { !it.isDirectory && it.name.matches(Regex("xl/worksheets/sheet\\d+\\.xml")) }
+            .sortedBy { it.name.substringAfter("sheet").substringBefore(".").toIntOrNull() ?: 0 }.toList()
+        if (sheets.isEmpty()) return "برگه‌ای برای خواندن در فایل پیدا نشد."
+        val output = StringBuilder()
+        sheets.forEachIndexed { sheetIndex, entry ->
+            val xml = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+            if (sheetIndex > 0) output.append("\n")
+            output.append("برگه ").append(sheetIndex + 1).append("\n")
+            Regex("<row\\b[^>]*>(.*?)</row>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(xml).forEach { row ->
+                val cells = Regex("<c\\b([^>]*)>(.*?)</c>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(row.groupValues[1])
+                val values = cells.map { cell ->
+                    val attrs = cell.groupValues[1]
+                    val body = cell.groupValues[2]
+                    val type = Regex("""\bt="([^"]+)""").find(attrs)?.groupValues?.get(1)
+                    val raw = Regex("<v\\b[^>]*>(.*?)</v>", setOf(RegexOption.DOT_MATCHES_ALL)).find(body)?.groupValues?.get(1)
+                    when (type) {
+                        "s" -> raw?.toIntOrNull()?.let { shared.getOrNull(it) }.orEmpty()
+                        "inlineStr" -> Regex("<t\\b[^>]*>(.*?)</t>", setOf(RegexOption.DOT_MATCHES_ALL)).findAll(body).joinToString("") { decodeXmlText(it.groupValues[1]) }
+                        else -> raw?.let(::decodeXmlText).orEmpty()
+                    }
+                }
+                if (values.any { it.isNotBlank() }) output.append(values.joinToString(" | ")).append("\n")
+                if (output.length >= 12000) return output.toString().take(12000)
+            }
+        }
+        return output.toString().ifBlank { "محتوای متنی قابل استخراج در این فایل پیدا نشد." }.take(12000)
+    }
+}
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -656,14 +702,19 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         val ext=file.extension.lowercase()
                                         previewText=when(ext) {
                                             "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
-                                            "docx","xlsx" -> runCatching {
+                                            "docx" -> runCatching {
                                                 java.util.zip.ZipFile(file).use { zip ->
-                                                    val entry=if(ext=="docx") zip.getEntry("word/document.xml") else zip.getEntry("xl/sharedStrings.xml")
+                                                    val entry=zip.getEntry("word/document.xml")
                                                     if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
-                                                        xml.readText().replace(Regex("</w:p>|</si>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("\\s+")," ").take(12000)
+                                                        xml.readText().replace(Regex("</w:p>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \t]+")," ").take(12000)
                                                     }
                                                 }
-                                            }.getOrElse { "استخراج فایل ناموفق بود: ${it.message}" }
+                                            }.getOrElse { "استخراج Word ناموفق بود: \${it.message}" }
+                                            "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: \${it.message}" }
+                                            "pdf" -> runCatching {
+                                                PDFBoxResourceLoader.init(context)
+                                                PDDocument.load(file).use { doc -> PDFTextStripper().getText(doc).take(12000).ifBlank { "متن قابل استخراج پیدا نشد؛ ممکن است PDF اسکن‌شده باشد." } }
+                                            }.getOrElse { "استخراج PDF ناموفق بود: \${it.message}" }
                                             else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
                                         }
                                         fileStatus="نتیجه خواندن: ${file.name}"
