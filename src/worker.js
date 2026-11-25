@@ -830,6 +830,20 @@ async function companionPair(request, env) {
   await log(env, env.ADMIN_TELEGRAM_ID, "companion.device_paired", "companion_device", tokenHash.slice(0, 16), { device_name: deviceName });
   return json({ ok: true, token, device_name: deviceName });
 }
+async function companionStatus(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  const enabled = await getSetting(env, "companion_master_enabled", "true");
+  return json({
+    ok: true,
+    master_enabled: enabled === "true",
+    providers: wolfProviderCatalog(env).map(provider => ({
+      id: provider.id, label: provider.label, configured: !!provider.configured,
+      free_only: !!provider.freeOnly, model: provider.model || null,
+      quota: provider.quota || null, note: provider.note || null
+    }))
+  });
+}
 async function companionMaster(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
@@ -2655,6 +2669,9 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
+    }
+    if (request.method === "GET" && url.pathname === "/api/companion/status") {
+      return await companionStatus(request, env);
     }
     if (request.method === "POST" && url.pathname === "/api/companion/master") {
       return await companionMaster(request, env);
