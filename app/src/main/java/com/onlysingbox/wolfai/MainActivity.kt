@@ -57,7 +57,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
             send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },
             createMission = { text -> apiCreateMission(securePrefs.getString("device_token", "") ?: "", text) },
-            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },\n            decideMission = { id, decision -> apiMissionDecision(securePrefs.getString("device_token", "") ?: "", id, decision) },
+            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },
+            decideMission = { id, decision -> apiMissionDecision(securePrefs.getString("device_token", "") ?: "", id, decision) },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
@@ -268,7 +269,13 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
                                     Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
                                     val steps = plan.optJSONArray("steps") ?: JSONArray()
-                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }\n                                    if (mission.optString("status") == "awaiting_approval") {\n                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {\n                                            Button(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "approve") }.onSuccess { missionStatus = "طرح تأیید شد؛ هنوز اجرا نشده است." }.onFailure { missionStatus = it.message ?: "تأیید ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("تأیید طرح") }\n                                            OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "reject") }.onSuccess { missionStatus = "طرح رد شد." }.onFailure { missionStatus = it.message ?: "رد طرح ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("رد طرح") }\n                                        }\n                                    } else if (mission.optString("status") == "approved_pending_execution") { Text("تأیید شده، اما هنوز اجرا نشده است.", color = Gold) }
+                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }
+                                    if (mission.optString("status") == "awaiting_approval") {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "approve") }.onSuccess { missionStatus = "طرح تأیید شد؛ هنوز اجرا نشده است." }.onFailure { missionStatus = it.message ?: "تأیید ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("تأیید طرح") }
+                                            OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "reject") }.onSuccess { missionStatus = "طرح رد شد." }.onFailure { missionStatus = it.message ?: "رد طرح ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("رد طرح") }
+                                        }
+                                    } else if (mission.optString("status") == "approved_pending_execution") { Text("تأیید شده، اما هنوز اجرا نشده است.", color = Gold) }
                                 }
                             }
                         }
