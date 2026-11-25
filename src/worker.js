@@ -3001,6 +3001,31 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
     }
+async function companionArtifacts(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  if (request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT id,kind,title,mime_type,created_at,substr(content_text,1,1200) AS excerpt FROM artifacts WHERE owner_id=? ORDER BY created_at DESC LIMIT 100").bind(String(device.owner_id)).all();
+    return json({ ok: true, artifacts: rows.results || [] });
+  }
+  if (request.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
+  if (await getSetting(env, "companion_master_enabled", "true") !== "true") return json({ ok: false, error: "MASTER OFF است؛ ذخیره سند متوقف است." }, 423);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const title = String(body?.title || "").trim().slice(0, 180);
+  const content = String(body?.content || "");
+  const kind = String(body?.kind || "document").trim().slice(0, 32);
+  if (!title || !content.trim() || content.length > 30000) return json({ ok: false, error: "عنوان و متن سند الزامی است؛ حداکثر متن ۳۰ هزار نویسه." }, 400);
+  if (body?.confirm !== true) return json({ ok: false, error: "برای ذخیره، تأیید صریح همین سند لازم است.", requires_confirmation: true, preview: { title, kind, characters: content.length } }, 409);
+  const id = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO artifacts (id, owner_id, kind, title, mime_type, storage_provider, content_text, metadata_json) VALUES (?, ?, ?, ?, 'text/markdown', 'd1', ?, ?)").bind(id, String(device.owner_id), kind, title, content, JSON.stringify({ source: "WOLF Android companion", approved_by_owner: true })).run();
+  await log(env, device.owner_id, "companion.artifact_created", "artifact", id, { title, kind, characters: content.length });
+  return json({ ok: true, artifact: { id, title, kind, characters: content.length } });
+}
+
+    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/artifacts") {
+      return await companionArtifacts(request, env);
+    }
     if (request.method === "GET" && url.pathname === "/api/companion/status") {
       return await companionStatus(request, env);
     }
