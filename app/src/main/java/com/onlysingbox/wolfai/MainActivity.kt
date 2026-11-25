@@ -55,7 +55,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         setContent { WolfApp(
             token = securePrefs.getString("device_token", "") ?: "",
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
-            send = { text, history -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history) },
+            send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
     override fun onDestroy() { tts?.stop(); tts?.shutdown(); super.onDestroy() }
 
-    private suspend fun apiChat(token: String, text: String, history: List<Pair<String,String>>): String = withContext(Dispatchers.IO) {
+    private suspend fun apiChat(token: String, text: String, history: List<Pair<String,String>>, model: String): String = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/chat").openConnection() as HttpURLConnection)
         try {
             conn.requestMethod = "POST"; conn.connectTimeout = 15000; conn.readTimeout = 60000
@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             conn.outputStream.use { out ->
                 val turns = JSONArray()
                 history.takeLast(10).forEach { (role, content) -> turns.put(JSONObject().put("role", if (role == "تو") "user" else "assistant").put("content", content)) }
-                out.write(JSONObject().put("text", text).put("session_id", "android-main").put("history", turns).toString().toByteArray())
+                out.write(JSONObject().put("text", text).put("session_id", "android-main").put("history", turns).put("model", model).toString().toByteArray())
             }
             val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
             val body = stream.bufferedReader().use { it.readText() }
@@ -104,13 +104,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>)->String, setRemoteMaster: suspend (Boolean)->Unit, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, setRemoteMaster: suspend (Boolean)->Unit, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
     var showStorage by remember { mutableStateOf(false) }
+    var selectedModel by remember { mutableStateOf(storagePrefs.getString("ai_model", "auto") ?: "auto") }
+    var showModels by remember { mutableStateOf(false) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
     var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
@@ -176,7 +178,21 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
                 }
-                OutlinedButton(onClick = { showStorage = !showStorage }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { showStorage = !showStorage; showModels = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false }) { Text("موتورهای هوش مصنوعی") }
+                }
+                if (showModels) {
+                    Text("انتخاب موتور", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    Text("انتخاب خودکار برای کارهای عادی از GLM و برای درخواست‌های پیچیده از Gemma استفاده می‌کند.", color = Color.LightGray)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("auto" to "خودکار", "glm" to "GLM", "gemma" to "Gemma").forEach { (key, label) ->
+                            FilterChip(selected = selectedModel == key, onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
+                        }
+                    }
+                    Text("سهمیه دقیق مصرف و زمان بازنشانی این مدل‌ها از رابط عمومی Workers AI قابل دریافت نیست؛ عدد ساختگی نمایش داده نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodySmall)
+                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "GLM-4.7-Flash"; "gemma" -> "Gemma 4 26B"; else -> "خودکار" }, color = Cyan)
+                }
                 if (showStorage) {
                     Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     Text("مصرف‌شده: %.2f از %.0f گیگابایت".format(usedGb, quotaGb), color = Cyan)
@@ -270,7 +286,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             activeRequest = scope.launch {
                                 try {
                                     val prior = chat.dropLast(1).takeLast(10).toList()
-                                    val a=send(q, prior)
+                                    val a=send(q, prior, selectedModel)
                                     if (masterEnabled) {
                                         chat.add("WOLF" to a)
                                         persistChat()
