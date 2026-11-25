@@ -207,3 +207,43 @@ test("provider model identifiers are current and never select the retired Groq L
   assert.equal(WOLF_EXTERNAL_PROVIDERS.groq.model, "openai/gpt-oss-120b");
   assert.equal(WOLF_EXTERNAL_PROVIDERS.openrouter.model, "meta-llama/llama-3.3-70b-instruct:free");
 });
+
+
+import { callWolfProvider } from "../src/worker.js";
+
+test("all five provider adapters parse successful mocked responses without exposing keys", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).includes("generativelanguage.googleapis.com")) {
+      return new Response(JSON.stringify({
+        candidates: [{ content: { parts: [{ text: "Gemini test reply" }] } }],
+        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 3 }
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: "OpenAI compatible test reply" } }],
+      usage: { prompt_tokens: 5, completion_tokens: 4 }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const messages = [{ role: "user", content: "test" }];
+    const cloudflareEnv = { AI: { async run(model) { return { choices: [{ message: { content: model + " reply" } }], usage: { total_tokens: 2 } }; } } };
+    assert.match((await callWolfProvider(cloudflareEnv, "glm", messages)).answer, /glm-4.7-flash/);
+    assert.match((await callWolfProvider(cloudflareEnv, "gemma", messages)).answer, /gemma-4-26b-a4b-it/);
+    const gemini = await callWolfProvider({ GEMINI_API_KEY: "never-log-this" }, "gemini", messages);
+    assert.equal(gemini.answer, "Gemini test reply");
+    assert.equal(gemini.usage.promptTokenCount, 4);
+    const groq = await callWolfProvider({ GROQ_API_KEY: "never-log-this" }, "groq", messages);
+    assert.equal(groq.answer, "OpenAI compatible test reply");
+    assert.match(calls.at(-1).init.body, /openai\/gpt-oss-120b/);
+    const openrouter = await callWolfProvider({ OPENROUTER_API_KEY: "never-log-this" }, "openrouter", messages);
+    assert.equal(openrouter.answer, "OpenAI compatible test reply");
+    assert.equal(calls.at(-1).init.headers["HTTP-Referer"], "https://wolfai.onlysingbox.workers.dev");
+    assert.match(calls.at(-1).init.body, /llama-3\.3-70b-instruct:free/);
+    assert.ok(calls.every(x => !x.url.includes("never-log-this")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
