@@ -77,7 +77,7 @@ The following Cloudflare Worker secrets are optional and are never stored in the
 - `OPENROUTER_API_KEY` for the free-only model `meta-llama/llama-3.3-70b-instruct:free`. Provider access and rate limits can change.
 - Existing `AI` binding continues to provide Cloudflare GLM and Gemma.
 
-No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Exact remaining quota is shown only when a provider exposes reliable usage information.
+No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Cloudflare documents a 10,000-Neuron daily free allocation; on Workers Free, requests fail after the allocation, while Workers Paid can bill usage above it. Keep the account on Workers Free if no charge is acceptable. Gemini's free tier may use submitted content to improve Google products. Groq must remain on its Free tier; OpenRouter is pinned to the `:free` model. Exact remaining quota is shown only when a provider exposes reliable usage information.
 
 ## Remaining agreed product work
 The provider adapters are one subsystem, not completion of WOLF. The Android app still needs the device-control permission/service layer, contact and call workflows, messaging intents/connectors, file/document workspace, scheduled tasks and approvals, market-data adapters, searchable memory controls, security/permission audit, full master-off enforcement across background jobs, and end-to-end tests. These must be implemented and verified before a final release is called ready.
