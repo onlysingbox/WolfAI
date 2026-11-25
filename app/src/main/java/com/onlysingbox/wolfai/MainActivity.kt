@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.provider.ContactsContract
 import android.provider.AlarmClock
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.speech.RecognizerIntent
@@ -216,6 +217,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var status by remember { mutableStateOf("آماده گفتگو") }
     val context = androidx.compose.ui.platform.LocalContext.current
     var showStorage by remember { mutableStateOf(false) }
+    var showFiles by remember { mutableStateOf(false) }
+    var filesRefresh by remember { mutableIntStateOf(0) }
+    var fileStatus by remember { mutableStateOf("فایل‌ها را از حافظه گوشی وارد فضای امن WOLF کن.") }
     var showContacts by remember { mutableStateOf(false) }
     var showDeviceTools by remember { mutableStateOf(false) }
     var appSearch by remember { mutableStateOf("") }
@@ -330,6 +334,26 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (granted) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خواندن مخاطبین ناموفق بود." } }
         else contactsStatus = "مجوز مخاطبین داده نشد."
     }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                val resolver = context.contentResolver
+                var displayName = "document"
+                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) displayName = cursor.getString(0) ?: displayName
+                }
+                val safeName = displayName.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(100).ifBlank { "document" }
+                val destination = File(storageRoot, "files").apply { mkdirs() }
+                var target = File(destination, safeName)
+                var suffix = 1
+                while (target.exists()) { target = File(destination, "${target.nameWithoutExtension}_${suffix++}.${target.extension}") }
+                resolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+                    ?: error("خواندن فایل ممکن نشد")
+                fileStatus = "فایل «${target.name}» وارد شد."
+                filesRefresh++
+            }.onFailure { fileStatus = "واردکردن فایل ناموفق بود: ${it.message}" }
+        }
+    }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!spoken.isNullOrBlank()) message = spoken
@@ -395,6 +419,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
                     item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false } }
                 }
@@ -429,7 +454,26 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("بازکردن تنظیمات VPN به معنی روشن‌شدن تونل نیست؛ اتصال واقعی به API رسمی سرویس نیاز دارد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 }
-                if(showSettings) {
+                if(showFiles) {
+                    Text("مدیریت فایل‌ها و اسناد",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    Text("PDF، Word، Excel، تصویر، صوت و فایل‌های متنی را وارد کن. فایل اصلی در فضای خصوصی WOLF کپی می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
+                    Text(fileStatus,color=MaterialTheme.colorScheme.primary)
+                    val importedFiles = remember(filesRefresh) { File(storageRoot,"files").apply{mkdirs()}.listFiles()?.filter{it.isFile}?.sortedByDescending{it.lastModified()} ?: emptyList() }
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                        items(importedFiles) { file ->
+                            Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                                Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(file.name,color=MaterialTheme.colorScheme.onSurface)
+                                        Text("%.1f KB".format(file.length()/1024.0),color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                                    }
+                                    TextButton(onClick={fileStatus="برای بازکردن فایل، از برنامه مدیریت فایل گوشی استفاده کن؛ نسخه داخلی خواندن این قالب هنوز اضافه نشده است."}) { Text("جزئیات") }
+                                }
+                            }
+                        }
+                    }
+                } else if(showSettings) {
                     Text("تنظیمات برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
                     Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
