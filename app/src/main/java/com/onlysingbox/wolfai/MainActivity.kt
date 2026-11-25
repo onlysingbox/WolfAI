@@ -322,6 +322,16 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
             if (number != null) { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))); return "صفحه تماس باز شد؛ تماس نهایی با تأیید خودت انجام می‌شود." }
         }
+        if (command.contains("خواندن صفحه") || command.contains("متن صفحه") || command.contains("read screen")) {
+            val service = WolfAccessibilityService.active ?: return "برای خواندن صفحه، ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
+            return service.readVisibleText()
+        }
+        if (command.contains("روی ") && (command.contains("بزن") || command.contains("کلیک"))) {
+            val target = command.substringAfter("روی ").substringBefore("بزن").substringBefore("کلیک").trim()
+            if (target.isBlank()) return "نام دکمه یا گزینه مشخص نیست."
+            val service = WolfAccessibilityService.active ?: return "ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
+            return if (service.clickVisibleText(target)) "روی «" + target + "» کلیک شد." else "گزینه «" + target + "» در صفحه فعلی پیدا نشد."
+        }
         if (command.contains("vpn")) {
             context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
             return "تنظیمات VPN باز شد؛ روشن‌کردن تونل به اتصال رسمی سرویس نیاز دارد."
@@ -530,6 +540,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("فعال‌سازی کنترل پیشرفته برنامه‌ها")}
+                            Text(if(WolfAccessibilityService.active!=null) "کنترل پیشرفته فعال است." else "برای کنترل عناصر داخل برنامه‌ها، این دسترسی را فقط در صورت تمایل از تنظیمات اندروید فعال کن.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                             Text("حریم خصوصی و کنترل",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                             Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("WOLF AI AGENT • نسخه 0.3",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
