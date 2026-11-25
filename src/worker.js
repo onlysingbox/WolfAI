@@ -659,7 +659,7 @@ const WOLF_EXTERNAL_PROVIDERS = {
   zai: { key: "ZAI_API_KEY", model: "glm-4.7-flash", freeTier: true },
   openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
 };
-export function wolfHasAnyProvider(env) {
+function wolfHasAnyProvider(env) {
   return !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.ZAI_API_KEY || env.OPENROUTER_API_KEY);
 }
 function wolfProviderCatalog(env) {
