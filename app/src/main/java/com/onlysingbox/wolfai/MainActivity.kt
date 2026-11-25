@@ -234,6 +234,19 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
     val context = androidx.compose.ui.platform.LocalContext.current
+    fun findPhoneNumberByName(query: String): String? {
+        if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
+            val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameCol).orEmpty()
+                val number = cursor.getString(numberCol).orEmpty()
+                if (name.contains(query, ignoreCase = true) && number.isNotBlank()) return number
+            }
+        }
+        return null
+    }
     var showStorage by remember { mutableStateOf(false) }
     var showFiles by remember { mutableStateOf(false) }
     var showPlanner by remember { mutableStateOf(false) }
@@ -368,7 +381,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
                 ?: raw.substringAfter("با ", raw.substringAfter("به ", "")).let { findPhoneNumberByName(it.replace("زنگ بزن", "").replace("تماس بگیر", "").trim()) }
             if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام یا شماره را دقیق بنویس و مجوز مخاطبین را فعال کن."
-            if (checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+            if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
                 context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))))
                 return "درخواست تماس مستقیم ارسال شد."
             }
