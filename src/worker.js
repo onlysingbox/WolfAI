@@ -658,6 +658,9 @@ const WOLF_EXTERNAL_PROVIDERS = {
   zai: { key: "ZAI_API_KEY", model: "glm-4.7-flash", freeTier: true },
   openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
 };
+export function wolfHasAnyProvider(env) {
+  return !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.ZAI_API_KEY || env.OPENROUTER_API_KEY);
+}
 function wolfProviderCatalog(env) {
   return [
     { id: "auto", label: "خودکار", configured: true, freeOnly: true },
@@ -1167,7 +1170,7 @@ async function companionChat(request, env) {
   if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ درخواست هوش مصنوعی پذیرفته نمی‌شود." }, 423);
   const userText = String(body?.text || "").trim().slice(0, 12000);
   if (!userText) return json({ ok: false, error: "متن پیام خالی است." }, 400);
-  if (!env.AI?.run && !env.GEMINI_API_KEY && !env.GROQ_API_KEY && !env.OPENROUTER_API_KEY) return json({ ok: false, error: "هیچ موتور رایگان پیکربندی‌شده‌ای در دسترس نیست." }, 503);
+  if (!wolfHasAnyProvider(env)) return json({ ok: false, error: "هیچ موتور رایگان پیکربندی‌شده‌ای در دسترس نیست." }, 503);
   const sessionId = String(body?.session_id || "default").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "default";
   const history = Array.isArray(body?.history) ? body.history.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-10).map(item => ({ role: item.role, content: String(item.content).slice(0, 3000) })) : [];
   const language = await responseLanguage(env, userText);
@@ -3025,7 +3028,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first();
-        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.ZAI_API_KEY || env.OPENROUTER_API_KEY), ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
+        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: wolfHasAnyProvider(env), ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
