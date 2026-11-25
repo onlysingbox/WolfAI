@@ -779,8 +779,8 @@ async function companionChat(request, env) {
     (language === "fa"
       ? "\n\nاین یک مکالمه صوتی/متنی معمولی با مالک است، نه صرفاً دریافت فرمان. طبیعی، صمیمی، مرتبط و روان پاسخ بده. اگر کاربر درخواست انجام کار بیرونی کرد، فعلاً فقط توضیح بده که درخواست باید از مسیر مأموریت و تأیید امن اجرا شود؛ ادعا نکن عملی انجام داده‌ای. هیچ اقدام بیرونی را از این endpoint اجرا نکن."
       : "\n\nThis is ordinary spoken/text conversation with the owner, not merely command input. Be natural, warm, relevant and conversational. If the user asks for an external action, explain that it must go through the agent task and approval flow; do not claim it was performed. Never execute external side effects from this endpoint.");
-  const preferredMode = await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-  const modelKey = chooseWolfModel(preferredMode, userText);
+  const requestedMode = ["auto", "glm", "gemma"].includes(String(body?.model || "")) ? String(body.model) : await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+  const modelKey = chooseWolfModel(requestedMode, userText);
   try {
     const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
       messages: [{ role: "system", content: system }, ...history, { role: "user", content: userText }],
