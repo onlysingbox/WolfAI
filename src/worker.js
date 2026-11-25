@@ -663,7 +663,7 @@ function wolfProviderCatalog(env) {
     { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.glm },
     { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.gemma },
     ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
-      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq Llama 3.3" : "OpenRouter Free",
+      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq GPT-OSS 120B" : "OpenRouter Free",
       configured: !!env[p.key], freeOnly: true, model: p.model,
       quota: "از API عمومی قابل تأیید نیست"
     })),
