@@ -192,6 +192,8 @@ private fun readXlsxText(file: File): String {
     }
 }
 
+private data class CalendarEvent(val title: String, val begin: Long, val end: Long, val location: String, val description: String)
+
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private lateinit var securePrefs: android.content.SharedPreferences
@@ -218,7 +220,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             storagePrefs = securePrefs,
             storageRoot = File(filesDir, "wolf_storage"),
             historyFile = File(filesDir, "wolf_storage/history/chat.json"),
-            loadContacts = { readPhoneContacts() }
+            loadContacts = { readPhoneContacts() },
+            loadCalendarEvents = { readCalendarEvents() }
         ) }
     }
     private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
@@ -273,6 +276,42 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
         result.distinctBy { it.second }.take(2000)
     }
+    private suspend fun readCalendarEvents(): List<CalendarEvent> = withContext(Dispatchers.IO) {
+        if (checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+            throw SecurityException("مجوز خواندن تقویم فعال نیست")
+        }
+        val begin = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+        val end = System.currentTimeMillis() + 90L * 24L * 60L * 60L * 1000L
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+            .appendPath(begin.toString()).appendPath(end.toString()).build()
+        val projection = arrayOf(
+            CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.END,
+            CalendarContract.Instances.EVENT_LOCATION,
+            CalendarContract.Instances.DESCRIPTION
+        )
+        val result = mutableListOf<CalendarEvent>()
+        contentResolver.query(uri, projection, null, null, CalendarContract.Instances.BEGIN + " ASC")?.use { cursor ->
+            val titleCol = cursor.getColumnIndex(CalendarContract.Instances.TITLE)
+            val beginCol = cursor.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val endCol = cursor.getColumnIndex(CalendarContract.Instances.END)
+            val locationCol = cursor.getColumnIndex(CalendarContract.Instances.EVENT_LOCATION)
+            val descriptionCol = cursor.getColumnIndex(CalendarContract.Instances.DESCRIPTION)
+            while (cursor.moveToNext() && result.size < 100) {
+                val title = cursor.getString(titleCol).orEmpty()
+                if (title.isNotBlank()) result.add(CalendarEvent(
+                    title,
+                    cursor.getLong(beginCol),
+                    cursor.getLong(endCol),
+                    cursor.getString(locationCol).orEmpty(),
+                    cursor.getString(descriptionCol).orEmpty()
+                ))
+            }
+        }
+        result
+    }
+
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
     override fun onDestroy() { tts?.stop(); tts?.shutdown(); super.onDestroy() }
 
@@ -366,7 +405,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -394,6 +433,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var eventTitle by remember { mutableStateOf("") }
     var eventNotes by remember { mutableStateOf("") }
     var plannerStatus by remember { mutableStateOf("برای ساخت رویداد، عنوان و توضیحات را وارد کن.") }
+    var calendarEvents by remember { mutableStateOf<List<CalendarEvent>>(emptyList()) }
+    var calendarEventsStatus by remember { mutableStateOf("برای مشاهده قرارهای ثبت‌شده، دسترسی تقویم را فعال کن.") }
     var filesRefresh by remember { mutableIntStateOf(0) }
     var fileStatus by remember { mutableStateOf("فایل‌ها را از حافظه گوشی وارد فضای امن WOLF کن.") }
     var showContacts by remember { mutableStateOf(false) }
@@ -633,6 +674,15 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (granted) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خواندن مخاطبین ناموفق بود." } }
         else contactsStatus = "مجوز مخاطبین داده نشد."
     }
+    val calendarPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scope.launch {
+            calendarEventsStatus = "در حال خواندن تقویم..."
+            runCatching { loadCalendarEvents() }
+                .onSuccess { calendarEvents = it; calendarEventsStatus = it.size.toString() + " رویداد پیدا شد." }
+                .onFailure { calendarEventsStatus = it.message ?: "خواندن تقویم ناموفق بود." }
+        } else calendarEventsStatus = "مجوز تقویم داده نشد؛ هیچ رویدادی خوانده نشد."
+    }
+
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -808,7 +858,37 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         else plannerStatus="برنامه تقویم سازگار پیدا نشد."
                     },modifier=Modifier.fillMaxWidth()){Text("افزودن به تقویم")}
                     OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("تنظیم دسترسی اعلان‌ها")}
-                    Text("دسترسی اعلان‌ها فقط پس از فعال‌سازی دستی در تنظیمات گوشی کار می‌کند. این دسترسی به معنی خواندن تاریخچه کامل پیام‌رسان‌ها نیست.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                    HorizontalDivider()
+                    Text("رویدادهای تقویم",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Button(onClick={
+                            if(context.checkSelfPermission(Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED) {
+                                scope.launch {
+                                    calendarEventsStatus="در حال خواندن تقویم..."
+                                    runCatching { loadCalendarEvents() }
+                                        .onSuccess { calendarEvents=it;calendarEventsStatus=it.size.toString()+" رویداد پیدا شد." }
+                                        .onFailure { calendarEventsStatus=it.message ?: "خواندن تقویم ناموفق بود." }
+                                }
+                            } else calendarPermission.launch(Manifest.permission.READ_CALENDAR)
+                        }) { Text("خواندن تقویم گوشی") }
+                        OutlinedButton(onClick={calendarEvents=emptyList();calendarEventsStatus="فهرست محلی پاک شد؛ رویدادهای اصلی تقویم حذف نمی‌شوند."}) { Text("پاک‌کردن فهرست") }
+                    }
+                    Text(calendarEventsStatus,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.bodySmall)
+                    if(calendarEvents.isNotEmpty()) {
+                        LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                            items(calendarEvents) { event ->
+                                Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                                    Column(Modifier.padding(10.dp),verticalArrangement=Arrangement.spacedBy(3.dp)) {
+                                        Text(event.title,color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleSmall)
+                                        Text(java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM,java.text.DateFormat.SHORT).format(java.util.Date(event.begin)),color=MaterialTheme.colorScheme.primary)
+                                        if(event.location.isNotBlank()) Text(event.location,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                                        if(event.description.isNotBlank()) Text(event.description.take(240),color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text("WOLF فقط رویدادهای ۷ روز گذشته تا ۹۰ روز آینده را می‌خواند؛ هیچ رویدادی را تغییر یا حذف نمی‌کند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Text(plannerStatus,color=MaterialTheme.colorScheme.primary)
                 } else if(showFiles) {
                     Text("مدیریت فایل‌ها و اسناد",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
