@@ -16,6 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Worker JavaScript syntax
         run: node --check src/worker.js
+      - name: Test mission execution safety boundaries
+        run: node --test tests/*.test.mjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
