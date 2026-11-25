@@ -472,6 +472,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var darkTheme by remember { mutableStateOf(storagePrefs.getBoolean("dark_theme", true)) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
+    var noteTitle by remember { mutableStateOf("") }
+    var noteBody by remember { mutableStateOf("") }
+    var noteSearch by remember { mutableStateOf("") }
+    var noteStatus by remember { mutableStateOf("یادداشت‌ها فقط روی همین دستگاه ذخیره می‌شوند.") }
+    var notesRefresh by remember { mutableIntStateOf(0) }
+    var editingNote by remember { mutableStateOf<File?>(null) }
     var pendingDeleteBucket by remember { mutableStateOf<Pair<String, File>?>(null) }
     var showClearChatConfirm by remember { mutableStateOf(false) }
     var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
@@ -1121,6 +1127,56 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Slider(value = quotaGb, onValueChange = { quotaGb = it }, valueRange = 20f..200f, steps = 17)
                     Button(onClick = { storagePrefs.edit().putInt("storage_quota_gb", quotaGb.toInt()).apply(); status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
                     Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = Color.LightGray)
+
+                    HorizontalDivider(color = Color(0xFF33445E))
+                    Text("یادداشت‌های شخصی", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Text(noteStatus, color = Cyan, style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(value = noteTitle, onValueChange = { noteTitle = it }, modifier = Modifier.fillMaxWidth(), label = { Text("عنوان یادداشت") }, singleLine = true)
+                    OutlinedTextField(value = noteBody, onValueChange = { noteBody = it }, modifier = Modifier.fillMaxWidth(), label = { Text("متن یادداشت") }, minLines = 3, maxLines = 6)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = noteTitle.isNotBlank() && noteBody.isNotBlank(), onClick = {
+                            runCatching {
+                                val dir = File(storageRoot, "notes").apply { mkdirs() }
+                                val target = editingNote ?: File(dir, "note_${System.currentTimeMillis()}.md")
+                                val safeTitle = noteTitle.trim().replace("\\n", " ").take(120)
+                                val content = "# " + safeTitle + "\\n\\n" + noteBody.trim() + "\\n"
+                                val temporary = File(dir, target.name + ".tmp")
+                                temporary.writeText(content, Charsets.UTF_8)
+                                if (!temporary.renameTo(target)) { target.writeText(content, Charsets.UTF_8); temporary.delete() }
+                            }.onSuccess {
+                                editingNote = null
+                                noteTitle = ""; noteBody = ""
+                                notesRefresh++; storageRefresh++
+                                noteStatus = "یادداشت ذخیره شد."
+                            }.onFailure { noteStatus = "ذخیره یادداشت ناموفق بود: ${it.message}" }
+                        }, modifier = Modifier.weight(1f)) { Text(if (editingNote == null) "ذخیره یادداشت" else "ذخیره تغییرات") }
+                        OutlinedButton(onClick = { editingNote = null; noteTitle = ""; noteBody = "" }, modifier = Modifier.weight(1f)) { Text("پاک‌کردن فرم") }
+                    }
+                    OutlinedTextField(value = noteSearch, onValueChange = { noteSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("جست‌وجو در یادداشت‌ها") }, singleLine = true)
+                    val savedNotes = remember(notesRefresh) { File(storageRoot, "notes").apply { mkdirs() }.listFiles()?.filter { it.isFile && it.extension == "md" }?.sortedByDescending { it.lastModified() } ?: emptyList() }
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 240.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(savedNotes.filter { file -> file.readText(Charsets.UTF_8).contains(noteSearch, ignoreCase = true) }) { file ->
+                            val raw = runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("")
+                            val title = raw.lineSequence().firstOrNull()?.removePrefix("# ")?.ifBlank { file.nameWithoutExtension } ?: file.nameWithoutExtension
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text(title, color = Color.White, style = MaterialTheme.typography.titleSmall)
+                                    Text(raw.lineSequence().drop(2).joinToString("\\n").take(240), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = {
+                                            editingNote = file
+                                            noteTitle = title
+                                            noteBody = raw.lineSequence().drop(2).joinToString("\\n").trim()
+                                            noteStatus = "یادداشت برای ویرایش بارگذاری شد."
+                                        }) { Text("ویرایش") }
+                                        TextButton(onClick = {
+                                            runCatching { file.delete() }.onSuccess { notesRefresh++; storageRefresh++; noteStatus = "یادداشت حذف شد." }.onFailure { noteStatus = "حذف یادداشت ناموفق بود." }
+                                        }) { Text("حذف", color = Color(0xFFFF7777)) }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(storageBuckets) { bucket ->
                             val (key, pair) = bucket
