@@ -18,20 +18,21 @@ This file records verified implementation, not planned features.
 - Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
 
-## Mission proposal API (source implemented, deployment pending)
+## Mission proposal and gated execution API (source implemented, deployment pending)
 - Authenticated Android companion endpoint: `POST /api/companion/missions` accepts `{\"text\":\"...\"}` and uses the configured free-only model router to create a JSON proposal.
 - `GET /api/companion/missions` lists only the authenticated owner's missions.
 - Plans are capped at 8 steps; capability values are allowlisted and unknown values become `manual_review`. All steps require approval. The endpoint stores proposals in `agent_runs` and `agent_steps` and writes an activity log.
-- This is proposal storage only. It does not execute phone, messaging, file, finance, web, or other external actions. Invalid model JSON fails closed without creating a mission.
+- Mission creation is proposal-only. Invalid model JSON fails closed without creating a mission. After the whole plan is approved, the owner can prepare an individual step. The Worker converts only supported read-only capabilities into a typed action, validates its action type and required arguments, stores it, and returns the exact action for review. A separate explicit Android action executes that exact stored action. Supported initial actions are web search/open, private memory search, artifact search, finance summary, system health, and read-only GitHub listing/workflow/file reads. Writes and external side effects are not executable through this path.
 - The route is protected by companion bearer authentication and MASTER OFF. Production use requires Worker deployment and the existing D1 migration `0002_agent_platform.sql` to be applied.
 
-## Android mission UI (source committed; CI build verified)
+## Android mission UI (source committed; latest execution-controls build pending)
 - The app calls the authenticated mission proposal API to create and list proposals.
 - It displays the generated summary, steps, capability labels, and awaiting-approval status. MASTER OFF disables proposal creation.
-- The owner can approve or reject a pending proposal from Android. Approval changes the run and steps to `approved_pending_execution`; rejection marks them `rejected`. Approval does not execute any step.
+- The owner can approve or reject a pending proposal from Android. Approval changes the run and steps to `approved_pending_execution`; rejection marks them `rejected`.
+- For supported read-only steps, Android can request an exact prepared action, display its JSON details, and require a second explicit tap before executing that action. It refreshes per-step status and displays the result/error. Unsupported capabilities remain unexecutable and require manual review.
 
 ## CI verification
-- GitHub Actions run `45546196445` for commit `f14bfb303afa6dd3e2adcbcb888b21f06cfc8009` completed successfully on 2026-11-25.
+- GitHub Actions run `45546196445` for commit `f14bfb303afa6dd3e2adcbcb888b21f06cfc8009` completed successfully on 2026-11-25. The newer secure-execution and Android UI changes are still awaiting their CI result.
 - The workflow passed `node --check src/worker.js` and the Android `assembleDebug` build.
 - An earlier run for the preceding Android mission UI commit failed Kotlin compilation due to malformed newline escaping; the source was corrected in the later commit and the subsequent CI run passed.
 - CI verifies syntax and compilation only. It does not run Worker/D1 integration tests or device-level acceptance tests.
@@ -42,7 +43,7 @@ This file records verified implementation, not planned features.
 - Server-side production deployment of the new companion endpoints.
 - Exact 60 GB per-category allocations and complete file management.
 - A complete provider quota dashboard with reset times and historical per-model usage. Provider APIs do not consistently expose this information; currently only returned usage metadata is forwarded, not a verified remaining-quota counter.
-- General agent task proposals are now available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions; POST creates a proposal with up to 8 steps). Every generated step is stored as `awaiting_approval` and `approval_required=1`. The endpoint does not execute actions. Android mission UI, Android approve/reject controls and the authenticated decision endpoint are now implemented in source. Approval remains proposal-only; durable step execution, permission-specific action adapters and result verification remain unimplemented.
+- General agent missions are available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions and step states; POST creates up to 8 proposal steps). The authenticated decision endpoint approves/rejects the plan. The first execution phase adds a prepare-and-confirm path for a narrow allowlist of read-only actions. Each prepared action is stored per step and requires a separate user tap to execute. This is not yet a general-purpose executor; messaging, calling, device control, purchases, deletion, file writes, GitHub writes, scheduling and other side effects remain unavailable. Production deployment, D1 migration, and end-to-end execution tests remain pending.
 - Email, calendar, messaging, browser automation and OAuth connectors inside Android.
 - Crypto/market analysis center and exchange data integration.
 - Contacts resolution and confirmed phone/video calling.
