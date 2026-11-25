@@ -1,5 +1,8 @@
 package com.onlysingbox.wolfai
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.provider.ContactsContract
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
@@ -67,7 +70,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
             storageRoot = File(filesDir, "wolf_storage"),
-            historyFile = File(filesDir, "wolf_storage/history/chat.json")
+            historyFile = File(filesDir, "wolf_storage/history/chat.json"),
+            loadContacts = { readPhoneContacts() }
         ) }
     }
     private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
@@ -98,6 +102,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         } finally { conn.disconnect() }
     }
 
+    private suspend fun readPhoneContacts(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) throw SecurityException("مجوز مخاطبین فعال نیست")
+        val result = mutableListOf<Pair<String, String>>()
+        contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " COLLATE LOCALIZED ASC")?.use { cursor ->
+            val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) { val name = cursor.getString(nameCol).orEmpty(); val number = cursor.getString(numberCol).orEmpty(); if (name.isNotBlank() && number.isNotBlank()) result.add(name to number) }
+        }
+        result.distinctBy { it.second }.take(2000)
+    }
     override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
     override fun onDestroy() { tts?.stop(); tts?.shutdown(); super.onDestroy() }
 
@@ -186,13 +200,18 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var showStorage by remember { mutableStateOf(false) }
+    var showContacts by remember { mutableStateOf(false) }
+    var contacts by remember { mutableStateOf<List<Pair<String,String>>>(emptyList()) }
+    var contactSearch by remember { mutableStateOf("") }
+    var contactsStatus by remember { mutableStateOf("برای مشاهده مخاطبین، مجوز گوشی لازم است.") }
     var showMissions by remember { mutableStateOf(false) }
     var missionText by remember { mutableStateOf("") }
     var missionBusy by remember { mutableStateOf(false) }
@@ -262,6 +281,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         return false
     }
     var activeRequest by remember { mutableStateOf<Job?>(null) }
+    val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خواندن مخاطبین ناموفق بود." } }
+        else contactsStatus = "مجوز مخاطبین داده نشد."
+    }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!spoken.isNullOrBlank()) message = spoken
@@ -327,12 +350,41 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showStorage = !showStorage; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                    OutlinedButton(onClick = { showStorage = !showStorage; showContacts = false; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
                     OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
-                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false }) { Text("موتورهای هوش مصنوعی") }
+                    OutlinedButton(onClick = {
+                        showContacts = !showContacts; showStorage = false; showModels = false; showMissions = false
+                        if (showContacts) {
+                            if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خطا در خواندن مخاطبین" } }
+                            else contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+                        }
+                    }) { Text(if (showContacts) "بازگشت" else "مخاطبین") }
+                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false; showContacts = false }) { Text("موتورهای هوش مصنوعی") }
                 }
                 }
-                if (showMissions) {
+                if (showContacts) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("مخاطبین گوشی", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                        TextButton(onClick = { showContacts = false }) { Text("بازگشت") }
+                    }
+                    Text(contactsStatus, color = Cyan)
+                    OutlinedTextField(contactSearch, { contactSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("جست‌وجوی نام یا شماره") }, singleLine = true)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(contacts.filter { it.first.contains(contactSearch, true) || it.second.contains(contactSearch, true) }) { item ->
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(item.first, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                        Text(item.second, color = Color.LightGray)
+                                    }
+                                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL).setData(android.net.Uri.parse("tel:" + android.net.Uri.encode(item.second)))) }) { Text("تماس") }
+                                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_SENDTO).setData(android.net.Uri.parse("smsto:" + android.net.Uri.encode(item.second)))) }) { Text("پیامک") }
+                                }
+                            }
+                        }
+                    }
+                    Text("WOLF فقط شماره‌ها را می‌خواند؛ تماس و پیامک در برنامه پیش‌فرض گوشی باز می‌شوند و ارسال خودکار انجام نمی‌شود.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                } else if (showMissions) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                         TextButton(onClick = { showMissions = false }) { Text("بازگشت") }
