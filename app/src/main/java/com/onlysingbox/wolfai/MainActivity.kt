@@ -119,11 +119,12 @@ private suspend fun readScannedPdfText(file: File, context: Context): String = w
         if (!api.init(root.absolutePath, "fas+eng")) {
             error("موتور OCR نتوانست مدل‌های فارسی و انگلیسی را بارگذاری کند")
         }
-        renderer = PdfRenderer(descriptor)
+        val pdfRenderer = PdfRenderer(descriptor)
+        renderer = pdfRenderer
         val output = StringBuilder()
-        val pageLimit = minOf(renderer.pageCount, 8)
+        val pageLimit = minOf(pdfRenderer.pageCount, 8)
         for (index in 0 until pageLimit) {
-            val page = renderer.openPage(index)
+            val page = pdfRenderer.openPage(index)
             val scale = minOf(1.7f, 2200f / page.width.toFloat())
             val bitmap = Bitmap.createBitmap(
                 (page.width * scale).toInt().coerceAtLeast(1),
@@ -133,7 +134,7 @@ private suspend fun readScannedPdfText(file: File, context: Context): String = w
             try {
                 page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                 api.setImage(bitmap)
-                val text = api.uT F8Text()
+                val text = api.getUTF8Text()
                 if (!text.isNullOrBlank()) {
                     if (output.isNotEmpty()) output.append("\n\n")
                     output.append("--- صفحه ").append(index + 1).append(" ---\n").append(text.trim())
@@ -145,7 +146,7 @@ private suspend fun readScannedPdfText(file: File, context: Context): String = w
             if (output.length >= 12000) break
         }
         if (output.isEmpty()) "در صفحات اسکن‌شده متن قابل تشخیصی پیدا نشد."
-        else output.toString().take(12000) + if (renderer.pageCount > pageLimit) "\n\nفقط ۸ صفحه اول پردازش شد." else ""
+        else output.toString().take(12000) + if (pdfRenderer.pageCount > pageLimit) "\n\nفقط ۸ صفحه اول پردازش شد." else ""
     } finally {
         api.recycle()
         renderer?.close()
@@ -830,7 +831,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         previewFile=file
                                         if (ext == "pdf") {
                                             previewText = ""
-                                            fileStatus = "در حال استخراج متن PDF؛ اگر سند اسکن‌شده باشد، OCR اجرا می‌شود..."
+                                            fileStatus = "در حال استخراج PDF؛ در صورت اسکن بودن، مدل‌های فارسی و انگلیسی فقط در بار اول دریافت می‌شوند و سپس آفلاین کار می‌کنند..."
                                             scope.launch {
                                                 val embedded = runCatching { withContext(Dispatchers.IO) { readPdfText(file, context) } }
                                                     .getOrElse { "استخراج PDF ناموفق بود: ${it.message}" }
