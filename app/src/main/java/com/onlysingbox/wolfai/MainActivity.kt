@@ -217,6 +217,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
             loadProviderStatus = { apiProviderStatus(securePrefs.getString("device_token", "") ?: "") },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
+            stopSpeaking = { tts?.stop() },
             storagePrefs = securePrefs,
             storageRoot = File(filesDir, "wolf_storage"),
             historyFile = File(filesDir, "wolf_storage/history/chat.json"),
@@ -405,7 +406,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var localMode by remember { mutableStateOf(storagePrefs.getBoolean("local_mode", false)) }
     var pairCode by remember { mutableStateOf("") }
@@ -1258,6 +1259,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 speechLauncher.launch(intent)
                             }
                         ) { Icon(Icons.Default.Mic, contentDescription = "ضبط صدا") }
+                        OutlinedButton(
+                            onClick = { stopSpeaking(); status = "پخش صدای WOLF متوقف شد." },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) { Text("توقف صدا") }
                         FilledIconButton(
                             enabled = masterEnabled && message.isNotBlank() && !busy,
                             onClick = {
