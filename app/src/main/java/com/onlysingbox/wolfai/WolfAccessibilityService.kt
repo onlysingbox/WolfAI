@@ -79,11 +79,21 @@ class WolfAccessibilityService : AccessibilityService() {
     }
 
     private fun findNode(node: AccessibilityNodeInfo, query: String): AccessibilityNodeInfo? {
-        val label = listOfNotNull(node.text?.toString(), node.contentDescription?.toString()).joinToString(" ")
-        if (label.contains(query, ignoreCase = true)) return node
+        val target = query.trim()
+        if (target.isBlank()) return null
+        val exact = findNodeMatch(node, target, true)
+        return exact ?: findNodeMatch(node, target, false)
+    }
+
+    private fun findNodeMatch(node: AccessibilityNodeInfo, query: String, exact: Boolean): AccessibilityNodeInfo? {
+        val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
+            .map { it.trim() }.filter { it.isNotBlank() }
+        val matches = if (exact) labels.any { it.equals(query, ignoreCase = true) }
+            else labels.any { it.contains(query, ignoreCase = true) }
+        if (matches) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            val found = findNode(child, query)
+            val found = findNodeMatch(child, query, exact)
             if (found != null) return found
         }
         return null
