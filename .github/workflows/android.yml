@@ -38,21 +38,20 @@ jobs:
         with:
           gradle-version: "8.9"
       - name: Prepare stable release signing key
-        if: ${{ env.WOLF_KEYSTORE_BASE64 != '' && env.WOLF_KEYSTORE_PASSWORD != '' }}
         run: |
+          test -n "$WOLF_KEYSTORE_BASE64"
+          test -n "$WOLF_KEYSTORE_PASSWORD"
           printf '%s' "$WOLF_KEYSTORE_BASE64" | base64 --decode > "$WOLF_KEYSTORE_FILE"
           test -s "$WOLF_KEYSTORE_FILE"
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - name: Build stable signed release APK
-        if: ${{ env.WOLF_KEYSTORE_BASE64 != '' && env.WOLF_KEYSTORE_PASSWORD != '' }}
         run: gradle --no-daemon assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: wolf-ai-agent-debug
           path: app/build/outputs/apk/debug/app-debug.apk
       - name: Upload stable signed release APK
-        if: ${{ env.WOLF_KEYSTORE_BASE64 != '' && env.WOLF_KEYSTORE_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: wolf-ai-agent-release
