@@ -13,7 +13,7 @@ This file records verified implementation, not planned features.
 - MASTER OFF immediately cancels the active Android request and suppresses late replies.
 - Server-side companion MASTER OFF endpoint is enforced at the shared AI model boundary for Android and Telegram AI requests; queued WOLF agent jobs are acknowledged and dropped while OFF, so they do not replay when re-enabled. Internal delayed-message cleanup remains operational.
 - Conversation context is sent from local Android storage; companion chat turns are no longer written to D1 per message.
-- AI model selection UI: automatic, GLM-4.7-Flash, Gemma 4 26B, Gemini 2.5 Flash, Groq Llama 3.3, and OpenRouter free model.
+- AI model selection UI: automatic, GLM-4.7-Flash, Gemma 4 26B, Gemini 2.5 Flash, Groq GPT-OSS 120B, and OpenRouter free model.
 - Worker provider adapters and free-only fallback routing added for Cloudflare Workers AI, Gemini, Groq, and OpenRouter. External providers remain unavailable until their API keys are configured as Worker secrets. DeepSeek API is deliberately disabled because a reliably free, no-billing API tier has not been verified.
 - Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
@@ -31,6 +31,14 @@ This file records verified implementation, not planned features.
 - It displays the generated summary, steps, capability labels, and awaiting-approval status. MASTER OFF disables proposal creation.
 - The owner can approve or reject a pending proposal from Android. Approval changes the run and steps to `approved_pending_execution`; rejection marks them `rejected`.
 - For supported read-only steps, Android can request an exact prepared action, display its JSON details, and require a second explicit tap before executing that action. It refreshes per-step status and displays the result/error. Unsupported capabilities remain unexecutable and require manual review.
+
+## AI provider implementation update (2026-11-25)
+- Updated Groq from the retired `llama-3.3-70b-versatile` model to `openai/gpt-oss-120b` following Groq's August 16, 2026 shutdown notice for the old model.
+- Confirmed the Cloudflare model identifiers against current Cloudflare model documentation: `@cf/zai-org/glm-4.7-flash` and `@cf/google/gemma-4-26b-a4b-it`.
+- Added 25-second request timeouts to Gemini, Groq, and OpenRouter HTTP calls, plus OpenRouter application identification headers.
+- Android model selection now reads the authenticated `/api/companion/status` provider catalog. Engines without a configured binding/key are disabled rather than presented as selectable.
+- Added automated tests for configured-provider reporting, free-only routing order, and current model identifiers. These are configuration/routing tests, not live provider inference tests.
+- Live Worker configuration check on 2026-11-25: `AI` binding is present; `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY` are absent. Therefore only the two Cloudflare-bound engines are configured. No external-provider live tests can pass until the user adds those secrets.
 
 ## CI verification
 - Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
@@ -64,10 +72,10 @@ Do not mark WOLF AI as ready until the release blockers and the agreed end-to-en
 
 
 ## Free provider setup
-The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git:
-- `GEMINI_API_KEY` for the Gemini free tier. Google states free-tier prompts may be used to improve its products; do not send sensitive/private material through this provider unless that policy is acceptable.
-- `GROQ_API_KEY` for Groq's free developer tier, subject to provider rate limits.
-- `OPENROUTER_API_KEY` for a free-model route. The configured model is explicitly suffixed `:free`; free catalog availability and limits can change.
+The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git. As last checked on 2026-11-25, all three external secrets were absent from the live Worker settings:
+- `GEMINI_API_KEY` for the Gemini 2.5 Flash free tier. Google states free-tier prompts may be used to improve its products; do not send sensitive/private material through this provider unless that policy is acceptable.
+- `GROQ_API_KEY` for Groq's Free tier using `openai/gpt-oss-120b`; do not upgrade the Groq account to a paid tier if zero-cost use is required.
+- `OPENROUTER_API_KEY` for a free-model route. The configured OpenRouter model is explicitly suffixed `:free`; Groq uses `openai/gpt-oss-120b` on its Free tier. Provider access and rate limits can change.
 - Existing `AI` binding continues to provide Cloudflare GLM and Gemma.
 
 No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Exact remaining quota is shown only when a provider exposes reliable usage information.
