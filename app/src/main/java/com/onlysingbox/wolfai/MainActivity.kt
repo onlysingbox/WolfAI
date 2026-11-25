@@ -467,44 +467,61 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                         }
                     }
-                    OutlinedTextField(message, {message=it}, modifier=Modifier.fillMaxWidth(), enabled=masterEnabled, label={Text("با WOLF صحبت کن...")})
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp), verticalAlignment=Alignment.CenterVertically) {
-                        FilledTonalIconButton(enabled=masterEnabled, onClick={
-                            val intent=Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
-                                putExtra(RecognizerIntent.EXTRA_PROMPT, "با WOLF صحبت کن")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = message,
+                            onValueChange = { message = it },
+                            modifier = Modifier.weight(1f),
+                            enabled = masterEnabled && !busy,
+                            label = { Text("با WOLF صحبت کن...") },
+                            maxLines = 4
+                        )
+                        FilledTonalIconButton(
+                            enabled = masterEnabled && !busy,
+                            onClick = {
+                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR")
+                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "با WOLF صحبت کن")
+                                }
+                                speechLauncher.launch(intent)
                             }
-                            speechLauncher.launch(intent)
-                        }) { Icon(Icons.Default.Mic, contentDescription="فرمان صوتی") }
-                        Button(enabled=masterEnabled && message.isNotBlank()&&!busy, onClick={
-                            val q=message.trim()
-                            message=""
-                            chat.add("تو" to q)
-                            persistChat()
-                            busy=true
-                            status="WOLF در حال فکر کردن..."
-                            activeRequest = scope.launch {
-                                try {
-                                    val prior = chat.dropLast(1).takeLast(10).toList()
-                                    val a=send(q, prior, selectedModel)
-                                    if (masterEnabled) {
-                                        chat.add("WOLF" to a)
-                                        persistChat()
-                                        speak(a)
-                                        status="آماده گفتگو"
+                        ) { Icon(Icons.Default.Mic, contentDescription = "ضبط صدا") }
+                        FilledIconButton(
+                            enabled = masterEnabled && message.isNotBlank() && !busy,
+                            onClick = {
+                                val q = message.trim()
+                                message = ""
+                                chat.add("تو" to q)
+                                persistChat()
+                                busy = true
+                                status = "WOLF در حال فکر کردن..."
+                                activeRequest = scope.launch {
+                                    try {
+                                        val prior = chat.dropLast(1).takeLast(10).toList()
+                                        val a = send(q, prior, selectedModel)
+                                        if (masterEnabled) {
+                                            chat.add("WOLF" to a)
+                                            persistChat()
+                                            speak(a)
+                                            status = "آماده گفتگو"
+                                        }
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        status = "درخواست متوقف شد"
+                                        throw e
+                                    } catch (e: Exception) {
+                                        status = e.message ?: "ارتباط برقرار نشد"
+                                    } finally {
+                                        busy = false
+                                        activeRequest = null
                                     }
-                                } catch(e: kotlinx.coroutines.CancellationException) {
-                                    status="درخواست متوقف شد"
-                                    throw e
-                                } catch(e:Exception) {
-                                    status=e.message ?: "ارتباط برقرار نشد"
-                                } finally {
-                                    busy=false
-                                    activeRequest=null
                                 }
                             }
-                        }, modifier=Modifier.weight(1f)) { Icon(Icons.Default.Send, contentDescription=null); Spacer(Modifier.width(8.dp)); Text("ارسال") }
+                        ) { Icon(Icons.Default.Send, contentDescription = "ارسال پیام") }
                     }
                     Text("میکروفون فقط با لمس دکمه فعال می‌شود. صدای خام ذخیره نمی‌شود.", color=Color.LightGray, style=MaterialTheme.typography.bodySmall)
                 }
