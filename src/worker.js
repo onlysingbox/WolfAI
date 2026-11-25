@@ -745,21 +745,27 @@ async function companionPair(request, env) {
   await log(env, env.ADMIN_TELEGRAM_ID, "companion.device_paired", "companion_device", tokenHash.slice(0, 16), { device_name: deviceName });
   return json({ ok: true, token, device_name: deviceName });
 }
+async function companionMaster(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  if (typeof body?.enabled !== "boolean") return json({ ok: false, error: "enabled must be boolean" }, 400);
+  await putSetting(env, "companion_master_enabled", body.enabled ? "true" : "false");
+  await log(env, device.owner_id, body.enabled ? "companion.master_on" : "companion.master_off", "companion_device", device.hash.slice(0, 16), {});
+  return json({ ok: true, enabled: body.enabled });
+}
 async function companionChat(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست؛ دوباره جفت‌سازی کن." }, 401);
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
-  const userText = String(body?.text || "").trim().slice(0, 4000);
+  const enabled = await getSetting(env, "companion_master_enabled", "true");
+  if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ درخواست هوش مصنوعی پذیرفته نمی‌شود." }, 423);
   if (!userText) return json({ ok: false, error: "متن پیام خالی است." }, 400);
   if (!env.AI?.run) return json({ ok: false, error: "موتور هوش مصنوعی در دسترس نیست." }, 503);
   const sessionId = String(body?.session_id || "default").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "default";
-  const sessionKey = "companion_conversation:" + device.hash + ":" + sessionId;
-  let history = [];
-  try {
-    const parsed = JSON.parse(await getSetting(env, sessionKey, "[]"));
-    history = Array.isArray(parsed) ? parsed.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-12) : [];
-  } catch { history = []; }
+  const history = Array.isArray(body?.history) ? body.history.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-10).map(item => ({ role: item.role, content: String(item.content).slice(0, 3000) })) : [];
   const language = await responseLanguage(env, userText);
   let ownerMemory = [];
   try {
@@ -782,10 +788,8 @@ async function companionChat(request, env) {
     }, modelKey);
     const answer = String(output?.choices?.[0]?.message?.content || "").trim();
     if (!answer) throw new Error("مدل پاسخ متنی برنگرداند.");
-    const next = [...history, { role: "user", content: userText }, { role: "assistant", content: answer }].slice(-12);
-    await putSetting(env, sessionKey, JSON.stringify(next));
-    await putSetting(env, "ai_last_model", usedModel + (fallback ? ":fallback" : ""));
-    await log(env, device.owner_id, "companion.chat", "companion_device", device.hash.slice(0, 16), { session_id: sessionId, input_chars: userText.length, output_chars: answer.length });
+    // Keep conversation turns on the Android device; avoid per-message D1 writes.
+    void usedModel; void fallback;
     return json({ ok: true, reply: answer, language, session_id: sessionId, model: usedModel });
   } catch (error) {
     console.error("companion chat failed", error);
@@ -2570,6 +2574,9 @@ export default {
     }
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
+    }
+    if (request.method === "POST" && url.pathname === "/api/companion/master") {
+      return await companionMaster(request, env);
     }
     if (request.method === "POST" && url.pathname === "/api/companion/chat") {
       return await companionChat(request, env);
