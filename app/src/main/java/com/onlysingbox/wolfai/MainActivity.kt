@@ -936,7 +936,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                     java.util.zip.ZipFile(file).use { zip ->
                                                         val entry=zip.getEntry("word/document.xml")
                                                         if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
-                                                            xml.readText().replace(Regex("</w:p>"),"\\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \\t]+")," ").take(12000)
+                                                            xml.readText().replace(Regex("</w:p>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \\t]+")," ").take(12000)
                                                         }
                                                     }
                                                 }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
@@ -1138,8 +1138,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             runCatching {
                                 val dir = File(storageRoot, "notes").apply { mkdirs() }
                                 val target = editingNote ?: File(dir, "note_${System.currentTimeMillis()}.md")
-                                val safeTitle = noteTitle.trim().replace("\\n", " ").take(120)
-                                val content = "# " + safeTitle + "\\n\\n" + noteBody.trim() + "\\n"
+                                val safeTitle = noteTitle.trim().replace("\n", " ").take(120)
+                                val content = "# " + safeTitle + "\n\n" + noteBody.trim() + "\n"
                                 val temporary = File(dir, target.name + ".tmp")
                                 temporary.writeText(content, Charsets.UTF_8)
                                 if (!temporary.renameTo(target)) { target.writeText(content, Charsets.UTF_8); temporary.delete() }
@@ -1161,12 +1161,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
                                 Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     Text(title, color = Color.White, style = MaterialTheme.typography.titleSmall)
-                                    Text(raw.lineSequence().drop(2).joinToString("\\n").take(240), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                                    Text(raw.lineSequence().drop(2).joinToString("\n").take(240), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         TextButton(onClick = {
                                             editingNote = file
                                             noteTitle = title
-                                            noteBody = raw.lineSequence().drop(2).joinToString("\\n").trim()
+                                            noteBody = raw.lineSequence().drop(2).joinToString("\n").trim()
                                             noteStatus = "یادداشت برای ویرایش بارگذاری شد."
                                         }) { Text("ویرایش") }
                                         TextButton(onClick = {
