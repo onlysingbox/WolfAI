@@ -29,6 +29,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.security.crypto.EncryptedSharedPreferences
@@ -447,8 +449,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text(deviceStatus,color=Cyan)
                     Text("تنظیم هشدار",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
-                        OutlinedTextField(alarmHour,{alarmHour=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("ساعت")},singleLine=true)
-                        OutlinedTextField(alarmMinute,{alarmMinute=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("دقیقه")},singleLine=true)
+                        OutlinedTextField(alarmHour,{alarmHour=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("ساعت")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
+                        OutlinedTextField(alarmMinute,{alarmMinute=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("دقیقه")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
                         Button(enabled=(alarmHour.toIntOrNull()?:99) in 0..23&&(alarmMinute.toIntOrNull()?:99) in 0..59,onClick={
                             val alarm=Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR,alarmHour.toInt()).putExtra(AlarmClock.EXTRA_MINUTES,alarmMinute.toInt()).putExtra(AlarmClock.EXTRA_MESSAGE,"هشدار از WOLF").putExtra(AlarmClock.EXTRA_SKIP_UI,false)
                             if(alarm.resolveActivity(context.packageManager)!=null) context.startActivity(alarm) else deviceStatus="برنامه ساعت پیدا نشد."
@@ -535,7 +537,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                 } else if (showContacts) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("مخاطبین گوشی", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                        Text("مخاطبین گوشی", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
                         TextButton(onClick = { showContacts = false }) { Text("بازگشت") }
                     }
                     Text(contactsStatus, color = Cyan)
@@ -546,7 +548,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(item.first, color = Color.White, style = MaterialTheme.typography.titleMedium)
-                                        Text(item.second, color = Color.LightGray)
+                                        Text(item.second, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL).setData(android.net.Uri.parse("tel:" + android.net.Uri.encode(item.second)))) }) { Text("تماس") }
                                     TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_SENDTO).setData(android.net.Uri.parse("smsto:" + android.net.Uri.encode(item.second)))) }) { Text("پیامک") }
@@ -686,7 +688,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                 } else if (!paired) {
                     Text("اتصال امن به WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                    OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true)
+                    OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true, keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
                     Button(enabled = pairCode.length == 6 && !busy, onClick = {
                         busy = true
                         scope.launch {
@@ -707,7 +709,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             busy=false
                         }
                     }) { Text(if (busy) "در حال اتصال..." else "اتصال WOLF") }
-                    Text("ابتدا در گفتگوی خصوصی @OnlyWolfbot دستور /pair را بفرست و کد را اینجا وارد کن.", color=Color.LightGray)
+                    Text("ابتدا در گفتگوی خصوصی @OnlyWolfbot دستور /pair را بفرست و کد را اینجا وارد کن.", color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(status, color=Cyan, modifier = Modifier.weight(1f))
@@ -717,8 +719,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         items(chat) { item ->
-                            Card(colors=CardDefaults.cardColors(containerColor=if(item.first=="تو") Panel else Color(0xFF123B55)), shape=RoundedCornerShape(16.dp)) {
-                                Column(Modifier.padding(12.dp)) { Text(item.first, color=Gold); Text(item.second, color=Color.White) }
+                            Card(colors=CardDefaults.cardColors(containerColor=if(item.first=="تو") MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface), shape=RoundedCornerShape(16.dp)) {
+                                Column(Modifier.padding(12.dp)) { Text(item.first, color=Gold); Text(item.second, color=MaterialTheme.colorScheme.onSurface) }
                             }
                         }
                     }
