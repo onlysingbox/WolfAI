@@ -195,8 +195,8 @@ test("provider catalog reports only actually configured engines", () => {
 
 test("automatic routing falls back only across configured free engines", () => {
   const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", OPENROUTER_API_KEY: "o" };
-  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["gemma","glm","gemini","openrouter"].filter(x => x !== "gemma").length ? ["glm","gemini","openrouter"] : []);
-  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["gemini","openrouter","gemma","glm"].filter(x => x !== "gemma").length ? ["gemini","glm","openrouter"] : []);
+  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","gemini","openrouter","gemma"]);
+  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["gemini","gemma","openrouter","glm"]);
   assert.throws(() => wolfProviderOrder(env, "groq", false), /هنوز کلید API/);
 });
 
