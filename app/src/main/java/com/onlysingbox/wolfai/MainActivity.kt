@@ -686,6 +686,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
                     Text(fileStatus,color=MaterialTheme.colorScheme.primary)
                     var previewText by remember { mutableStateOf("") }
+                    var previewFile by remember { mutableStateOf<File?>(null) }
                     val importedFiles = remember(filesRefresh) { File(storageRoot,"files").apply{mkdirs()}.listFiles()?.filter{it.isFile}?.sortedByDescending{it.lastModified()} ?: emptyList() }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         items(importedFiles) { file ->
@@ -697,6 +698,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     }
                                     TextButton(onClick={
                                         val ext=file.extension.lowercase()
+                                        previewFile=file
                                         previewText=when(ext) {
                                             "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
                                             "docx" -> runCatching {
@@ -720,7 +722,16 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     if(previewText.isNotBlank()) {
                         Text("پیش‌نمایش متن",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                         Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)) {
-                            Text(previewText,Modifier.padding(12.dp),color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodySmall)
+                            Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(value=previewText,onValueChange={previewText=it},modifier=Modifier.fillMaxWidth(),minLines=5,maxLines=14,label={Text("متن استخراج‌شده")})
+                                val editable = previewFile?.extension?.lowercase() in listOf("txt","md","csv","json","log")
+                                if(editable) Button(onClick={
+                                    runCatching { previewFile?.writeText(previewText,Charsets.UTF_8) ?: error("فایلی انتخاب نشده") }
+                                        .onSuccess { fileStatus="تغییرات در فایل ذخیره شد." }
+                                        .onFailure { fileStatus="ذخیره تغییرات ناموفق بود: ${it.message}" }
+                                },modifier=Modifier.fillMaxWidth()) { Text("ذخیره تغییرات در فایل") }
+                                else Text("ویرایش پیش‌نمایش فقط برای فایل‌های متنی قابل ذخیره است؛ فایل اصلی Word و Excel دست‌نخورده می‌ماند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 } else if(showSettings) {
