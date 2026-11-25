@@ -183,20 +183,21 @@ test("D1 claim gate rejects another owner's approval and a running mission step"
 import { wolfProviderCatalog, wolfProviderOrder, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS } from "../src/worker.js";
 
 test("provider catalog reports only actually configured engines", () => {
-  const env = { AI: { run() {} }, GEMINI_API_KEY: "configured", GROQ_API_KEY: "", OPENROUTER_API_KEY: "configured" };
+  const env = { AI: { run() {} }, GEMINI_API_KEY: "configured", GROQ_API_KEY: "", ZAI_API_KEY: "configured", OPENROUTER_API_KEY: "configured" };
   const catalog = wolfProviderCatalog(env);
   assert.equal(catalog.find(x => x.id === "glm").configured, true);
   assert.equal(catalog.find(x => x.id === "gemma").configured, true);
   assert.equal(catalog.find(x => x.id === "gemini").configured, true);
   assert.equal(catalog.find(x => x.id === "groq").configured, false);
+  assert.equal(catalog.find(x => x.id === "zai").configured, true);
   assert.equal(catalog.find(x => x.id === "openrouter").configured, true);
-  assert.ok(catalog.filter(x => ["glm","gemma","gemini","groq","openrouter"].includes(x.id)).every(x => x.freeOnly));
+  assert.ok(catalog.filter(x => ["glm","gemma","gemini","groq","zai","openrouter"].includes(x.id)).every(x => x.freeOnly));
 });
 
 test("automatic routing falls back only across configured free engines", () => {
-  const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", OPENROUTER_API_KEY: "o" };
-  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","gemini","openrouter","gemma"]);
-  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["gemini","gemma","openrouter","glm"]);
+  const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", ZAI_API_KEY: "z", OPENROUTER_API_KEY: "o" };
+  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","zai","gemini","openrouter","gemma"]);
+  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["zai","gemma","glm","gemini","openrouter"]);
   assert.throws(() => wolfProviderOrder(env, "groq", false), /هنوز کلید API/);
 });
 
@@ -205,13 +206,14 @@ test("provider model identifiers are current and never select the retired Groq L
   assert.equal(WOLF_AI_MODELS.gemma, "@cf/google/gemma-4-26b-a4b-it");
   assert.equal(WOLF_EXTERNAL_PROVIDERS.gemini.model, "gemini-2.5-flash");
   assert.equal(WOLF_EXTERNAL_PROVIDERS.groq.model, "openai/gpt-oss-120b");
+  assert.equal(WOLF_EXTERNAL_PROVIDERS.zai.model, "glm-4.7-flash");
   assert.equal(WOLF_EXTERNAL_PROVIDERS.openrouter.model, "meta-llama/llama-3.3-70b-instruct:free");
 });
 
 
 import { callWolfProvider } from "../src/worker.js";
 
-test("all five provider adapters parse successful mocked responses without exposing keys", async () => {
+test("all six provider adapters parse successful mocked responses without exposing keys", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
@@ -238,6 +240,11 @@ test("all five provider adapters parse successful mocked responses without expos
     const groq = await callWolfProvider({ GROQ_API_KEY: "never-log-this" }, "groq", messages);
     assert.equal(groq.answer, "OpenAI compatible test reply");
     assert.match(calls.at(-1).init.body, /openai\/gpt-oss-120b/);
+    const zai = await callWolfProvider({ ZAI_API_KEY: "never-log-this" }, "zai", messages);
+    assert.equal(zai.answer, "OpenAI compatible test reply");
+    assert.equal(calls.at(-1).url, "https://api.z.ai/api/paas/v4/chat/completions");
+    assert.equal(calls.at(-1).init.headers.authorization, "Bearer never-log-this");
+    assert.match(calls.at(-1).init.body, /glm-4\.7-flash/);
     const openrouter = await callWolfProvider({ OPENROUTER_API_KEY: "never-log-this" }, "openrouter", messages);
     assert.equal(openrouter.answer, "OpenAI compatible test reply");
     assert.equal(calls.at(-1).init.headers["HTTP-Referer"], "https://wolfai.onlysingbox.workers.dev");
