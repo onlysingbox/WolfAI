@@ -64,18 +64,17 @@ This file records verified implementation, not planned features.
 - MASTER OFF is now enforced for model execution and queued WOLF work in source; production behavior remains unverified until the Worker is deployed with owner approval.
 
 ## Release blockers
-1. The first APK was built with the GitHub runner's debug signing key. GitHub-hosted runners generate their debug keystore locally; it was not persisted in the repository or workflow artifact. A later APK signed with a different key cannot update that installation. A stable signing key must be established, and the first installation compatibility issue must be resolved without changing the application ID.
-2. Worker source changes are not deployed to the production Cloudflare Worker. Production deployment requires explicit owner approval.
-3. A successful CI build proves compilation only. It does not prove that Android permissions, backend pairing, live AI requests, or phone actions work on a real device.
+1. Stable release signing is now configured in GitHub Actions through repository secrets, and a signed release APK artifact was successfully built in run 45553866282. The previously installed debug-signed APK cannot be updated in place; the user has already approved one uninstall/reinstall when the final stable APK is ready. Every future release must keep using the same persisted signing key and the unchanged application ID.
+2. The latest Worker source changes are not deployed to production. The owner has now authorized deployment, but the three external provider secrets are still absent. Deploy only after the provider setup is complete and then run authenticated live checks.
+3. CI builds and mocked provider tests do not prove live model access or device-level behavior. Real provider tests, Android pairing/chat tests, and final device acceptance remain required.
 
-Do not mark WOLF AI as ready until the release blockers and the agreed end-to-end acceptance tests are resolved.
-
+Do not mark WOLF AI as ready until the provider setup, production deployment, live acceptance tests, and agreed product-scope checks are complete.
 
 ## Free provider setup
 The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git. As last checked on 2026-11-25, all three external secrets were absent from the live Worker settings:
 - `GEMINI_API_KEY` for the Gemini 2.5 Flash free tier. Google states free-tier prompts may be used to improve its products; do not send sensitive/private material through this provider unless that policy is acceptable.
 - `GROQ_API_KEY` for Groq's Free tier using `openai/gpt-oss-120b`; do not upgrade the Groq account to a paid tier if zero-cost use is required.
-- `OPENROUTER_API_KEY` for a free-model route. The configured OpenRouter model is explicitly suffixed `:free`; Groq uses `openai/gpt-oss-120b` on its Free tier. Provider access and rate limits can change.
+- `OPENROUTER_API_KEY` for the free-only model `meta-llama/llama-3.3-70b-instruct:free`. Provider access and rate limits can change.
 - Existing `AI` binding continues to provide Cloudflare GLM and Gemma.
 
 No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Exact remaining quota is shown only when a provider exposes reliable usage information.
