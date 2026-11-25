@@ -201,6 +201,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 }
 
+@Composable
+private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
+    FilterChip(selected=selected,onClick=onClick,label={Text(label)},shape=RoundedCornerShape(14.dp))
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>) {
