@@ -977,7 +977,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   const system = "Convert the approved step into exactly one read-only action JSON. Return only {\"type\":string,\"args\":object}. Allowed action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. No writes, messages, calls, device control, purchases, deletes, or scheduling. Match the requested capability. If the step requires a write or unsupported action, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
   try {
     const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
-    const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\\s*/i,"").replace(/\\s*\x60{3}$/i,"").trim();
+    const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/i,"").trim();
     const action=JSON.parse(raw);
     const type=String(action.type||"");
     const args=action.args&&typeof action.args==="object"&&!Array.isArray(action.args)?action.args:{};
@@ -992,7 +992,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
     if(type==="research.open") { const u=new URL(String(args.url||"")); if(u.protocol!=="https:"||u.username||u.password) throw new Error("فقط URL عمومی HTTPS مجاز است."); }
     if(type==="memory.search"||type==="artifact.search") { if(!String(args.query||"").trim()||String(args.query).length>300) throw new Error("عبارت جست‌وجو معتبر نیست."); }
     if(type==="finance.summary") {
-      if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(args.start_date||""))||!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(args.end_date||""))||args.start_date>args.end_date) throw new Error("بازه تاریخ معتبر و صریح نیست.");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(String(args.start_date||""))||!/^\d{4}-\d{2}-\d{2}$/.test(String(args.end_date||""))||args.start_date>args.end_date) throw new Error("بازه تاریخ معتبر و صریح نیست.");
     }
     if(type==="github.get_file") {
       if(!/^[A-Za-z0-9_.-]{1,100}$/.test(String(args.repo||""))||!String(args.path||"")||String(args.path).startsWith("/")||String(args.path).split("/").some(p=>!p||p==="."||p==="..")) throw new Error("مخزن یا مسیر فایل معتبر نیست.");
@@ -2876,6 +2876,14 @@ export default {
     }
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {
       return await companionMissions(request, env);
+    }
+    const missionStepPrepareMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/steps\/prepare$/i);
+    if (request.method === "POST" && missionStepPrepareMatch) {
+      return await prepareCompanionMissionStep(request, env, missionStepPrepareMatch[1]);
+    }
+    const missionStepExecuteMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/steps\/execute$/i);
+    if (request.method === "POST" && missionStepExecuteMatch) {
+      return await executeCompanionMissionStep(request, env, missionStepExecuteMatch[1]);
     }
     const missionDecisionMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/decision$/i);
     if (request.method === "POST" && missionDecisionMatch) {
