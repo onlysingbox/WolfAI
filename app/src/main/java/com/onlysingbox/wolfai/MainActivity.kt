@@ -11,6 +11,9 @@ import android.provider.OpenableColumns
 import android.provider.CalendarContract
 import android.content.pm.ResolveInfo
 import android.os.Bundle
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
@@ -40,6 +43,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -747,21 +757,33 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     TextButton(onClick={
                                         val ext=file.extension.lowercase()
                                         previewFile=file
-                                        previewText=when(ext) {
-                                            "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
-                                            "docx" -> runCatching {
-                                                java.util.zip.ZipFile(file).use { zip ->
-                                                    val entry=zip.getEntry("word/document.xml")
-                                                    if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
-                                                        xml.readText().replace(Regex("</w:p>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \t]+")," ").take(12000)
+                                        if (ext == "pdf") {
+                                            previewText = ""
+                                            fileStatus = "در حال استخراج متن PDF؛ اگر سند اسکن‌شده باشد، OCR اجرا می‌شود..."
+                                            scope.launch {
+                                                val embedded = runCatching { withContext(Dispatchers.IO) { readPdfText(file, context) } }
+                                                    .getOrElse { "استخراج PDF ناموفق بود: ${it.message}" }
+                                                previewText = if (embedded.contains("متن قابل استخراج پیدا نشد")) {
+                                                    runCatching { readScannedPdfText(file) }.getOrElse { "OCR ناموفق بود: ${it.message}" }
+                                                } else embedded
+                                                fileStatus = "نتیجه خواندن: ${file.name}"
+                                            }
+                                        } else {
+                                            previewText=when(ext) {
+                                                "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
+                                                "docx" -> runCatching {
+                                                    java.util.zip.ZipFile(file).use { zip ->
+                                                        val entry=zip.getEntry("word/document.xml")
+                                                        if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
+                                                            xml.readText().replace(Regex("</w:p>"),"\\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \\t]+")," ").take(12000)
+                                                        }
                                                     }
-                                                }
-                                            }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
-                                            "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
-                                            "pdf" -> runCatching { readPdfText(file, context) }.getOrElse { "استخراج PDF ناموفق بود: ${it.message}" }
-                                            else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
+                                                }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
+                                                "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
+                                                else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
+                                            }
+                                            fileStatus="نتیجه خواندن: ${file.name}"
                                         }
-                                        fileStatus="نتیجه خواندن: ${file.name}"
                                     }) { Text("خواندن") }
                                     TextButton(onClick={
                                         pendingExportFile=file
