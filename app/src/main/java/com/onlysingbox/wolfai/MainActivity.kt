@@ -395,7 +395,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         if (item.optString("id") == "auto" || item.optString("id") == "deepseek") continue
                         Text((item.optString("label") + " | " + if (item.optBoolean("configured")) "پیکربندی شده" else "نیازمند اتصال یا کلید"), color = if (item.optBoolean("configured")) Cyan else Gold, style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("کلیدهای Gemini، Groq و OpenRouter فقط در Cloudflare Worker ذخیره می‌شوند. سهمیه فقط در صورت گزارش معتبر سرویس نمایش داده می‌شود. DeepSeek غیرفعال است.", color = Gold, style = MaterialTheme.typography.bodySmall)
+                    Text("کلیدها فقط در Cloudflare ذخیره می‌شوند. Gemini در طرح رایگان ممکن است از داده‌ها برای بهبود محصولات Google استفاده کند؛ اطلاعات محرمانه نفرست. Workers AI در طرح رایگان روزانه ۱۰٬۰۰۰ Neuron دارد؛ در طرح پولی مصرف اضافه ممکن است هزینه داشته باشد. برای جلوگیری از هزینه، طرح پولی را فعال نکن.", color = Gold, style = MaterialTheme.typography.bodySmall)
                     Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 if (showStorage) {
