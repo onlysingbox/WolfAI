@@ -860,6 +860,67 @@ async function companionMaster(request, env) {
   await log(env, device.owner_id, body.enabled ? "companion.master_on" : "companion.master_off", "companion_device", device.hash.slice(0, 16), {});
   return json({ ok: true, enabled: body.enabled });
 }
+async function companionMissions(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  const enabled = await getSetting(env, "companion_master_enabled", "true");
+  if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ ثبت مأموریت هوشمند متوقف است." }, 423);
+
+  if (request.method === "GET") {
+    const rows = await env.DB.prepare(
+      "SELECT id, request_text, status, plan_json, created_at, updated_at FROM agent_runs WHERE owner_id = ? ORDER BY created_at DESC LIMIT 50"
+    ).bind(String(device.owner_id)).all();
+    return json({ ok: true, missions: (rows.results || []).map(row => ({
+      id: row.id, request: row.request_text, status: row.status,
+      plan: safeJson(row.plan_json, []), created_at: row.created_at, updated_at: row.updated_at
+    })) });
+  }
+
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const requestText = String(body?.text || "").trim().slice(0, 8000);
+  if (!requestText) return json({ ok: false, error: "متن مأموریت خالی است." }, 400);
+  const language = detectMessageLanguage(requestText);
+  const system = language === "fa"
+    ? "درخواست کاربر را به یک طرح مأموریت JSON تبدیل کن. فقط JSON معتبر بده با ساختار {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. حداکثر 8 مرحله. capability فقط یکی از اینها باشد: web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, manual_review. هیچ ابزار، کد اجرایی، دستور سیستم، URL اجرایی یا اقدام واقعی تولید نکن. جزئیات فقط توضیح متنی باشند. اگر کار مبهم یا حساس است manual_review انتخاب کن. همه مراحل صرفاً پیشنهاد هستند."
+    : "Convert the request into a mission proposal. Return only valid JSON: {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. Maximum 8 steps. capability must be one of web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, manual_review. Never produce executable code, tool calls, system commands, executable URLs, or perform actions. Details are descriptive text only. Use manual_review for ambiguous or sensitive work. Every step is proposal-only.";
+  try {
+    const result = await runWolfModel(env, [
+      { role: "system", content: system },
+      { role: "user", content: requestText }
+    ], "auto", requestText);
+    const raw = String(result.answer || "").replace(/^`{3}(?:json)?\s*/i, "").replace(/\s*`{3}$/i, "").trim();
+    const parsed = JSON.parse(raw);
+    const allowed = new Set(["web_research","files_documents","software_engineering","communication","device_control","finance","scheduling","content_creation","personal_memory","manual_review"]);
+    const sourceSteps = Array.isArray(parsed.steps) ? parsed.steps.slice(0, 8) : [];
+    if (!sourceSteps.length) throw new Error("مدل هیچ مرحله معتبری برنگرداند.");
+    const steps = sourceSteps.map((step, index) => ({
+      step: index + 1,
+      capability: allowed.has(String(step.capability)) ? String(step.capability) : "manual_review",
+      title: String(step.title || "بررسی دستی").replace(/[\r\n]/g, " ").slice(0, 180),
+      details: String(step.details || "").slice(0, 1200),
+      approval_required: true,
+      status: "awaiting_approval"
+    }));
+    const plan = { summary: String(parsed.summary || requestText).slice(0, 1000), steps, proposal_only: true };
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, ?, 'awaiting_approval', ?)")
+      .bind(id, String(device.owner_id), requestText, String(body?.input_mode || "text").slice(0, 24), JSON.stringify(plan)).run();
+    for (const step of steps) {
+      await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
+        .bind(crypto.randomUUID(), id, step.step, step.capability, step.title, JSON.stringify({ details: step.details })).run();
+    }
+    await log(env, device.owner_id, "companion.mission_proposed", "agent_run", id, { step_count: steps.length });
+    return json({ ok: true, mission: { id, status: "awaiting_approval", plan, proposal_only: true }, model: result.provider });
+  } catch (error) {
+    console.error("companion mission planning failed", error);
+    return json({ ok: false, error: "طرح مأموریت ساخته نشد: " + String(error?.message || error).slice(0, 240) }, 502);
+  }
+}
+function safeJson(value, fallback) {
+  try { return JSON.parse(String(value || "")); } catch { return fallback; }
+}
+
 async function companionChat(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست؛ دوباره جفت‌سازی کن." }, 401);
@@ -2682,7 +2743,7 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/master") {
       return await companionMaster(request, env);
     }
-    if (request.method === "POST" && url.pathname === "/api/companion/chat") {
+    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {\n      return await companionMissions(request, env);\n    }\n    if (request.method === "POST" && url.pathname === "/api/companion/chat") {
       return await companionChat(request, env);
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
