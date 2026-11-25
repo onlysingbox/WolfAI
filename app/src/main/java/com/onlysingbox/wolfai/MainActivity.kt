@@ -307,6 +307,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("🐺 WOLF AI", style = MaterialTheme.typography.headlineLarge, color = Color.White)
                 Text("AGENT  •  مکالمه هوشمند فارسی و انگلیسی", color = Gold)
+                if (!showMissions) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text(if (masterEnabled) "WOLF فعال است" else "تمام فعالیت‌های خودکار متوقف است", color = if (masterEnabled) Cyan else Gold)
                     Button(onClick = {
@@ -329,17 +330,21 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
                     OutlinedButton(onClick = { showModels = !showModels; showStorage = false }) { Text("موتورهای هوش مصنوعی") }
                 }
+                }
                 if (showMissions) {
-                    Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                    Text("در این مرحله فقط طرح کار ساخته و ذخیره می‌شود. هیچ تماس، پیام، خرید یا تغییر بیرونی بدون مرحله تأیید اجرا نخواهد شد.", color = Gold)
-                    OutlinedTextField(missionText, { missionText = it }, modifier = Modifier.fillMaxWidth(), enabled = masterEnabled && !missionBusy, label = { Text("چه کاری انجام بدهم؟") }, minLines = 3)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                        TextButton(onClick = { showMissions = false }) { Text("بازگشت") }
+                    }
+                    Text("طرح‌ها و مراحل در این صفحه قابل خواندن و پیمایش هستند. هیچ اقدام بیرونی بدون تأیید تو اجرا نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(missionText, { missionText = it }, modifier = Modifier.fillMaxWidth(), enabled = masterEnabled && !missionBusy, label = { Text("چه کاری انجام بدهم؟") }, minLines = 2, maxLines = 4)
                     Button(enabled = masterEnabled && missionText.isNotBlank() && !missionBusy, onClick = { val request = missionText.trim(); missionBusy = true; missionStatus = "در حال ساخت طرح امن..."; scope.launch { runCatching { createMission(request) }.onSuccess { mission -> missionText = ""; missionStatus = "طرح ذخیره شد و همه مراحل در انتظار تأیید هستند."; missions = JSONArray().put(mission).also { current -> for (i in 0 until missions.length()) current.put(missions.getJSONObject(i)) } }.onFailure { missionStatus = it.message ?: "ساخت مأموریت ناموفق بود" }; missionBusy = false } }) { Text(if (missionBusy) "در حال برنامه‌ریزی..." else "ساخت طرح مأموریت") }
                     Text(missionStatus, color = Cyan)
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items((0 until missions.length()).map { missions.getJSONObject(it) }) { mission ->
                             val plan = mission.optJSONObject("plan") ?: JSONObject()
-                            Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
-                                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
                                     Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
                                     val steps = plan.optJSONArray("steps") ?: JSONArray()
@@ -349,9 +354,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         val state = stepStates.optJSONObject(i) ?: JSONObject()
                                         val stepStatus = state.optString("status", "awaiting_approval")
                                         val stepNo = i + 1
-                                        Text("$stepNo. ${step.optString("title")}", color = Cyan)
-                                        Text(step.optString("details"), color = Color.LightGray)
-                                        Text("قابلیت: ${step.optString("capability")} | وضعیت: $stepStatus", color = Gold, style = MaterialTheme.typography.bodySmall)
+                                        HorizontalDivider(color = Color(0xFF33445E), thickness = 1.dp)
+                                        Text("مرحله $stepNo: ${step.optString("title")}", color = Cyan, style = MaterialTheme.typography.titleMedium)
+                                        Text(step.optString("details"), color = Color.LightGray, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+                                        Text("قابلیت: ${step.optString("capability")}\nوضعیت: $stepStatus", color = Gold, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
                                         state.optJSONObject("prepared_action")?.let { prepared ->
                                             Text("عملیات دقیق آماده‌شده: " + prepared.toString(), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                                         }
