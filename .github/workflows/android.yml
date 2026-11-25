@@ -8,6 +8,9 @@ on:
       - "settings.gradle.kts"
       - ".github/workflows/android.yml"
       - "src/**"
+      - "tests/**"
+      - "package.json"
+      - "migrations/**"
       - "wrangler.toml"
 jobs:
   build:
