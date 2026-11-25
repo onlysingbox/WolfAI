@@ -82,6 +82,50 @@ private fun readPdfText(file: File, context: Context): String {
     }
 }
 
+private suspend fun recognizePdfBitmap(bitmap: Bitmap, recognizer: TextRecognizer): String =
+    suspendCancellableCoroutine { continuation ->
+        recognizer.process(InputImage.fromBitmap(bitmap, 0))
+            .addOnSuccessListener { result -> if (continuation.isActive) continuation.resume(result.text) }
+            .addOnFailureListener { error -> if (continuation.isActive) continuation.resumeWithException(error) }
+    }
+
+private suspend fun readScannedPdfText(file: File): String = withContext(Dispatchers.IO) {
+    val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+    val renderer = PdfRenderer(descriptor)
+    val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    try {
+        val output = StringBuilder()
+        val pageLimit = minOf(renderer.pageCount, 8)
+        for (index in 0 until pageLimit) {
+            val page = renderer.openPage(index)
+            val scale = minOf(1.5f, 1800f / page.width.toFloat())
+            val bitmap = Bitmap.createBitmap(
+                (page.width * scale).toInt().coerceAtLeast(1),
+                (page.height * scale).toInt().coerceAtLeast(1),
+                Bitmap.Config.ARGB_8888
+            )
+            try {
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                val text = recognizePdfBitmap(bitmap, recognizer)
+                if (text.isNotBlank()) {
+                    if (output.isNotEmpty()) output.append("\\n")
+                    output.append("Page ").append(index + 1).append("\\n").append(text)
+                }
+            } finally {
+                bitmap.recycle()
+                page.close()
+            }
+            if (output.length >= 12000) break
+        }
+        if (output.isEmpty()) "No text was detected. The current OCR engine supports Latin-script text, not Persian."
+        else output.toString().take(12000) + if (renderer.pageCount > pageLimit) "\\n\\nOnly the first 8 pages were processed." else ""
+    } finally {
+        recognizer.close()
+        renderer.close()
+        descriptor.close()
+    }
+}
+
 private fun readXlsxText(file: File): String {
     java.util.zip.ZipFile(file).use { zip ->
         val shared = mutableListOf<String>()
