@@ -642,6 +642,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("PDF، Word، Excel، تصویر، صوت و فایل‌های متنی را وارد کن. فایل اصلی در فضای خصوصی WOLF کپی می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
                     Text(fileStatus,color=MaterialTheme.colorScheme.primary)
+                    var previewText by remember { mutableStateOf("") }
                     val importedFiles = remember(filesRefresh) { File(storageRoot,"files").apply{mkdirs()}.listFiles()?.filter{it.isFile}?.sortedByDescending{it.lastModified()} ?: emptyList() }
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                         items(importedFiles) { file ->
@@ -651,9 +652,30 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         Text(file.name,color=MaterialTheme.colorScheme.onSurface)
                                         Text("%.1f KB".format(file.length()/1024.0),color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                                     }
-                                    TextButton(onClick={fileStatus="برای بازکردن فایل، از برنامه مدیریت فایل گوشی استفاده کن؛ نسخه داخلی خواندن این قالب هنوز اضافه نشده است."}) { Text("جزئیات") }
+                                    TextButton(onClick={
+                                        val ext=file.extension.lowercase()
+                                        previewText=when(ext) {
+                                            "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
+                                            "docx","xlsx" -> runCatching {
+                                                java.util.zip.ZipFile(file).use { zip ->
+                                                    val entry=if(ext=="docx") zip.getEntry("word/document.xml") else zip.getEntry("xl/sharedStrings.xml")
+                                                    if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
+                                                        xml.readText().replace(Regex("</w:p>|</si>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("\\s+")," ").take(12000)
+                                                    }
+                                                }
+                                            }.getOrElse { "استخراج فایل ناموفق بود: ${it.message}" }
+                                            else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
+                                        }
+                                        fileStatus="نتیجه خواندن: ${file.name}"
+                                    }) { Text("خواندن") }
                                 }
                             }
+                        }
+                    }
+                    if(previewText.isNotBlank()) {
+                        Text("پیش‌نمایش متن",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                        Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)) {
+                            Text(previewText,Modifier.padding(12.dp),color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodySmall)
                         }
                     }
                 } else if(showSettings) {
