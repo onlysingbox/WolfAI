@@ -231,6 +231,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var providerStatusError by remember { mutableStateOf("وضعیت موتورها هنوز دریافت نشده است.") }
     var providerStatusBusy by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var darkTheme by remember { mutableStateOf(storagePrefs.getBoolean("dark_theme", true)) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
     var pendingDeleteBucket by remember { mutableStateOf<Pair<String, File>?>(null) }
@@ -298,7 +300,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!spoken.isNullOrBlank()) message = spoken
     }
-    MaterialTheme(colorScheme = darkColorScheme(primary = Cyan, secondary = Gold, background = Navy, surface = Panel)) {
+    val wolfColors = if (darkTheme) darkColorScheme(primary=Color(0xFF36C8F5),secondary=Gold,background=Color(0xFF071426),surface=Color(0xFF10243D),surfaceVariant=Color(0xFF18334F)) else lightColorScheme(primary=Color(0xFF075E8C),secondary=Color(0xFF9A6900),background=Color(0xFFF3F6FA),surface=Color.White,surfaceVariant=Color(0xFFE7EEF5))
+    MaterialTheme(colorScheme=wolfColors) {
         pendingDeleteBucket?.let { (label, dir) ->
             AlertDialog(
                 onDismissRequest = { pendingDeleteBucket = null },
@@ -336,78 +339,85 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 dismissButton = { TextButton(onClick = { showClearChatConfirm = false }) { Text("انصراف") } }
             )
         }
-        Scaffold(containerColor = Navy) { padding ->
+        Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("🐺 WOLF AI", style = MaterialTheme.typography.headlineLarge, color = Color.White)
-                Text("AGENT  •  مکالمه هوشمند فارسی و انگلیسی", color = Gold)
-                if (!showMissions) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (masterEnabled) "WOLF فعال است" else "تمام فعالیت‌های خودکار متوقف است", color = if (masterEnabled) Cyan else Gold)
-                    Button(onClick = {
-                        masterEnabled = !masterEnabled
-                        storagePrefs.edit().putBoolean("master_enabled", masterEnabled).apply()
-                        if (!masterEnabled) {
-                            activeRequest?.cancel()
-                            activeRequest = null
-                            busy = false
-                            status = "WOLF خاموش شد؛ درخواست جاری متوقف شد و گوشی در حالت عادی باقی می‌ماند"
-                        } else status = "WOLF با فرمان تو فعال شد"
-                        scope.launch {
-                            runCatching { setRemoteMaster(masterEnabled) }
-                                .onFailure { status = if (!masterEnabled) "خاموشی محلی فعال است؛ همگام‌سازی سرور ناموفق بود: ${it.message}" else "فعال‌سازی سرور ناموفق بود: ${it.message}" }
-                        }
-                    }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
+                Text("🐺 WOLF AI",style=MaterialTheme.typography.headlineLarge,color=MaterialTheme.colorScheme.onBackground)
+                Text("AGENT  •  دستیار هوشمند شخصی",color=MaterialTheme.colorScheme.secondary)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween, verticalAlignment=Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(if(masterEnabled) "WOLF فعال است" else "فعالیت‌های خودکار متوقف است", color=if(masterEnabled) Cyan else Gold, style=MaterialTheme.typography.labelLarge)
+                        Text(status, color=MaterialTheme.colorScheme.onSurfaceVariant, style=MaterialTheme.typography.bodySmall, maxLines=1)
+                    }
+                    Button(onClick={
+                        masterEnabled=!masterEnabled
+                        storagePrefs.edit().putBoolean("master_enabled",masterEnabled).apply()
+                        if(!masterEnabled){activeRequest?.cancel();activeRequest=null;busy=false;status="WOLF خاموش شد"} else status="WOLF فعال شد"
+                        scope.launch { runCatching { setRemoteMaster(masterEnabled) }.onFailure { status="همگام‌سازی ناموفق: ${it.message}" } }
+                    }, colors=ButtonDefaults.buttonColors(containerColor=if(masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if(masterEnabled) "خاموش" else "فعال‌سازی") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showStorage = !showStorage; showContacts = false; showDeviceTools = false; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
-                    OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showDeviceTools = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
-                    OutlinedButton(onClick = {
-                        showContacts = !showContacts; showStorage = false; showDeviceTools = false; showModels = false; showMissions = false
-                        if (showDeviceTools) {
-                    Text("کنترل برنامه‌ها و گوشی", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                    Text(deviceStatus, color = Cyan)
-                    Text("تنظیم هشدار", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(alarmHour, { alarmHour = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), label = { Text("ساعت") }, singleLine = true)
-                        OutlinedTextField(alarmMinute, { alarmMinute = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), label = { Text("دقیقه") }, singleLine = true)
-                        Button(enabled = (alarmHour.toIntOrNull() ?: 99) in 0..23 && (alarmMinute.toIntOrNull() ?: 99) in 0..59, onClick = {
-                            val h = alarmHour.toInt(); val m = alarmMinute.toInt()
-                            val intent = Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h).putExtra(AlarmClock.EXTRA_MINUTES, m).putExtra(AlarmClock.EXTRA_MESSAGE, "هشدار از WOLF").putExtra(AlarmClock.EXTRA_SKIP_UI, false)
-                            if (intent.resolveActivity(context.packageManager) != null) context.startActivity(intent) else deviceStatus = "برنامه ساعت روی گوشی پیدا نشد."
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(vertical=4.dp)) {
+                    item { NavigationChip("گفتگو",!showStorage&&!showContacts&&!showDeviceTools&&!showModels&&!showMissions&&!showSettings) { showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("مخاطبین",showContacts) { showContacts=true;showStorage=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false; if(context.checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts=it;contactsStatus="${it.size} شماره مخاطب خوانده شد." }.onFailure { contactsStatus=it.message ?: "خطا در خواندن مخاطبین" } } else contactsPermission.launch(Manifest.permission.READ_CONTACTS) } }
+                    item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
+                    item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
+                    item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false } }
+                }
+                if(showDeviceTools) {
+                    Text("کنترل برنامه‌ها و گوشی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleLarge)
+                    Text(deviceStatus,color=Cyan)
+                    Text("تنظیم هشدار",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                        OutlinedTextField(alarmHour,{alarmHour=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("ساعت")},singleLine=true)
+                        OutlinedTextField(alarmMinute,{alarmMinute=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("دقیقه")},singleLine=true)
+                        Button(enabled=(alarmHour.toIntOrNull()?:99) in 0..23&&(alarmMinute.toIntOrNull()?:99) in 0..59,onClick={
+                            val alarm=Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR,alarmHour.toInt()).putExtra(AlarmClock.EXTRA_MINUTES,alarmMinute.toInt()).putExtra(AlarmClock.EXTRA_MESSAGE,"هشدار از WOLF").putExtra(AlarmClock.EXTRA_SKIP_UI,false)
+                            if(alarm.resolveActivity(context.packageManager)!=null) context.startActivity(alarm) else deviceStatus="برنامه ساعت پیدا نشد."
                         }) { Text("تنظیم") }
                     }
-                    Divider(color = Color.Gray)
-                    Text("باز کردن برنامه‌های نصب‌شده", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(appSearch, { appSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("جست‌وجوی برنامه") }, singleLine = true)
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(launchableApps.filter { it.loadLabel(context.packageManager).toString().contains(appSearch, true) }) { app ->
-                            val label = app.loadLabel(context.packageManager).toString()
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
-                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text(label, color = Color.White, modifier = Modifier.weight(1f))
-                                    TextButton(onClick = {
-                                        val launch = context.packageManager.getLaunchIntentForPackage(app.activityInfo.packageName)
-                                        if (launch != null) context.startActivity(launch) else deviceStatus = "اجرای این برنامه ممکن نیست."
-                                    }) { Text("باز کن") }
+                    HorizontalDivider()
+                    Text("برنامه‌های نصب‌شده",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(appSearch,{appSearch=it},modifier=Modifier.fillMaxWidth(),label={Text("جست‌وجوی برنامه")},singleLine=true)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                        items(launchableApps.filter{it.loadLabel(context.packageManager).toString().contains(appSearch,true)}) { app ->
+                            Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)) {
+                                Row(Modifier.fillMaxWidth().padding(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                                    Text(app.loadLabel(context.packageManager).toString(),color=MaterialTheme.colorScheme.onSurface,modifier=Modifier.weight(1f))
+                                    TextButton(onClick={context.packageManager.getLaunchIntentForPackage(app.activityInfo.packageName)?.let{context.startActivity(it)}?:run{deviceStatus="اجرای این برنامه ممکن نیست."}}){Text("باز کن")}
                                 }
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }) { Text("تنظیمات VPN") }
-                        OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }) { Text("تنظیمات گوشی") }
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))}){Text("تنظیمات VPN")}
+                        OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_SETTINGS))}){Text("تنظیمات گوشی")}
                     }
-                    Text("WOLF می‌تواند برنامه را باز کند و صفحه تنظیمات VPN را نشان دهد. روشن‌کردن تونل VPN برنامه‌های دیگر بدون API رسمی آن برنامه یا سرویس VPN خود WOLF ممکن نیست؛ برای امنیت، این محدودیت را دور نمی‌زنیم.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
-                } else if (showContacts) {
-                            if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خطا در خواندن مخاطبین" } }
-                            else contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+                    Text("بازکردن تنظیمات VPN به معنی روشن‌شدن تونل نیست؛ اتصال واقعی به API رسمی سرویس نیاز دارد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
+                }
+                if(showSettings) {
+                    Text("تنظیمات برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                            Text("ظاهر برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
+                                Column(Modifier.weight(1f)) { Text("تم تاریک",color=MaterialTheme.colorScheme.onSurface);Text("انتخاب ظاهر روشن یا تاریک",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall) }
+                                Switch(checked=darkTheme,onCheckedChange={darkTheme=it;storagePrefs.edit().putBoolean("dark_theme",it).apply()})
+                            }
+                            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                                FilterChip(selected=darkTheme,onClick={darkTheme=true;storagePrefs.edit().putBoolean("dark_theme",true).apply()},label={Text("تاریک")})
+                                FilterChip(selected=!darkTheme,onClick={darkTheme=false;storagePrefs.edit().putBoolean("dark_theme",false).apply()},label={Text("روشن")})
+                            }
                         }
-                    }) { Text(if (showContacts) "بازگشت" else "مخاطبین") }
-                    OutlinedButton(onClick = { showDeviceTools = !showDeviceTools; showStorage = false; showContacts = false; showModels = false; showMissions = false }) { Text(if (showDeviceTools) "بازگشت" else "ابزارهای گوشی") }
-                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false; showContacts = false; showDeviceTools = false }) { Text("موتورهای هوش مصنوعی") }
-                }
-                }
-                if (showContacts) {
+                    }
+                    Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
+                        Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Text("حریم خصوصی و کنترل",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                            Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("WOLF AI AGENT • نسخه 0.3",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                } else if (showContacts) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("مخاطبین گوشی", color = Color.White, style = MaterialTheme.typography.titleLarge)
                         TextButton(onClick = { showContacts = false }) { Text("بازگشت") }
