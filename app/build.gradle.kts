@@ -3,6 +3,16 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+val wolfStoreFile = System.getenv("WOLF_KEYSTORE_FILE")
+val wolfStorePassword = System.getenv("WOLF_KEYSTORE_PASSWORD")
+val wolfKeyAlias = System.getenv("WOLF_KEY_ALIAS") ?: "wolfai"
+val wolfKeyPassword = System.getenv("WOLF_KEY_PASSWORD") ?: wolfStorePassword
+val hasReleaseSigning = !wolfStoreFile.isNullOrBlank() &&
+    !wolfStorePassword.isNullOrBlank() &&
+    !wolfKeyAlias.isNullOrBlank() &&
+    !wolfKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.onlysingbox.wolfai"
     compileSdk = 35
@@ -10,18 +20,35 @@ android {
         applicationId = "com.onlysingbox.wolfai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
+    }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("wolfRelease") {
+                storeFile = file(wolfStoreFile!!)
+                storePassword = wolfStorePassword
+                keyAlias = wolfKeyAlias
+                keyPassword = wolfKeyPassword
+            }
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("wolfRelease")
+            }
+            isMinifyEnabled = false
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
 }
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.10.0")
