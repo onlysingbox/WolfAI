@@ -62,12 +62,26 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             prepareMissionStep = { id, step -> apiMissionStep(securePrefs.getString("device_token", "") ?: "", id, step, "prepare") },
             executeMissionStep = { id, step -> apiMissionStep(securePrefs.getString("device_token", "") ?: "", id, step, "execute") },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
+            loadProviderStatus = { apiProviderStatus(securePrefs.getString("device_token", "") ?: "") },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
             storageRoot = File(filesDir, "wolf_storage"),
             historyFile = File(filesDir, "wolf_storage/history/chat.json")
         ) }
     }
+    private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/status").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 15000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val body = stream.bufferedReader().use { it.readText() }
+            val obj = JSONObject(body)
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "دریافت وضعیت موتورها ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
+    }
+
     private suspend fun apiMaster(token: String, enabled: Boolean) = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/master").openConnection() as HttpURLConnection)
         try {
@@ -171,7 +185,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
@@ -184,6 +198,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var missionStatus by remember { mutableStateOf("برای ساخت طرح مأموریت، درخواستت را بنویس.") }
     var missions by remember { mutableStateOf(JSONArray()) }
     var selectedModel by remember { mutableStateOf(storagePrefs.getString("ai_model", "auto") ?: "auto") }
+    var providerStatus by remember { mutableStateOf<JSONObject?>(null) }
+    var providerStatusError by remember { mutableStateOf("وضعیت موتورها هنوز دریافت نشده است.") }
+    var providerStatusBusy by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
@@ -224,6 +241,24 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         }
     }
     val scope = rememberCoroutineScope()
+    LaunchedEffect(paired) {
+        if (paired) {
+            providerStatusBusy = true
+            runCatching { loadProviderStatus() }
+                .onSuccess { providerStatus = it; providerStatusError = "" }
+                .onFailure { providerStatusError = it.message ?: "ارتباط با سرور برقرار نشد." }
+            providerStatusBusy = false
+        }
+    }
+    fun providerIsConfigured(id: String): Boolean {
+        if (id == "auto") return true
+        val providers = providerStatus?.optJSONArray("providers") ?: return false
+        for (i in 0 until providers.length()) {
+            val item = providers.optJSONObject(i) ?: continue
+            if (item.optString("id") == id) return item.optBoolean("configured")
+        }
+        return false
+    }
     var activeRequest by remember { mutableStateOf<Job?>(null) }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
@@ -336,14 +371,32 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                 } else if (showModels) {
                     Text("انتخاب موتور", color = Color.White, style = MaterialTheme.typography.titleLarge)
-                    Text("مسیریابی خودکار بین موتورهای رایگانِ فعال؛ در صورت خطا فقط به سرویس رایگانِ دارای کلید می‌رود. هیچ مسیر پولی فعال نیست.", color = Color.LightGray)
+                    Text("وضعیت زیر از خود Worker خوانده می‌شود؛ موتورِ بدون اتصال قابل انتخاب نیست.", color = Color.LightGray)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(if (providerStatusBusy) "در حال بررسی..." else if (providerStatus != null) "وضعیت سرور دریافت شد" else providerStatusError, color = if (providerStatus != null) Cyan else Gold, modifier = Modifier.weight(1f))
+                        OutlinedButton(enabled = !providerStatusBusy && paired, onClick = {
+                            scope.launch {
+                                providerStatusBusy = true
+                                runCatching { loadProviderStatus() }
+                                    .onSuccess { providerStatus = it; providerStatusError = "" }
+                                    .onFailure { providerStatusError = it.message ?: "خطا در دریافت وضعیت" }
+                                providerStatusBusy = false
+                            }
+                        }) { Text("تازه‌سازی") }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("auto" to "خودکار", "glm" to "GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
-                            FilterChip(selected = selectedModel == key, onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
+                            FilterChip(selected = selectedModel == key, enabled = providerIsConfigured(key), onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
                         }
                     }
-                    Text("Gemini، Groq و OpenRouter فقط پس از ثبت کلید API در Cloudflare فعال می‌شوند. سهمیه فقط وقتی API اعلام کند نمایش داده می‌شود؛ در غیر این صورت نامشخص است. DeepSeek API تا تأیید مسیر رایگان فعال نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodySmall)
-                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq Llama 3.3"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
+                    val providerItems = providerStatus?.optJSONArray("providers") ?: JSONArray()
+                    for (i in 0 until providerItems.length()) {
+                        val item = providerItems.optJSONObject(i) ?: continue
+                        if (item.optString("id") == "auto" || item.optString("id") == "deepseek") continue
+                        Text((item.optString("label") + " | " + if (item.optBoolean("configured")) "پیکربندی شده" else "نیازمند اتصال یا کلید"), color = if (item.optBoolean("configured")) Cyan else Gold, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("کلیدهای Gemini، Groq و OpenRouter فقط در Cloudflare Worker ذخیره می‌شوند. سهمیه فقط در صورت گزارش معتبر سرویس نمایش داده می‌شود. DeepSeek غیرفعال است.", color = Gold, style = MaterialTheme.typography.bodySmall)
+                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 if (showStorage) {
                     Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
