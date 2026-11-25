@@ -45,6 +45,23 @@ jobs:
           test -s "$WOLF_KEYSTORE_FILE"
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+      - name: Android emulator smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am force-stop com.onlysingbox.wolfai
+            adb shell am start -n com.onlysingbox.wolfai/.MainActivity
+            sleep 15
+            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep -q 'com.onlysingbox.wolfai'
+            if adb logcat -d -t 3000 | grep -E 'FATAL EXCEPTION|Process: com.onlysingbox.wolfai' | grep -q 'FATAL EXCEPTION'; then
+              adb logcat -d -t 3000 | grep -A 30 -B 5 'FATAL EXCEPTION'
+              exit 1
+            fi
       - name: Build stable signed release APK
         run: gradle --no-daemon assembleRelease
       - uses: actions/upload-artifact@v4
