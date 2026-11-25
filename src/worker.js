@@ -904,12 +904,14 @@ async function companionMissions(request, env) {
     }));
     const plan = { summary: String(parsed.summary || requestText).slice(0, 1000), steps, proposal_only: true };
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, ?, 'awaiting_approval', ?)")
-      .bind(id, String(device.owner_id), requestText, String(body?.input_mode || "text").slice(0, 24), JSON.stringify(plan)).run();
-    for (const step of steps) {
-      await env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
-        .bind(crypto.randomUUID(), id, step.step, step.capability, step.title, JSON.stringify({ details: step.details })).run();
-    }
+    const inserts = [
+      env.DB.prepare("INSERT INTO agent_runs (id, owner_id, request_text, input_mode, status, plan_json) VALUES (?, ?, ?, ?, 'awaiting_approval', ?)")
+        .bind(id, String(device.owner_id), requestText, String(body?.input_mode || "text").slice(0, 24), JSON.stringify(plan)),
+      ...steps.map(step => env.DB.prepare("INSERT INTO agent_steps (id, run_id, step_no, capability, title, input_json, status, approval_required) VALUES (?, ?, ?, ?, ?, ?, 'awaiting_approval', 1)")
+        .bind(crypto.randomUUID(), id, step.step, step.capability, step.title, JSON.stringify({ details: step.details })))
+    ];
+    // D1 batch is transactional: never leave a visible run with only some of its steps.
+    await env.DB.batch(inserts);
     await log(env, device.owner_id, "companion.mission_proposed", "agent_run", id, { step_count: steps.length });
     return json({ ok: true, mission: { id, status: "awaiting_approval", plan, proposal_only: true }, model: result.provider });
   } catch (error) {
