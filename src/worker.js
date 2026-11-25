@@ -1110,7 +1110,7 @@ async function executeCompanionMissionStep(request, env, missionId) {
   let body; try{body=await request.json();}catch{return json({ok:false,error:"Invalid JSON"},400);}
   const stepNo=Number(body?.step_no);
   if(!Number.isInteger(stepNo)||stepNo<1||stepNo>8) return json({ok:false,error:"شماره مرحله نامعتبر است."},400);
-  const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
+  const run=await getOwnedCompanionMission(env,missionId,device.owner_id);
   if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
   if(run.status!=="approved_pending_execution"&&run.status!=="running") return json({ok:false,error:"مأموریت در وضعیت قابل اجرا نیست."},409);
   const step=await env.DB.prepare("SELECT id,capability,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
