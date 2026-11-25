@@ -328,6 +328,40 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val service = WolfAccessibilityService.active ?: return "برای خواندن صفحه، ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
             return service.readVisibleText()
         }
+        if (command.contains("برگرد عقب") || command == "عقب" || command.contains("دکمه بازگشت")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.global("back")) "به صفحه قبل برگشتم." else "بازگشت در این صفحه انجام نشد."
+        }
+        if (command.contains("برو خانه") || command.contains("صفحه اصلی گوشی") || command == "home") {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.global("home")) "به صفحه اصلی گوشی برگشتم." else "رفتن به خانه انجام نشد."
+        }
+        if (command.contains("برنامه های اخیر") || command.contains("برنامه‌های اخیر") || command.contains("recent apps")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.global("recents")) "برنامه‌های اخیر باز شدند." else "بازکردن برنامه‌های اخیر انجام نشد."
+        }
+        if (command.contains("پنل اعلان") || command.contains("اعلان ها را باز") || command.contains("اعلان‌ها را باز") || command.contains("notifications")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.global("notifications")) "پنل اعلان‌ها باز شد." else "بازکردن پنل اعلان‌ها انجام نشد."
+        }
+        if (command.contains("تنظیمات سریع") || command.contains("quick settings")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.global("quick_settings")) "تنظیمات سریع باز شد." else "بازکردن تنظیمات سریع انجام نشد."
+        }
+        if (command.contains("اسکرول پایین") || command.contains("پایین برو") || command.contains("صفحه را پایین") || command.contains("scroll down")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.scroll("down")) "صفحه به پایین پیمایش شد." else "بخش قابل پیمایش در صفحه پیدا نشد."
+        }
+        if (command.contains("اسکرول بالا") || command.contains("بالا برو") || command.contains("صفحه را بالا") || command.contains("scroll up")) {
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.scroll("up")) "صفحه به بالا پیمایش شد." else "بخش قابل پیمایش در صفحه پیدا نشد."
+        }
+        if (command.contains("نگه دار") || command.contains("لمس طولانی")) {
+            val target = command.substringAfter("روی ").substringBefore("نگه").substringBefore("لمس").trim()
+            if (target.isBlank()) return "نام گزینه‌ای که باید نگه داشته شود مشخص نیست."
+            val service = WolfAccessibilityService.active ?: return "برای کنترل صفحه، دسترسی Accessibility را در تنظیمات فعال کن."
+            return if (service.longClickVisibleText(target)) "روی «$target» لمس طولانی انجام شد." else "گزینه «$target» پیدا نشد یا لمس طولانی را پشتیبانی نمی‌کند."
+        }
         if (command.contains("در فیلد") && (command.contains("بنویس") || command.contains("وارد کن"))) {
             val field = command.substringAfter("در فیلد").substringBefore("بنویس").substringBefore("وارد کن").trim()
             val value = raw.substringAfter("بنویس", raw.substringAfter("وارد کن", "")).trim()
