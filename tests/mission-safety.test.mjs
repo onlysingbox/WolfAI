@@ -101,11 +101,20 @@ test("MASTER OFF blocks the read-only executor before external work", async () =
 test("owned mission lookup is scoped to the authenticated owner", async () => {
   let sqlSeen = "";
   let bindings = [];
-  const env = { DB: { prepare(sql) { sqlSeen = sql; return { bind(...args) { bindings = args; return { async first() { return args[1] === "owner-A" ? { id: args[0], status: "approved_pending_execution", owner_id: args[1] } : null; } }; } }; } } };
-  assert.match(sqlSeen = "SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=? LIMIT 1", /owner_id=\?/);
-  env.DB.prepare = sql => ({ bind(...args) { bindings = args; return { async first() { return args[1] === "owner-A" ? { id: args[0], status: "approved_pending_execution", owner_id: args[1] } : null; } }; } });
+  const env = { DB: { prepare(sql) {
+    sqlSeen = sql;
+    return { bind(...args) {
+      bindings = args;
+      return { async first() {
+        return args[1] === "owner-A"
+          ? { id: args[0], status: "approved_pending_execution", owner_id: args[1] }
+          : null;
+      } };
+    } };
+  } } };
   assert.equal((await getOwnedCompanionMission(env, "mission-1", "owner-A")).owner_id, "owner-A");
   assert.equal(await getOwnedCompanionMission(env, "mission-1", "owner-B"), null);
+  assert.match(sqlSeen, /owner_id=\?/);
   assert.deepEqual(bindings, ["mission-1", "owner-B"]);
 });
 
