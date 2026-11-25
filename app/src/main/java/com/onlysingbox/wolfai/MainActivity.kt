@@ -1,5 +1,6 @@
 package com.onlysingbox.wolfai
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
@@ -46,6 +47,9 @@ import java.io.File
 import android.content.SharedPreferences
 import java.util.Locale
 import org.json.JSONArray
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
 private val Navy = Color(0xFF071426)
@@ -57,6 +61,16 @@ private val Gold = Color(0xFFFFC928)
 private fun decodeXmlText(value: String): String = value
     .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
     .replace("&quot;", "\"").replace("&apos;", "'")
+
+
+private fun readPdfText(file: File, context: Context): String {
+    PDFBoxResourceLoader.init(context.applicationContext)
+    PDDocument.load(file).use { document ->
+        if (document.isEncrypted) return "این PDF رمزگذاری شده است و بدون رمز قابل خواندن نیست."
+        val stripper = PDFTextStripper().apply { sortByPosition = true }
+        return stripper.getText(document).take(12000).ifBlank { "متن قابل استخراج پیدا نشد؛ ممکن است PDF فقط تصویر اسکن‌شده باشد." }
+    }
+}
 
 private fun readXlsxText(file: File): String {
     java.util.zip.ZipFile(file).use { zip ->
@@ -722,7 +736,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                 }
                                             }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
                                             "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
-                                            "pdf" -> "فایل PDF با موفقیت ذخیره شده است؛ استخراج متن PDF در نسخه بعدی اضافه می‌شود."
+                                            "pdf" -> runCatching { readPdfText(file, context) }.getOrElse { "استخراج PDF ناموفق بود: ${it.message}" }
                                             else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
                                         }
                                         fileStatus="نتیجه خواندن: ${file.name}"
