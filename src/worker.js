@@ -649,6 +649,7 @@ const WOLF_AI_MODELS = {
   gemma: "@cf/google/gemma-4-26b-a4b-it"
 };
 const WOLF_AI_DEFAULT_MODEL = "auto";
+const WOLF_ALLOWED_MODES = ["auto", "glm", "zai", "gemma", "gemini", "groq", "openrouter"];
 
 // Provider adapters only use endpoints with a documented free tier or the
 // existing Workers AI binding. No billing fallback is ever attempted.
@@ -1186,7 +1187,6 @@ async function companionChat(request, env) {
     (language === "fa"
       ? "\n\nاین یک مکالمه صوتی/متنی معمولی با مالک است، نه صرفاً دریافت فرمان. طبیعی، صمیمی، مرتبط و روان پاسخ بده. اگر کاربر درخواست انجام کار بیرونی کرد، فعلاً فقط توضیح بده که درخواست باید از مسیر مأموریت و تأیید امن اجرا شود؛ ادعا نکن عملی انجام داده‌ای. هیچ اقدام بیرونی را از این endpoint اجرا نکن."
       : "\n\nThis is ordinary spoken/text conversation with the owner, not merely command input. Be natural, warm, relevant and conversational. If the user asks for an external action, explain that it must go through the agent task and approval flow; do not claim it was performed. Never execute external side effects from this endpoint.");
-  export const WOLF_ALLOWED_MODES = ["auto", "glm", "zai", "gemma", "gemini", "groq", "openrouter"];
   const requestedMode = WOLF_ALLOWED_MODES.includes(String(body?.model || "")) ? String(body.model) : await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
   try {
     const messages = [{ role: "system", content: system }, ...history, { role: "user", content: userText }];
@@ -3176,4 +3176,4 @@ export default {
     }
   }
 };
-export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider };
+export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider };
