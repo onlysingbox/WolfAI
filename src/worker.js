@@ -1183,14 +1183,17 @@ async function companionChat(request, env) {
   const memoryContext = ownerMemory.length
     ? "\n\nOwner-approved memory (use only when relevant):\n" + ownerMemory.map(item => "- " + String(item.key || "") + ": " + String(item.value || "").slice(0, 400)).join("\n")
     : "";
-  const system = wolfSystemPrompt(language) + memoryContext +
+  const conversationGuidance = conversationPreferenceGuidance(history, userText, language);
+  const system = wolfSystemPrompt(language) + memoryContext + conversationGuidance +
     (language === "fa"
-      ? "\n\nاین یک مکالمه صوتی/متنی معمولی با مالک است، نه صرفاً دریافت فرمان. طبیعی، صمیمی، مرتبط و روان پاسخ بده. اگر کاربر درخواست انجام کار بیرونی کرد، فعلاً فقط توضیح بده که درخواست باید از مسیر مأموریت و تأیید امن اجرا شود؛ ادعا نکن عملی انجام داده‌ای. هیچ اقدام بیرونی را از این endpoint اجرا نکن."
-      : "\n\nThis is ordinary spoken/text conversation with the owner, not merely command input. Be natural, warm, relevant and conversational. If the user asks for an external action, explain that it must go through the agent task and approval flow; do not claim it was performed. Never execute external side effects from this endpoint.");
+      ? "\n\nقواعد مکالمه اپ WOLF باید مانند گفتگوی طبیعی ربات تلگرام باشد: پیام آخر را دقیق بخوان و فقط به همان منظور پاسخ بده؛ تاریخچه را برای فهم ارجاع‌ها و ادامه بحث به کار ببر، نه برای منحرف کردن موضوع. پاسخ معمولی را طبیعی، روان و مستقیم بده؛ از معرفی دوباره خودت، عبارت‌های کلیشه‌ای، فهرست‌سازی بی‌دلیل و توضیحات نامربوط پرهیز کن. اگر منظور روشن است سؤال اضافه نپرس. اگر کاربر درخواست جست‌وجو یا اقدام بیرونی دارد، توضیح بده از بخش مأموریت‌ها و مسیر تأیید امن اپ استفاده کند؛ ادعا نکن کاری انجام شده و هیچ اثر بیرونی را از این endpoint اجرا نکن. اگر داده یا ابزاری در دسترس نیست، صریح بگو."
+      : "\n\nThe WOLF app conversation must feel like the Telegram bot: read the latest message carefully and answer only its actual intent; use history to resolve references and follow-ups without derailing the topic. Be natural, direct and relevant. Avoid reintroductions, canned boilerplate, needless lists and unrelated explanations. Do not ask extra questions when intent is clear. For web research or external actions, direct the user to the app's Missions flow and its approval steps; never claim an action was performed and never execute external side effects from this endpoint. State clearly when data or tools are unavailable.");
   const requestedMode = WOLF_ALLOWED_MODES.includes(String(body?.model || "")) ? String(body.model) : await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
+  const casualChat = isCasualChatMessage(userText);
+  const selectedMode = casualChat && requestedMode === "auto" ? "gemma" : requestedMode;
   try {
     const messages = [{ role: "system", content: system }, ...history, { role: "user", content: userText }];
-    const result = await runWolfModel(env, messages, requestedMode, userText);
+    const result = await runWolfModel(env, messages, selectedMode, userText);
     // Keep conversation turns on the Android device; avoid per-message D1 writes.
     return json({ ok: true, reply: result.answer, language, session_id: sessionId, model: result.provider, model_name: result.model, fallback: result.fallback, quota: result.usage || null });
   } catch (error) {
