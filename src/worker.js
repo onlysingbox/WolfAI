@@ -650,6 +650,87 @@ const WOLF_AI_MODELS = {
 };
 const WOLF_AI_DEFAULT_MODEL = "auto";
 
+// Provider adapters only use endpoints with a documented free tier or the
+// existing Workers AI binding. No billing fallback is ever attempted.
+const WOLF_EXTERNAL_PROVIDERS = {
+  gemini: { key: "GEMINI_API_KEY", model: "gemini-2.5-flash", freeTier: true },
+  groq: { key: "GROQ_API_KEY", model: "llama-3.3-70b-versatile", freeTier: true },
+  openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
+};
+function wolfProviderCatalog(env) {
+  return [
+    { id: "auto", label: "خودکار", configured: true, freeOnly: true },
+    { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true },
+    { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true },
+    ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
+      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq Llama 3.3" : "OpenRouter Free",
+      configured: !!env[p.key], freeOnly: true, model: p.model,
+      quota: "از API عمومی قابل تأیید نیست"
+    })),
+    { id: "deepseek", label: "DeepSeek API", configured: false, freeOnly: false, note: "تا زمانی که API رایگانِ بدون صورتحساب تأیید نشود فعال نمی‌شود." }
+  ];
+}
+async function callOpenAICompatible(url, key, model, messages, maxTokens = 900) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + key },
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature: 0.4 })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error("provider_http_" + response.status + ": " + String(data.error?.message || data.message || "provider request failed").slice(0, 180));
+  const answer = String(data.choices?.[0]?.message?.content || "").trim();
+  if (!answer) throw new Error("provider_empty_response");
+  return { answer, usage: data.usage || null };
+}
+async function callGemini(env, messages, maxTokens = 900) {
+  const model = WOLF_EXTERNAL_PROVIDERS.gemini.model;
+  const system = messages.find(x => x.role === "system")?.content || "";
+  const contents = messages.filter(x => x.role !== "system").map(x => ({
+    role: x.role === "assistant" ? "model" : "user",
+    parts: [{ text: String(x.content || "") }]
+  }));
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 } })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error("gemini_http_" + response.status + ": " + String(data.error?.message || "Gemini request failed").slice(0, 180));
+  const answer = String(data.candidates?.[0]?.content?.parts?.map(x => x.text || "").join("") || "").trim();
+  if (!answer) throw new Error("gemini_empty_response");
+  return { answer, usage: data.usageMetadata || null };
+}
+async function callWolfProvider(env, id, messages) {
+  if (id === "glm" || id === "gemma") {
+    if (!env.AI?.run) throw new Error("Workers AI binding is unavailable");
+    const result = await env.AI.run(WOLF_AI_MODELS[id], { messages, max_tokens: 900, chat_template_kwargs: { enable_thinking: false } });
+    const answer = String(result?.choices?.[0]?.message?.content || "").trim();
+    if (!answer) throw new Error("Workers AI returned an empty response");
+    return { answer, usage: result?.usage || null, model: WOLF_AI_MODELS[id] };
+  }
+  if (id === "gemini") {
+    if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is not configured");
+    return { ...(await callGemini(env, messages)), model: WOLF_EXTERNAL_PROVIDERS.gemini.model };
+  }
+  if (id === "groq") {
+    if (!env.GROQ_API_KEY) throw new Error("Groq API key is not configured");
+    return { ...(await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", env.GROQ_API_KEY, WOLF_EXTERNAL_PROVIDERS.groq.model, messages)), model: WOLF_EXTERNAL_PROVIDERS.groq.model };
+  }
+  if (id === "openrouter") {
+    if (!env.OPENROUTER_API_KEY) throw new Error("OpenRouter API key is not configured");
+    return { ...(await callOpenAICompatible("https://openrouter.ai/api/v1/chat/completions", env.OPENROUTER_API_KEY, WOLF_EXTERNAL_PROVIDERS.openrouter.model, messages)), model: WOLF_EXTERNAL_PROVIDERS.openrouter.model };
+  }
+  throw new Error("Unknown or disabled provider: " + id);
+}
+function wolfProviderOrder(env, requested, complex) {
+  const configured = wolfProviderCatalog(env).filter(p => p.configured && p.id !== "auto").map(p => p.id);
+  if (requested && requested !== "auto") {
+    if (!configured.includes(requested)) throw new Error("این موتور هنوز کلید API یا اتصال فعال ندارد: " + requested);
+    return [requested];
+  }
+  const preferred = complex ? ["gemini", "groq", "gemma", "openrouter", "glm"] : ["glm", "groq", "gemini", "openrouter", "gemma"];
+  return preferred.filter(id => configured.includes(id));
+}
+
 function isAmbiguousTopCountriesRequest(value) {
   const text = String(value || "").trim();
   const asksCountries = /(?:کشور(?:ها)?|countries?)/i.test(text);
@@ -666,17 +747,21 @@ function chooseWolfModel(mode, userText) {
   return complex ? "gemma" : "glm";
 }
 
-async function runWolfModel(env, payload, modelKey = "glm") {
-  const selected = WOLF_AI_MODELS[modelKey] ? modelKey : "glm";
-  try {
-    return { result: await env.AI.run(WOLF_AI_MODELS[selected], payload), modelKey: selected };
-  } catch (error) {
-    if (selected === "gemma") {
-      console.error("WOLF AI primary model failed; falling back to GLM", error);
-      return { result: await env.AI.run(WOLF_AI_MODELS.glm, payload), modelKey: "glm", fallback: true };
+async function runWolfModel(env, messages, requestedMode, userText) {
+  const complex = chooseWolfModel("auto", userText) === "gemma";
+  const order = wolfProviderOrder(env, requestedMode, complex);
+  if (!order.length) throw new Error("هیچ موتور رایگان و پیکربندی‌شده‌ای در دسترس نیست.");
+  const errors = [];
+  for (const provider of order) {
+    try {
+      const result = await callWolfProvider(env, provider, messages);
+      return { ...result, provider, fallback: errors.length > 0, attempted: order };
+    } catch (error) {
+      errors.push(provider + ": " + String(error?.message || error).slice(0, 160));
+      // Only fall back to another explicitly configured free provider.
     }
-    throw error;
   }
+  throw new Error("همه موتورهای رایگان در دسترس نبودند: " + errors.join(" | "));
 }
 
 async function getSetting(env, key, fallback = null) {
@@ -762,8 +847,9 @@ async function companionChat(request, env) {
   try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
   const enabled = await getSetting(env, "companion_master_enabled", "true");
   if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ درخواست هوش مصنوعی پذیرفته نمی‌شود." }, 423);
+  const userText = String(body?.text || "").trim().slice(0, 12000);
   if (!userText) return json({ ok: false, error: "متن پیام خالی است." }, 400);
-  if (!env.AI?.run) return json({ ok: false, error: "موتور هوش مصنوعی در دسترس نیست." }, 503);
+  if (!env.AI?.run && !env.GEMINI_API_KEY && !env.GROQ_API_KEY && !env.OPENROUTER_API_KEY) return json({ ok: false, error: "هیچ موتور رایگان پیکربندی‌شده‌ای در دسترس نیست." }, 503);
   const sessionId = String(body?.session_id || "default").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 48) || "default";
   const history = Array.isArray(body?.history) ? body.history.filter(item => item && ["user", "assistant"].includes(item.role) && typeof item.content === "string").slice(-10).map(item => ({ role: item.role, content: String(item.content).slice(0, 3000) })) : [];
   const language = await responseLanguage(env, userText);
@@ -779,18 +865,13 @@ async function companionChat(request, env) {
     (language === "fa"
       ? "\n\nاین یک مکالمه صوتی/متنی معمولی با مالک است، نه صرفاً دریافت فرمان. طبیعی، صمیمی، مرتبط و روان پاسخ بده. اگر کاربر درخواست انجام کار بیرونی کرد، فعلاً فقط توضیح بده که درخواست باید از مسیر مأموریت و تأیید امن اجرا شود؛ ادعا نکن عملی انجام داده‌ای. هیچ اقدام بیرونی را از این endpoint اجرا نکن."
       : "\n\nThis is ordinary spoken/text conversation with the owner, not merely command input. Be natural, warm, relevant and conversational. If the user asks for an external action, explain that it must go through the agent task and approval flow; do not claim it was performed. Never execute external side effects from this endpoint.");
-  const requestedMode = ["auto", "glm", "gemma"].includes(String(body?.model || "")) ? String(body.model) : await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
-  const modelKey = chooseWolfModel(requestedMode, userText);
+  const allowedModes = ["auto", "glm", "gemma", "gemini", "groq", "openrouter"];
+  const requestedMode = allowedModes.includes(String(body?.model || "")) ? String(body.model) : await getSetting(env, "ai_model", WOLF_AI_DEFAULT_MODEL);
   try {
-    const { result: output, modelKey: usedModel, fallback } = await runWolfModel(env, {
-      messages: [{ role: "system", content: system }, ...history, { role: "user", content: userText }],
-      max_tokens: 700, chat_template_kwargs: { enable_thinking: false }
-    }, modelKey);
-    const answer = String(output?.choices?.[0]?.message?.content || "").trim();
-    if (!answer) throw new Error("مدل پاسخ متنی برنگرداند.");
+    const messages = [{ role: "system", content: system }, ...history, { role: "user", content: userText }];
+    const result = await runWolfModel(env, messages, requestedMode, userText);
     // Keep conversation turns on the Android device; avoid per-message D1 writes.
-    void usedModel; void fallback;
-    return json({ ok: true, reply: answer, language, session_id: sessionId, model: usedModel });
+    return json({ ok: true, reply: result.answer, language, session_id: sessionId, model: result.provider, model_name: result.model, fallback: result.fallback, quota: result.usage || null });
   } catch (error) {
     console.error("companion chat failed", error);
     return json({ ok: false, error: "پاسخ‌گویی انجام نشد: " + String(error?.message || error).slice(0, 300) }, 502);
@@ -2584,7 +2665,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first();
-        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: env.AI ? "auto (GLM-4.7-Flash + Gemma 4 26B)" : null, research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
+        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!env.AI, ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
