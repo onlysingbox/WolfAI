@@ -917,6 +917,44 @@ async function companionMissions(request, env) {
     return json({ ok: false, error: "طرح مأموریت ساخته نشد: " + String(error?.message || error).slice(0, 240) }, 502);
   }
 }
+async function decideCompanionMission(request, env, missionId) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  const enabled = await getSetting(env, "companion_master_enabled", "true");
+  if (enabled !== "true") return json({ ok: false, error: "MASTER OFF است؛ تصمیم‌گیری مأموریت متوقف است." }, 423);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const decision = String(body?.decision || "").toLowerCase();
+  if (!["approve", "reject"].includes(decision)) return json({ ok: false, error: "تصمیم باید approve یا reject باشد." }, 400);
+  if (!/^[0-9a-f-]{36}$/i.test(missionId)) return json({ ok: false, error: "شناسه مأموریت نامعتبر است." }, 400);
+
+  const mission = await env.DB.prepare(
+    "SELECT id, status FROM agent_runs WHERE id = ? AND owner_id = ? LIMIT 1"
+  ).bind(missionId, String(device.owner_id)).first();
+  if (!mission) return json({ ok: false, error: "مأموریت پیدا نشد." }, 404);
+  if (mission.status !== "awaiting_approval") return json({ ok: false, error: "این مأموریت قبلاً تعیین تکلیف شده است." }, 409);
+
+  const nextStatus = decision === "approve" ? "approved_pending_execution" : "rejected";
+  const stepStatus = decision === "approve" ? "approved_pending_execution" : "rejected";
+  const now = new Date().toISOString();
+  const statements = [
+    env.DB.prepare("UPDATE agent_runs SET status = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND status = 'awaiting_approval'")
+      .bind(nextStatus, now, missionId, String(device.owner_id)),
+    env.DB.prepare("UPDATE agent_steps SET status = ?, approved_by = ?, approved_at = ? WHERE run_id = ? AND status = 'awaiting_approval' AND approval_required = 1")
+      .bind(stepStatus, decision === "approve" ? String(device.owner_id) : null, decision === "approve" ? now : null, missionId)
+  ];
+  const results = await env.DB.batch(statements);
+  if (!results?.[0]?.meta?.changes) return json({ ok: false, error: "وضعیت مأموریت تغییر کرده است؛ فهرست را تازه‌سازی کن." }, 409);
+  await log(env, device.owner_id, decision === "approve" ? "companion.mission_approved" : "companion.mission_rejected", "agent_run", missionId, { status: nextStatus });
+  return json({
+    ok: true, mission_id: missionId, status: nextStatus,
+    executed: false,
+    message: decision === "approve"
+      ? "طرح تأیید شد و در صف اجرای آینده قرار گرفت؛ هنوز هیچ مرحله‌ای اجرا نشده است."
+      : "طرح رد شد و هیچ مرحله‌ای اجرا نخواهد شد."
+  });
+}
+
 function safeJson(value, fallback) {
   try { return JSON.parse(String(value || "")); } catch { return fallback; }
 }
@@ -2745,6 +2783,10 @@ export default {
     }
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {
       return await companionMissions(request, env);
+    }
+    const missionDecisionMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/decision$/i);
+    if (request.method === "POST" && missionDecisionMatch) {
+      return await decideCompanionMission(request, env, missionDecisionMatch[1]);
     }
     if (request.method === "POST" && url.pathname === "/api/companion/chat") {
       return await companionChat(request, env);
