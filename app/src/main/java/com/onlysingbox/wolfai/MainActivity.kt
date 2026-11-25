@@ -512,9 +512,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             scope.launch {
                 kotlinx.coroutines.delay(2200)
                 val service = WolfAccessibilityService.active
-                val clicked = service?.clickVisibleText("Voice Call") == true ||
-                    service?.clickVisibleText("تماس صوتی") == true ||
-                    service?.clickVisibleText("Call") == true
+                val clicked = service?.clickVisibleTextExact("Voice Call") == true ||
+                    service?.clickVisibleTextExact("Voice call") == true ||
+                    service?.clickVisibleTextExact("تماس صوتی") == true
                 status = if (clicked) "گزینه تماس تلگرام انتخاب شد؛ وضعیت برقراری تماس را در خود تلگرام بررسی کن."
                     else "مخاطب تلگرام باز شد، اما دکمه تماس به‌صورت امن و قابل‌تشخیص پیدا نشد."
             }
@@ -531,9 +531,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             scope.launch {
                 kotlinx.coroutines.delay(1800)
                 val service = WolfAccessibilityService.active
-                val clicked = service?.clickVisibleText("Voice call") == true ||
-                    service?.clickVisibleText("تماس صوتی") == true ||
-                    service?.clickVisibleText("Call") == true
+                val clicked = service?.clickVisibleTextExact("Voice call") == true ||
+                    service?.clickVisibleTextExact("Voice Call") == true ||
+                    service?.clickVisibleTextExact("تماس صوتی") == true
                 status = if (clicked) "دکمه تماس واتساپ انتخاب شد؛ اگر واتساپ تأیید دیگری خواست آن را بررسی کن." else "گفتگوی مخاطب در واتساپ باز شد؛ دکمه تماس در این نسخه خودکار پیدا نشد."
             }
             return "گفتگوی مخاطب در واتساپ باز شد؛ در حال بررسی دکمه تماس."
