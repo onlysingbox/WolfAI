@@ -3,6 +3,9 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.ContactsContract
+import android.provider.AlarmClock
+import android.provider.Settings
+import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
@@ -209,6 +212,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     val context = androidx.compose.ui.platform.LocalContext.current
     var showStorage by remember { mutableStateOf(false) }
     var showContacts by remember { mutableStateOf(false) }
+    var showDeviceTools by remember { mutableStateOf(false) }
+    var appSearch by remember { mutableStateOf("") }
+    var alarmHour by remember { mutableStateOf("7") }
+    var alarmMinute by remember { mutableStateOf("00") }
+    var deviceStatus by remember { mutableStateOf("اجرای برنامه‌ها و تنظیم هشدار گوشی") }
+    val launchableApps = remember(showDeviceTools) { if (!showDeviceTools) emptyList() else context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(context.packageManager).toString().lowercase() } }
     var contacts by remember { mutableStateOf<List<Pair<String,String>>>(emptyList()) }
     var contactSearch by remember { mutableStateOf("") }
     var contactsStatus by remember { mutableStateOf("برای مشاهده مخاطبین، مجوز گوشی لازم است.") }
@@ -350,16 +359,52 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showStorage = !showStorage; showContacts = false; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
-                    OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
+                    OutlinedButton(onClick = { showStorage = !showStorage; showContacts = false; showDeviceTools = false; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                    OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showDeviceTools = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
                     OutlinedButton(onClick = {
-                        showContacts = !showContacts; showStorage = false; showModels = false; showMissions = false
-                        if (showContacts) {
+                        showContacts = !showContacts; showStorage = false; showDeviceTools = false; showModels = false; showMissions = false
+                        if (showDeviceTools) {
+                    Text("کنترل برنامه‌ها و گوشی", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    Text(deviceStatus, color = Cyan)
+                    Text("تنظیم هشدار", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(alarmHour, { alarmHour = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), label = { Text("ساعت") }, singleLine = true)
+                        OutlinedTextField(alarmMinute, { alarmMinute = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), label = { Text("دقیقه") }, singleLine = true)
+                        Button(enabled = (alarmHour.toIntOrNull() ?: 99) in 0..23 && (alarmMinute.toIntOrNull() ?: 99) in 0..59, onClick = {
+                            val h = alarmHour.toInt(); val m = alarmMinute.toInt()
+                            val intent = Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, h).putExtra(AlarmClock.EXTRA_MINUTES, m).putExtra(AlarmClock.EXTRA_MESSAGE, "هشدار از WOLF").putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                            if (intent.resolveActivity(context.packageManager) != null) context.startActivity(intent) else deviceStatus = "برنامه ساعت روی گوشی پیدا نشد."
+                        }) { Text("تنظیم") }
+                    }
+                    Divider(color = Color.Gray)
+                    Text("باز کردن برنامه‌های نصب‌شده", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(appSearch, { appSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("جست‌وجوی برنامه") }, singleLine = true)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(launchableApps.filter { it.loadLabel(context.packageManager).toString().contains(appSearch, true) }) { app ->
+                            val label = app.loadLabel(context.packageManager).toString()
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(label, color = Color.White, modifier = Modifier.weight(1f))
+                                    TextButton(onClick = {
+                                        val launch = context.packageManager.getLaunchIntentForPackage(app.activityInfo.packageName)
+                                        if (launch != null) context.startActivity(launch) else deviceStatus = "اجرای این برنامه ممکن نیست."
+                                    }) { Text("باز کن") }
+                                }
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }) { Text("تنظیمات VPN") }
+                        OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }) { Text("تنظیمات گوشی") }
+                    }
+                    Text("WOLF می‌تواند برنامه را باز کند و صفحه تنظیمات VPN را نشان دهد. روشن‌کردن تونل VPN برنامه‌های دیگر بدون API رسمی آن برنامه یا سرویس VPN خود WOLF ممکن نیست؛ برای امنیت، این محدودیت را دور نمی‌زنیم.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                } else if (showContacts) {
                             if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خطا در خواندن مخاطبین" } }
                             else contactsPermission.launch(Manifest.permission.READ_CONTACTS)
                         }
                     }) { Text(if (showContacts) "بازگشت" else "مخاطبین") }
-                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false; showContacts = false }) { Text("موتورهای هوش مصنوعی") }
+                    OutlinedButton(onClick = { showDeviceTools = !showDeviceTools; showStorage = false; showContacts = false; showModels = false; showMissions = false }) { Text(if (showDeviceTools) "بازگشت" else "ابزارهای گوشی") }
+                    OutlinedButton(onClick = { showModels = !showModels; showStorage = false; showContacts = false; showDeviceTools = false }) { Text("موتورهای هوش مصنوعی") }
                 }
                 }
                 if (showContacts) {
