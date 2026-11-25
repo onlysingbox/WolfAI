@@ -55,7 +55,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         setContent { WolfApp(
             token = securePrefs.getString("device_token", "") ?: "",
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
-            send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },\n            createMission = { text -> apiCreateMission(securePrefs.getString("device_token", "") ?: "", text) },\n            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },
+            send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },
+            createMission = { text -> apiCreateMission(securePrefs.getString("device_token", "") ?: "", text) },
+            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
             speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
             storagePrefs = securePrefs,
@@ -139,7 +141,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("آماده گفتگو") }
-    var showStorage by remember { mutableStateOf(false) }\n    var showMissions by remember { mutableStateOf(false) }\n    var missionText by remember { mutableStateOf("") }\n    var missionBusy by remember { mutableStateOf(false) }\n    var missionStatus by remember { mutableStateOf("برای ساخت طرح مأموریت، درخواستت را بنویس.") }\n    var missions by remember { mutableStateOf(JSONArray()) }
+    var showStorage by remember { mutableStateOf(false) }
+    var showMissions by remember { mutableStateOf(false) }
+    var missionText by remember { mutableStateOf("") }
+    var missionBusy by remember { mutableStateOf(false) }
+    var missionStatus by remember { mutableStateOf("برای ساخت طرح مأموریت، درخواستت را بنویس.") }
+    var missions by remember { mutableStateOf(JSONArray()) }
     var selectedModel by remember { mutableStateOf(storagePrefs.getString("ai_model", "auto") ?: "auto") }
     var showModels by remember { mutableStateOf(false) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
@@ -227,10 +234,30 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }, colors = ButtonDefaults.buttonColors(containerColor = if (masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if (masterEnabled) "MASTER OFF" else "فعال‌سازی WOLF") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showStorage = !showStorage; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }\n                    OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
+                    OutlinedButton(onClick = { showStorage = !showStorage; showModels = false; showMissions = false }) { Text(if (showStorage) "بازگشت به گفتگو" else "مدیریت حافظه") }
+                    OutlinedButton(onClick = { showMissions = !showMissions; showStorage = false; showModels = false; if (showMissions) scope.launch { runCatching { listMissions() }.onSuccess { missions = it }.onFailure { missionStatus = it.message ?: "خطا در دریافت مأموریت‌ها" } } }) { Text(if (showMissions) "بازگشت" else "مأموریت‌ها") }
                     OutlinedButton(onClick = { showModels = !showModels; showStorage = false }) { Text("موتورهای هوش مصنوعی") }
                 }
-                if (showMissions) {\n                    Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)\n                    Text("در این مرحله فقط طرح کار ساخته و ذخیره می‌شود. هیچ تماس، پیام، خرید یا تغییر بیرونی بدون مرحله تأیید اجرا نخواهد شد.", color = Gold)\n                    OutlinedTextField(missionText, { missionText = it }, modifier = Modifier.fillMaxWidth(), enabled = masterEnabled && !missionBusy, label = { Text("چه کاری انجام بدهم؟") }, minLines = 3)\n                    Button(enabled = masterEnabled && missionText.isNotBlank() && !missionBusy, onClick = { val request = missionText.trim(); missionBusy = true; missionStatus = "در حال ساخت طرح امن..."; scope.launch { runCatching { createMission(request) }.onSuccess { mission -> missionText = ""; missionStatus = "طرح ذخیره شد و همه مراحل در انتظار تأیید هستند."; missions = JSONArray().put(mission).also { current -> for (i in 0 until missions.length()) current.put(missions.getJSONObject(i)) } }.onFailure { missionStatus = it.message ?: "ساخت مأموریت ناموفق بود" }; missionBusy = false } }) { Text(if (missionBusy) "در حال برنامه‌ریزی..." else "ساخت طرح مأموریت") }\n                    Text(missionStatus, color = Cyan)\n                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {\n                        items((0 until missions.length()).map { missions.getJSONObject(it) }) { mission ->\n                            val plan = mission.optJSONObject("plan") ?: JSONObject()\n                            Card(colors = CardDefaults.cardColors(containerColor = Panel)) {\n                                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {\n                                    Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)\n                                    Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)\n                                    val steps = plan.optJSONArray("steps") ?: JSONArray()\n                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }\n                                }\n                            }\n                        }\n                    }\n                } else if (showModels) {
+                if (showMissions) {
+                    Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    Text("در این مرحله فقط طرح کار ساخته و ذخیره می‌شود. هیچ تماس، پیام، خرید یا تغییر بیرونی بدون مرحله تأیید اجرا نخواهد شد.", color = Gold)
+                    OutlinedTextField(missionText, { missionText = it }, modifier = Modifier.fillMaxWidth(), enabled = masterEnabled && !missionBusy, label = { Text("چه کاری انجام بدهم؟") }, minLines = 3)
+                    Button(enabled = masterEnabled && missionText.isNotBlank() && !missionBusy, onClick = { val request = missionText.trim(); missionBusy = true; missionStatus = "در حال ساخت طرح امن..."; scope.launch { runCatching { createMission(request) }.onSuccess { mission -> missionText = ""; missionStatus = "طرح ذخیره شد و همه مراحل در انتظار تأیید هستند."; missions = JSONArray().put(mission).also { current -> for (i in 0 until missions.length()) current.put(missions.getJSONObject(i)) } }.onFailure { missionStatus = it.message ?: "ساخت مأموریت ناموفق بود" }; missionBusy = false } }) { Text(if (missionBusy) "در حال برنامه‌ریزی..." else "ساخت طرح مأموریت") }
+                    Text(missionStatus, color = Cyan)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items((0 until missions.length()).map { missions.getJSONObject(it) }) { mission ->
+                            val plan = mission.optJSONObject("plan") ?: JSONObject()
+                            Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                                Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                    Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
+                                    val steps = plan.optJSONArray("steps") ?: JSONArray()
+                                    for (i in 0 until steps.length()) { val step = steps.optJSONObject(i) ?: JSONObject(); Text("${i + 1}. ${step.optString("title")} ", color = Cyan); Text(step.optString("details"), color = Color.LightGray); Text("نیازمند تأیید | ${step.optString("capability")}", color = Gold, style = MaterialTheme.typography.bodySmall) }
+                                }
+                            }
+                        }
+                    }
+                } else if (showModels) {
                     Text("انتخاب موتور", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     Text("مسیریابی خودکار بین موتورهای رایگانِ فعال؛ در صورت خطا فقط به سرویس رایگانِ دارای کلید می‌رود. هیچ مسیر پولی فعال نیست.", color = Color.LightGray)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
