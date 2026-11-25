@@ -2743,7 +2743,10 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/master") {
       return await companionMaster(request, env);
     }
-    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {\n      return await companionMissions(request, env);\n    }\n    if (request.method === "POST" && url.pathname === "/api/companion/chat") {
+    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {
+      return await companionMissions(request, env);
+    }
+    if (request.method === "POST" && url.pathname === "/api/companion/chat") {
       return await companionChat(request, env);
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
