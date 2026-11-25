@@ -33,6 +33,17 @@ class WolfAccessibilityService : AccessibilityService() {
         return false
     }
 
+    fun clickVisibleTextExact(query: String): Boolean {
+        val root = rootInActiveWindow ?: return false
+        val node = findNodeMatch(root, query.trim(), true) ?: return false
+        var current: AccessibilityNodeInfo? = node
+        while (current != null) {
+            if (current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+            current = current.parent
+        }
+        return false
+    }
+
     fun longClickVisibleText(query: String): Boolean {
         val root = rootInActiveWindow ?: return false
         val node = findNode(root, query) ?: return false
