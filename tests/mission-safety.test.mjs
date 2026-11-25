@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCompanionReadOnlyAction } from "../src/worker.js";
+import { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction } from "../src/worker.js";
 
 test("accepts a bounded web search", () => {
   assert.deepEqual(
@@ -66,4 +66,24 @@ test("rejects unknown action parameters", () => {
   assert.throws(() => validateCompanionReadOnlyAction("web_research", {
     type: "research.search", args: { query: "test", execute: true }
   }));
+});
+
+test("the execution wrapper rejects writes before touching storage", async () => {
+  let dbTouched = false;
+  const env = { DB: { prepare() { dbTouched = true; throw new Error("DB must not be reached"); } } };
+  await assert.rejects(
+    executeCompanionReadOnlyAction(env, "personal_memory", {
+      type: "memory.save", args: { key: "private", value: "must not write" }
+    })
+  );
+  assert.equal(dbTouched, false);
+});
+
+test("the execution wrapper rejects sequence envelopes", async () => {
+  const env = { DB: { prepare() { throw new Error("DB must not be reached"); } } };
+  await assert.rejects(
+    executeCompanionReadOnlyAction(env, "web_research", {
+      type: "agent.sequence", args: { steps: [{ type: "research.search", args: { query: "x" } }] }
+    })
+  );
 });
