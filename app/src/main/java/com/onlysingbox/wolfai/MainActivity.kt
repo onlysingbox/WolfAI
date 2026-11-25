@@ -115,6 +115,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var showModels by remember { mutableStateOf(false) }
     var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
+    var pendingDeleteBucket by remember { mutableStateOf<Pair<String, File>?>(null) }
     var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
     val storageBuckets = remember(storageRefresh) { listOf("history" to "تاریخچه گفتگوها", "memory" to "حافظه بلندمدت", "notes" to "یادداشت‌ها", "files" to "فایل‌ها", "audio" to "صدا و ضبط‌ها").map { (key, label) -> key to (label to File(storageRoot, key).apply { mkdirs() }) } }
     fun folderBytes(file: File): Long = if (!file.exists()) 0L else if (file.isFile) file.length() else (file.listFiles()?.sumOf { folderBytes(it) } ?: 0L)
@@ -157,6 +158,24 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (!spoken.isNullOrBlank()) message = spoken
     }
     MaterialTheme(colorScheme = darkColorScheme(primary = Cyan, secondary = Gold, background = Navy, surface = Panel)) {
+        pendingDeleteBucket?.let { (label, dir) ->
+            AlertDialog(
+                onDismissRequest = { pendingDeleteBucket = null },
+                title = { Text("تأیید پاک‌سازی") },
+                text = { Text("تمام محتویات بخش «" + label + "» برای همیشه از حافظه محلی WOLF حذف می‌شود. این کار قابل بازگشت نیست. ادامه می‌دهی؟") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val deleted = dir.listFiles()?.count { it.deleteRecursively() } ?: 0
+                        pendingDeleteBucket = null
+                        storageRefresh++
+                        status = "پاک‌سازی «" + label + "» انجام شد؛ " + deleted + " مورد حذف شد"
+                    }) { Text("حذف دائمی", color = Color(0xFFFF7777)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteBucket = null }) { Text("انصراف") }
+                }
+            )
+        }
         Scaffold(containerColor = Navy) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("🐺 WOLF AI", style = MaterialTheme.typography.headlineLarge, color = Color.White)
@@ -222,11 +241,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         Text("%.2f GB".format(folderBytes(dir) / (1024.0 * 1024 * 1024)), color = Color.LightGray)
                                     }
                                     if (key == "files" || key == "audio") {
-                                        TextButton(onClick = {
-                                            dir.listFiles()?.forEach { it.deleteRecursively() }
-                                            storageRefresh++
-                                            status = "$label پاک‌سازی شد"
-                                        }) { Text("پاک‌سازی") }
+                                        TextButton(onClick = { pendingDeleteBucket = label to dir }) { Text("پاک‌سازی") }
                                     }
                                 }
                             }
