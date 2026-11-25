@@ -296,6 +296,35 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         }
         return false
     }
+    fun runLocalCommand(raw: String): String? {
+        val command = raw.trim().lowercase(Locale.ROOT)
+        if (command.contains("vpn")) {
+            context.startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+            return "تنظیمات VPN باز شد؛ روشن‌کردن تونل به اتصال رسمی سرویس نیاز دارد."
+        }
+        if (command.contains("باز کن") || command.contains("اجرا کن") || command.startsWith("open app") || command.startsWith("launch ")) {
+            val target = command.replace("لطفاً", "").replace("لطفا", "").replace("باز کن", "").replace("اجرا کن", "").replace("برنامه", "").replace("open app", "").replace("launch", "").trim()
+            val apps = context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).distinctBy { it.activityInfo.packageName }
+            val match = apps.firstOrNull { target.isNotBlank() && it.loadLabel(context.packageManager).toString().lowercase().contains(target) }
+            if (match != null) {
+                val launch = context.packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+                if (launch != null) { context.startActivity(launch); return "برنامه " + match.loadLabel(context.packageManager) + " باز شد." }
+            }
+            return "برنامه موردنظر پیدا نشد. نام نمایشی برنامه را دقیق‌تر بنویس."
+        }
+        if (command.contains("هشدار") || command.contains("آلارم")) {
+            val match = Regex("(\\d{1,2})[:٫.](\\d{2})").find(command)
+            if (match != null) {
+                val hour = match.groupValues[1].toIntOrNull() ?: return "ساعت نامعتبر است."
+                val minute = match.groupValues[2].toIntOrNull() ?: return "دقیقه نامعتبر است."
+                if (hour !in 0..23 || minute !in 0..59) return "زمان هشدار معتبر نیست."
+                val alarm = Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, hour).putExtra(AlarmClock.EXTRA_MINUTES, minute).putExtra(AlarmClock.EXTRA_MESSAGE, "هشدار از WOLF").putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                if (alarm.resolveActivity(context.packageManager) != null) { context.startActivity(alarm); return "فرم تنظیم هشدار باز شد؛ ذخیره را در برنامه ساعت تأیید کن." }
+                return "برنامه ساعت پیدا نشد."
+            }
+        }
+        return null
+    }
     var activeRequest by remember { mutableStateOf<Job?>(null) }
     val contactsPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) scope.launch { runCatching { loadContacts() }.onSuccess { contacts = it; contactsStatus = it.size.toString() + " شماره مخاطب خوانده شد." }.onFailure { contactsStatus = it.message ?: "خواندن مخاطبین ناموفق بود." } }
@@ -642,6 +671,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 message = ""
                                 chat.add("تو" to q)
                                 persistChat()
+                                val localResult = runCatching { runLocalCommand(q) }.getOrElse { "اجرای فرمان ناموفق بود: " + (it.message ?: "خطا") }
+                                if (localResult != null) { chat.add("WOLF" to localResult); persistChat(); speak(localResult); status = "فرمان گوشی اجرا شد" } else {
                                 busy = true
                                 status = "WOLF در حال فکر کردن..."
                                 activeRequest = scope.launch {
@@ -663,6 +694,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         busy = false
                                         activeRequest = null
                                     }
+                                }
                                 }
                             }
                         ) { Icon(Icons.Default.Send, contentDescription = "ارسال پیام") }
