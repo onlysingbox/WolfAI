@@ -655,6 +655,7 @@ const WOLF_AI_DEFAULT_MODEL = "auto";
 const WOLF_EXTERNAL_PROVIDERS = {
   gemini: { key: "GEMINI_API_KEY", model: "gemini-2.5-flash", freeTier: true },
   groq: { key: "GROQ_API_KEY", model: "openai/gpt-oss-120b", freeTier: true },
+  zai: { key: "ZAI_API_KEY", model: "glm-4.7-flash", freeTier: true },
   openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
 };
 function wolfProviderCatalog(env) {
@@ -663,7 +664,7 @@ function wolfProviderCatalog(env) {
     { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.glm },
     { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.gemma },
     ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
-      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq GPT-OSS 120B" : "OpenRouter Free",
+      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq GPT-OSS 120B" : id === "zai" ? "Z.ai GLM-4.7-Flash" : "OpenRouter Free",
       configured: !!env[p.key], freeOnly: true, model: p.model,
       quota: "از API عمومی قابل تأیید نیست"
     })),
@@ -717,6 +718,10 @@ async function callWolfProvider(env, id, messages) {
     if (!env.GROQ_API_KEY) throw new Error("Groq API key is not configured");
     return { ...(await callOpenAICompatible("https://api.groq.com/openai/v1/chat/completions", env.GROQ_API_KEY, WOLF_EXTERNAL_PROVIDERS.groq.model, messages)), model: WOLF_EXTERNAL_PROVIDERS.groq.model };
   }
+  if (id === "zai") {
+    if (!env.ZAI_API_KEY) throw new Error("Z.ai API key is not configured");
+    return { ...(await callOpenAICompatible("https://api.z.ai/api/paas/v4/chat/completions", env.ZAI_API_KEY, WOLF_EXTERNAL_PROVIDERS.zai.model, messages)), model: WOLF_EXTERNAL_PROVIDERS.zai.model };
+  }
   if (id === "openrouter") {
     if (!env.OPENROUTER_API_KEY) throw new Error("OpenRouter API key is not configured");
     return { ...(await callOpenAICompatible("https://openrouter.ai/api/v1/chat/completions", env.OPENROUTER_API_KEY, WOLF_EXTERNAL_PROVIDERS.openrouter.model, messages)), model: WOLF_EXTERNAL_PROVIDERS.openrouter.model };
@@ -729,7 +734,7 @@ function wolfProviderOrder(env, requested, complex) {
     if (!configured.includes(requested)) throw new Error("این موتور هنوز کلید API یا اتصال فعال ندارد: " + requested);
     return [requested];
   }
-  const preferred = complex ? ["gemini", "groq", "gemma", "openrouter", "glm"] : ["glm", "groq", "gemini", "openrouter", "gemma"];
+  const preferred = complex ? ["groq", "zai", "gemma", "glm", "gemini", "openrouter"] : ["glm", "zai", "groq", "gemma", "gemini", "openrouter"];
   return preferred.filter(id => configured.includes(id));
 }
 
@@ -3020,7 +3025,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/health") {
       try {
         const row = await env.DB.prepare("SELECT COUNT(*) AS tables_ok FROM sqlite_master WHERE type='table' AND name IN ('users','projects','tasks','approvals','activity_logs','settings','agent_runs','agent_steps','integrations','contacts','message_drafts','artifacts','schedules','finance_entries')").first();
-        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.OPENROUTER_API_KEY), ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
+        return json({ ok: row.tables_ok === 14, service: "WOLF AI", bot: "@OnlyWolfbot", database: row.tables_ok === 14 ? "connected" : "schema_incomplete", mode: "approval_required", github_readonly: !!env.GITHUB_TOKEN, ai_chat: !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.ZAI_API_KEY || env.OPENROUTER_API_KEY), ai_model: "multi-provider free-only", ai_providers: wolfProviderCatalog(env), research_search: "parallel multi-engine (DuckDuckGo, Bing RSS, Google, Yahoo; optional Tavily and Serper)", version: "0.5.0" });
       } catch (error) {
         return json({ ok: false, service: "WOLF AI", error: error.message }, 500);
       }
