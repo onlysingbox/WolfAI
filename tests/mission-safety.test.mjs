@@ -196,7 +196,7 @@ test("provider catalog reports only actually configured engines", () => {
 
 test("automatic routing falls back only across configured free engines", () => {
   const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", ZAI_API_KEY: "z", OPENROUTER_API_KEY: "o" };
-  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","zai","gemini","openrouter","gemma"]);
+  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","zai","gemma","gemini","openrouter"]);
   assert.deepEqual(wolfProviderOrder(env, "auto", true), ["zai","gemma","glm","gemini","openrouter"]);
   assert.throws(() => wolfProviderOrder(env, "groq", false), /هنوز کلید API/);
 });
