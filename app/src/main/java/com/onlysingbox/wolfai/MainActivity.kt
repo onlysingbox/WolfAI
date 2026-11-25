@@ -385,7 +385,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }) { Text("تازه‌سازی") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("auto" to "خودکار", "glm" to "GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
+                        listOf("auto" to "خودکار", "glm" to "GLM", "zai" to "Z.ai GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
                             FilterChip(selected = selectedModel == key, enabled = providerIsConfigured(key), onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
                         }
                     }
@@ -396,7 +396,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         Text((item.optString("label") + " | " + if (item.optBoolean("configured")) "پیکربندی شده" else "نیازمند اتصال یا کلید"), color = if (item.optBoolean("configured")) Cyan else Gold, style = MaterialTheme.typography.bodySmall)
                     }
                     Text("کلیدها فقط در Cloudflare ذخیره می‌شوند. Gemini در طرح رایگان ممکن است از داده‌ها برای بهبود محصولات Google استفاده کند؛ اطلاعات محرمانه نفرست. Workers AI در طرح رایگان روزانه ۱۰٬۰۰۰ Neuron دارد؛ در طرح پولی مصرف اضافه ممکن است هزینه داشته باشد. برای جلوگیری از هزینه، طرح پولی را فعال نکن.", color = Gold, style = MaterialTheme.typography.bodySmall)
-                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
+                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "zai" -> "Z.ai GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 if (showStorage) {
                     Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
