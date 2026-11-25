@@ -957,6 +957,97 @@ async function decideCompanionMission(request, env, missionId) {
   });
 }
 
+async function prepareCompanionMissionStep(request, env, missionId) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok:false, error:"دستگاه مجاز نیست." },401);
+  if (await getSetting(env,"companion_master_enabled","true") !== "true") return json({ok:false,error:"MASTER OFF است."},423);
+  let body; try { body=await request.json(); } catch { return json({ok:false,error:"Invalid JSON"},400); }
+  const stepNo=Number(body?.step_no);
+  if (!Number.isInteger(stepNo)||stepNo<1||stepNo>8) return json({ok:false,error:"شماره مرحله نامعتبر است."},400);
+  const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
+  if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
+  if(run.status!=="approved_pending_execution") return json({ok:false,error:"ابتدا باید طرح مأموریت تأیید شده باشد."},409);
+  const step=await env.DB.prepare("SELECT id,capability,title,input_json,status FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
+  if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
+  if(step.status!=="approved_pending_execution") return json({ok:false,error:"مرحله در وضعیت قابل آماده‌سازی نیست."},409);
+  const supported = new Set(["web_research","personal_memory","files_documents","finance"]);
+  if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
+  const input=safeJson(step.input_json,{});
+  const language=detectMessageLanguage(String(input.details||step.title));
+  const system = "Convert the approved step into exactly one read-only action JSON. Return only {\"type\":string,\"args\":object}. Allowed action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. No writes, messages, calls, device control, purchases, deletes, or scheduling. Match the requested capability. If the step requires a write or unsupported action, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
+  try {
+    const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
+    const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\\s*/i,"").replace(/\\s*\x60{3}$/i,"").trim();
+    const action=JSON.parse(raw);
+    const type=String(action.type||"");
+    const args=action.args&&typeof action.args==="object"&&!Array.isArray(action.args)?action.args:{};
+    const allowedByCapability={
+      web_research:["research.search","research.open"],
+      personal_memory:["memory.search"],
+      files_documents:["artifact.search","github.get_file"],
+      finance:["finance.summary"]
+    };
+    if(!(allowedByCapability[step.capability]||[]).includes(type)) throw new Error("مدل عملیات خواندنی مجاز و متناسب با این مرحله تولید نکرد.");
+    if(type==="research.search" && (!String(args.query||"").trim()||String(args.query).length>300)) throw new Error("عبارت جست‌وجو معتبر نیست.");
+    if(type==="research.open") { const u=new URL(String(args.url||"")); if(u.protocol!=="https:"||u.username||u.password) throw new Error("فقط URL عمومی HTTPS مجاز است."); }
+    if(type==="memory.search"||type==="artifact.search") { if(!String(args.query||"").trim()||String(args.query).length>300) throw new Error("عبارت جست‌وجو معتبر نیست."); }
+    if(type==="finance.summary") {
+      if(!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(args.start_date||""))||!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(args.end_date||""))||args.start_date>args.end_date) throw new Error("بازه تاریخ معتبر و صریح نیست.");
+    }
+    if(type==="github.get_file") {
+      if(!/^[A-Za-z0-9_.-]{1,100}$/.test(String(args.repo||""))||!String(args.path||"")||String(args.path).startsWith("/")||String(args.path).split("/").some(p=>!p||p==="."||p==="..")) throw new Error("مخزن یا مسیر فایل معتبر نیست.");
+    }
+    if(type==="github.workflow_runs"&&!/^[A-Za-z0-9_.-]{1,100}$/.test(String(args.repo||""))) throw new Error("نام مخزن معتبر نیست.");
+    const prepared={type,args};
+    const updated=await env.DB.prepare("UPDATE agent_steps SET input_json=?,status='awaiting_execution_approval' WHERE id=? AND run_id=? AND status='approved_pending_execution'")
+      .bind(JSON.stringify({details:input.details||"",prepared_action:prepared}),step.id,missionId).run();
+    if(!updated?.meta?.changes) return json({ok:false,error:"وضعیت مرحله هم‌زمان تغییر کرده است."},409);
+    await log(env,device.owner_id,"companion.mission_step_prepared","agent_step",step.id,{action_type:type});
+    return json({ok:true,mission_id:missionId,step_no:stepNo,status:"awaiting_execution_approval",prepared_action:prepared,executed:false});
+  } catch(error) {
+    return json({ok:false,error:"آماده‌سازی امن مرحله انجام نشد: "+String(error?.message||error).slice(0,220)},422);
+  }
+}
+
+async function executeCompanionMissionStep(request, env, missionId) {
+  const device=await authorizeCompanion(request,env);
+  if(!device) return json({ok:false,error:"دستگاه مجاز نیست."},401);
+  if(await getSetting(env,"companion_master_enabled","true")!=="true") return json({ok:false,error:"MASTER OFF است؛ اجرا متوقف شد."},423);
+  let body; try{body=await request.json();}catch{return json({ok:false,error:"Invalid JSON"},400);}
+  const stepNo=Number(body?.step_no);
+  if(!Number.isInteger(stepNo)||stepNo<1||stepNo>8) return json({ok:false,error:"شماره مرحله نامعتبر است."},400);
+  const run=await env.DB.prepare("SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=?").bind(missionId,String(device.owner_id)).first();
+  if(!run) return json({ok:false,error:"مأموریت پیدا نشد."},404);
+  if(run.status!=="approved_pending_execution"&&run.status!=="running") return json({ok:false,error:"مأموریت در وضعیت قابل اجرا نیست."},409);
+  const step=await env.DB.prepare("SELECT id,input_json,status FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
+  if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
+  if(step.status!=="awaiting_execution_approval") return json({ok:false,error:"ابتدا عملیات دقیق این مرحله را جداگانه تأیید کن."},409);
+  const input=safeJson(step.input_json,{});
+  const action=input.prepared_action;
+  if(!action||typeof action.type!=="string") return json({ok:false,error:"عملیات آماده‌شده وجود ندارد."},409);
+  const readOnlyTypes=["research.search","research.open","memory.search","artifact.search","finance.summary","system.health","github.list_repos","github.workflow_runs","github.get_file"];
+  if(!readOnlyTypes.includes(action.type)) return json({ok:false,error:"این نوع عملیات در اجرای خودکار مجاز نیست."},403);
+  const claim=await env.DB.prepare("UPDATE agent_steps SET status='running',started_at=CURRENT_TIMESTAMP WHERE id=? AND status='awaiting_execution_approval'").bind(step.id).run();
+  if(!claim?.meta?.changes) return json({ok:false,error:"مرحله قبلاً اجرا یا تعیین تکلیف شده است."},409);
+  await env.DB.prepare("UPDATE agent_runs SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status IN ('approved_pending_execution','running')").bind(missionId,String(device.owner_id)).run();
+  try{
+    if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
+    const output=await executeApprovedAction(env,action,missionId,stepNo,String(device.owner_id));
+    if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF هنگام اجرا فعال شد؛ نتیجه برای ادامه مأموریت نادیده گرفته شد.");
+    await env.DB.prepare("UPDATE agent_steps SET status='completed',output_json=?,completed_at=CURRENT_TIMESTAMP,error_text=NULL WHERE id=? AND status='running'").bind(JSON.stringify(output).slice(0,12000),step.id).run();
+    const pending=await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND status NOT IN ('completed','rejected')").bind(missionId).first();
+    const nextStatus=Number(pending?.n||0)===0?"completed":"approved_pending_execution";
+    await env.DB.prepare("UPDATE agent_runs SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(nextStatus,JSON.stringify({last_step:stepNo,completed:nextStatus==="completed"}).slice(0,12000),missionId).run();
+    await log(env,device.owner_id,"companion.mission_step_executed","agent_step",step.id,{action_type:action.type,read_only:true});
+    return json({ok:true,mission_id:missionId,step_no:stepNo,status:"completed",result:output,mission_status:nextStatus});
+  }catch(error){
+    await env.DB.prepare("UPDATE agent_steps SET status='failed',error_text=?,completed_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'").bind(String(error?.message||error).slice(0,1500),step.id).run();
+    await env.DB.prepare("UPDATE agent_runs SET status='execution_failed',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(missionId).run();
+    await log(env,device.owner_id,"companion.mission_step_failed","agent_step",step.id,{error:String(error?.message||error).slice(0,300)});
+    return json({ok:false,error:"اجرای مرحله ناموفق بود: "+String(error?.message||error).slice(0,240)},502);
+  }
+}
+
 function safeJson(value, fallback) {
   try { return JSON.parse(String(value || "")); } catch { return fallback; }
 }
