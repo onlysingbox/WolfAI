@@ -416,6 +416,28 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         }
         val isWhatsappCall = command.contains("واتساپ") || command.contains("whatsapp")
         val callIntent = command.contains("زنگ بزن") || command.contains("تماس بگیر") || command.contains("تماس با") || command.contains("شماره گیری") || command.contains("call ")
+        val isTelegramCall = command.contains("تلگرام") || command.contains("telegram")
+        if (isTelegramCall && callIntent) {
+            val target = raw.substringAfter("به ", raw.substringAfter("با تلگرام", raw.substringAfter("با telegram", "")))
+                .replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
+            val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
+                ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
+            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. برای تماس تلگرام، شماره مخاطب یا نام ذخیره‌شده‌اش لازم است."
+            val digits = number.filter { it.isDigit() }
+            val telegram = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?phone=$digits")).setPackage("org.telegram.messenger")
+            if (telegram.resolveActivity(context.packageManager) == null) return "تلگرام اصلی نصب نیست یا پیوند تماس را پشتیبانی نمی‌کند."
+            context.startActivity(telegram)
+            scope.launch {
+                kotlinx.coroutines.delay(2200)
+                val service = WolfAccessibilityService.active
+                val clicked = service?.clickVisibleText("Voice Call") == true ||
+                    service?.clickVisibleText("تماس صوتی") == true ||
+                    service?.clickVisibleText("Call") == true
+                status = if (clicked) "گزینه تماس تلگرام انتخاب شد؛ وضعیت برقراری تماس را در خود تلگرام بررسی کن."
+                    else "مخاطب تلگرام باز شد، اما دکمه تماس به‌صورت امن و قابل‌تشخیص پیدا نشد."
+            }
+            return "مخاطب تلگرام باز شد؛ در حال بررسی گزینه تماس."
+        }
         if (isWhatsappCall && callIntent) {
             val target = raw.substringAfter("به ", raw.substringAfter("با واتساپ", raw.substringAfter("با whatsapp", ""))).replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
