@@ -535,6 +535,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             }.onFailure { fileStatus = "واردکردن فایل ناموفق بود: ${it.message}" }
         }
     }
+    var pendingExportFile by remember { mutableStateOf<File?>(null) }
+    val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val source = pendingExportFile
+        pendingExportFile = null
+        if (uri != null && source != null && source.exists()) {
+            runCatching {
+                context.contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { input -> input.copyTo(output) } }
+                    ?: error("ساخت فایل خروجی ممکن نشد")
+            }.onSuccess { fileStatus = "فایل «${source.name}» در حافظه انتخاب‌شده ذخیره شد." }
+             .onFailure { fileStatus = "خروجی گرفتن ناموفق بود: ${it.message}" }
+        } else if (uri != null) fileStatus = "فایل منبع برای خروجی پیدا نشد."
+    }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
         if (!spoken.isNullOrBlank()) message = spoken
@@ -708,13 +720,17 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                         xml.readText().replace(Regex("</w:p>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \t]+")," ").take(12000)
                                                     }
                                                 }
-                                            }.getOrElse { "استخراج Word ناموفق بود: \${it.message}" }
-                                            "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: \${it.message}" }
+                                            }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
+                                            "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
                                             "pdf" -> "فایل PDF با موفقیت ذخیره شده است؛ استخراج متن PDF در نسخه بعدی اضافه می‌شود."
                                             else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
                                         }
                                         fileStatus="نتیجه خواندن: ${file.name}"
                                     }) { Text("خواندن") }
+                                    TextButton(onClick={
+                                        pendingExportFile=file
+                                        exportPicker.launch(file.name)
+                                    }) { Text("خروجی") }
                                 }
                             }
                         }
