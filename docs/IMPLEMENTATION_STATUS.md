@@ -16,7 +16,7 @@ This file records verified implementation, not planned features.
 - AI model selection UI: automatic, GLM-4.7-Flash, Gemma 4 26B, Gemini 2.5 Flash, Groq Llama 3.3, and OpenRouter free model.\n- Worker provider adapters and free-only fallback routing added for Cloudflare Workers AI, Gemini, Groq, and OpenRouter. External providers remain unavailable until their API keys are configured as Worker secrets. DeepSeek API is deliberately disabled because a reliably free, no-billing API tier has not been verified.\n- Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
 
-## CI verification
+## Mission proposal API (source implemented, deployment pending)\n- Authenticated Android companion endpoint: `POST /api/companion/missions` accepts `{\"text\":\"...\"}` and uses the configured free-only model router to create a JSON proposal.\n- `GET /api/companion/missions` lists only the authenticated owner's missions.\n- Plans are capped at 8 steps; capability values are allowlisted and unknown values become `manual_review`. All steps require approval. The endpoint stores proposals in `agent_runs` and `agent_steps` and writes an activity log.\n- This is proposal storage only. It does not execute phone, messaging, file, finance, web, or other external actions. Invalid model JSON fails closed without creating a mission.\n- The route is protected by companion bearer authentication and MASTER OFF. Production use requires Worker deployment and the existing D1 migration `0002_agent_platform.sql` to be applied.\n\n## CI verification
 - GitHub Actions Android build runs 10, 11, 12 and 13 completed successfully.
 - The latest workflow adds `node --check src/worker.js` so backend syntax is validated as well as Android compilation. Run 14 is the verification run for that workflow change.
 
@@ -26,7 +26,7 @@ This file records verified implementation, not planned features.
 - Server-side production deployment of the new companion endpoints.
 - Exact 60 GB per-category allocations and complete file management.
 - A complete provider quota dashboard with reset times and historical per-model usage. Provider APIs do not consistently expose this information; currently only returned usage metadata is forwarded, not a verified remaining-quota counter.
-- General agent task proposals, approval UI, durable execution and result verification inside Android.
+- General agent task proposals are now available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions; POST creates a proposal with up to 8 steps). Every generated step is stored as `awaiting_approval` and `approval_required=1`. The endpoint does not execute actions. Android mission UI, explicit approve/reject endpoints, durable step execution and result verification remain unimplemented.
 - Email, calendar, messaging, browser automation and OAuth connectors inside Android.
 - Crypto/market analysis center and exchange data integration.
 - Contacts resolution and confirmed phone/video calling.
