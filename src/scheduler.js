@@ -6,7 +6,7 @@ export function normalizeReminderSchedule(input, now = Date.now()) {
 
   if (!title || title.length > 180) throw new Error("عنوان یادآوری باید بین ۱ تا ۱۸۰ نویسه باشد.");
   if (!message || message.length > 2000) throw new Error("متن یادآوری باید بین ۱ تا ۲۰۰۰ نویسه باشد.");
-  if (!/(?:Z|[+-](?:0\d|1\d|2[0-3]):[0-5]\d)$/i.test(dueText)) {
+  if (!/(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/i.test(dueText)) {
     throw new Error("زمان باید ISO 8601 همراه با منطقه زمانی یا اختلاف UTC باشد.");
   }
   const timestamp = Date.parse(dueText);
