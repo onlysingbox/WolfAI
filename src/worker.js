@@ -621,6 +621,11 @@ async function createTask(env, title, ownerId, action = null, requestText = null
     if (item?.type === "schedule.create") return "ساخت یادآوری: " + String(item.args?.title || "یادآوری");
     if (item?.type === "schedule.list") return "فهرست یادآوری‌ها";
     if (item?.type === "schedule.cancel") return "لغو یادآوری: " + String(item.args?.id || "");
+    if (item?.type === "project.create") return "ساخت پروژه: " + String(item.args?.name || "");
+    if (item?.type === "project.list") return "فهرست پروژه‌ها";
+    if (item?.type === "task.create") return "ساخت وظیفه: " + String(item.args?.title || "");
+    if (item?.type === "task.list") return "فهرست وظایف";
+    if (item?.type === "task.update") return "تغییر وضعیت وظیفه";
     if (item?.type === "research.search") return "جست‌وجوی وب: " + String(item.args?.query || "");
     if (item?.type === "research.open") return "خواندن صفحه وب: " + String(item.args?.url || "");
     if (item?.type === "system.health") return "بررسی سلامت WOLF AI";
@@ -628,9 +633,9 @@ async function createTask(env, title, ownerId, action = null, requestText = null
   };
   const taskTitle = actions.length === 1 ? describe(actions[0]) : actions.length > 1 ? "مأموریت چندمرحله‌ای: " + actions.map(describe).join("؛ ").slice(0, 180) : String(title || "مأموریت جدید").slice(0, 240);
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
-  const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list"]);
+  const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list","project.list","task.list"]);
   const plan = actions.length
-    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : item.type?.startsWith("research.") ? "research" : item.type?.startsWith("schedule.") ? "scheduling" : "general", title: item.type, action: item.type, approval_required: !readOnlyTypes.has(item.type) }))
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : item.type?.startsWith("research.") ? "research" : item.type?.startsWith("schedule.") ? "scheduling" : item.type?.startsWith("project.") || item.type?.startsWith("task.") ? "personal_operations" : "general", title: item.type, action: item.type, approval_required: !readOnlyTypes.has(item.type) }))
     : [{ step: 1, capability: "general", title: taskTitle, action: "planning", approval_required: true }];
   const approvalSummary = actions.length ? "نیازمند تأیید مالک: " + taskTitle : "بررسی و برنامه‌ریزی وظیفه: " + taskTitle;
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
@@ -912,8 +917,8 @@ async function companionMissions(request, env) {
   if (!requestText) return json({ ok: false, error: "متن مأموریت خالی است." }, 400);
   const language = detectMessageLanguage(requestText);
   const system = language === "fa"
-    ? "درخواست کاربر را به یک طرح مأموریت JSON تبدیل کن. فقط JSON معتبر بده با ساختار {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. حداکثر 8 مرحله. capability فقط یکی از اینها باشد: web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, manual_review. هیچ ابزار، کد اجرایی، دستور سیستم، URL اجرایی یا اقدام واقعی تولید نکن. جزئیات فقط توضیح متنی باشند. اگر کار مبهم یا حساس است manual_review انتخاب کن. همه مراحل صرفاً پیشنهاد هستند."
-    : "Convert the request into a mission proposal. Return only valid JSON: {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. Maximum 8 steps. capability must be one of web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, manual_review. Never produce executable code, tool calls, system commands, executable URLs, or perform actions. Details are descriptive text only. Use manual_review for ambiguous or sensitive work. Every step is proposal-only.";
+    ? "درخواست کاربر را به یک طرح مأموریت JSON تبدیل کن. فقط JSON معتبر بده با ساختار {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. حداکثر 8 مرحله. capability فقط یکی از اینها باشد: web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, personal_operations, manual_review. هیچ ابزار، کد اجرایی، دستور سیستم، URL اجرایی یا اقدام واقعی تولید نکن. جزئیات فقط توضیح متنی باشند. اگر کار مبهم یا حساس است manual_review انتخاب کن. همه مراحل صرفاً پیشنهاد هستند."
+    : "Convert the request into a mission proposal. Return only valid JSON: {\"summary\":\"...\",\"steps\":[{\"capability\":\"...\",\"title\":\"...\",\"details\":\"...\"}]}. Maximum 8 steps. capability must be one of web_research, files_documents, software_engineering, communication, device_control, finance, scheduling, content_creation, personal_memory, personal_operations, manual_review. Never produce executable code, tool calls, system commands, executable URLs, or perform actions. Details are descriptive text only. Use manual_review for ambiguous or sensitive work. Every step is proposal-only.";
   try {
     const result = await runWolfModel(env, [
       { role: "system", content: system },
@@ -921,7 +926,7 @@ async function companionMissions(request, env) {
     ], "auto", requestText);
     const raw = String(result.answer || "").replace(/^`{3}(?:json)?\s*/i, "").replace(/\s*`{3}$/i, "").trim();
     const parsed = JSON.parse(raw);
-    const allowed = new Set(["web_research","files_documents","software_engineering","communication","device_control","finance","scheduling","content_creation","personal_memory","manual_review"]);
+    const allowed = new Set(["web_research","files_documents","software_engineering","communication","device_control","finance","scheduling","content_creation","personal_memory","personal_operations","manual_review"]);
     const sourceSteps = Array.isArray(parsed.steps) ? parsed.steps.slice(0, 8) : [];
     if (!sourceSteps.length) throw new Error("مدل هیچ مرحله معتبری برنگرداند.");
     const steps = sourceSteps.map((step, index) => ({
@@ -993,6 +998,7 @@ function validateCompanionReadOnlyAction(capability, action) {
   const allowed = {
     web_research: ["research.search", "research.open"],
     personal_memory: ["memory.search"],
+    personal_operations: ["project.list", "task.list"],
     files_documents: ["artifact.search", "github.get_file"],
     finance: ["finance.summary"]
   };
@@ -1055,6 +1061,34 @@ function validateCompanionReadOnlyAction(capability, action) {
 }
 
 function validateCompanionAction(capability, action) {
+  if (capability === "personal_operations") {
+    if (action?.type === "project.create") {
+      const args = action.args || {};
+      if (Object.keys(args).some(key => !["name","description"].includes(key))) throw new Error("پارامتر اضافی پروژه مجاز نیست.");
+      const name = String(args.name || "").trim();
+      const description = String(args.description || "").trim();
+      if (!name || name.length > 120 || description.length > 1500) throw new Error("نام یا توضیح پروژه معتبر نیست.");
+      return { type: "project.create", args: { name, description } };
+    }
+    if (action?.type === "task.create") {
+      const args = action.args || {};
+      if (Object.keys(args).some(key => !["title","description","project_id"].includes(key))) throw new Error("پارامتر اضافی وظیفه مجاز نیست.");
+      const title = String(args.title || "").trim();
+      const description = String(args.description || "").trim();
+      const project_id = String(args.project_id || "").trim();
+      if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id))) throw new Error("عنوان یا اطلاعات وظیفه معتبر نیست.");
+      return { type: "task.create", args: { title, description, project_id: project_id || null } };
+    }
+    if (action?.type === "task.update") {
+      const args = action.args || {};
+      if (Object.keys(args).some(key => !["id","status"].includes(key))) throw new Error("پارامتر اضافی تغییر وظیفه مجاز نیست.");
+      const id = String(args.id || "").trim();
+      const status = String(args.status || "").trim();
+      if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
+      return { type: "task.update", args: { id, status } };
+    }
+  }
+  if (capability === "scheduling" && action?.type === "schedule.create") {
   if (capability === "scheduling" && action?.type === "schedule.create") {
     if (!action.args || typeof action.args !== "object" || Array.isArray(action.args) ||
         Object.keys(action.args).some(key => !["title","message","due_at","timezone"].includes(key))) {
@@ -1088,7 +1122,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
   const input=safeJson(step.input_json,{});
   const language=detectMessageLanguage(String(input.details||step.title));
-  const system = "Convert the approved step into exactly one validated action JSON. Return only {\"type\":string,\"args\":object}. Read-only action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. For capability scheduling only, you may prepare schedule.create {title,message,due_at,timezone}; due_at must be a future ISO 8601 timestamp with an explicit UTC offset or Z, and timezone must be a valid IANA name. This is only a prepared proposal; it will require a second explicit owner approval before insertion. Never prepare messaging, calls, device control, purchases, arbitrary writes, deletes, or infrastructure changes. Match the requested capability. If details do not contain enough information, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, times, timezone, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
+  const system = "Convert the approved step into exactly one validated action JSON. Return only {\"type\":string,\"args\":object}. Read-only action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. For capability scheduling only, you may prepare schedule.create {title,message,due_at,timezone}; due_at must be a future ISO 8601 timestamp with an explicit UTC offset or Z, and timezone must be a valid IANA name. This is only a prepared proposal; it will require a second explicit owner approval before insertion. For capability personal_operations, you may prepare exactly one of project.create {name,description}, task.create {title,description,project_id?}, task.update {id,status}, project.list {}, or task.list {status?,project_id?}. Creating or changing records requires a second explicit owner approval. Do not invent IDs; if a task update lacks a real task ID, return unsupported. Never prepare messaging, calls, device control, purchases, arbitrary writes, deletes, or infrastructure changes. Match the requested capability. If details do not contain enough information, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, times, timezone, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
   try {
     const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
     const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/i,"").trim();
@@ -1158,7 +1192,7 @@ async function executeCompanionMissionStep(request, env, missionId) {
   }
   try{
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
-    const output=action.type === "schedule.create"
+    const output=["schedule.create","project.create","task.create","task.update"].includes(action.type)
       ? await executeApprovedAction(env, action, null, 1, String(device.owner_id))
       : await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF هنگام اجرا فعال شد؛ نتیجه برای ادامه مأموریت نادیده گرفته شد.");
@@ -1369,6 +1403,11 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "schedule_create", description: "Create a one-time private reminder. due_at must be ISO 8601 with explicit UTC offset or Z. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, message: { type: "string" }, due_at: { type: "string" }, timezone: { type: "string" } }, required: ["title","message","due_at"] } } },
     { type: "function", function: { name: "schedule_list", description: "List the owner's recent reminders and delivery status. Read-only.", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "schedule_cancel", description: "Cancel one active reminder by its exact ID. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
+    { type: "function", function: { name: "project_create", description: "Create a personal project in WOLF AI. Requires owner approval.", parameters: { type: "object", properties: { name: { type: "string" }, description: { type: "string" } }, required: ["name"] } } },
+    { type: "function", function: { name: "project_list", description: "List personal projects. Read-only.", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "task_create", description: "Create a personal task, optionally linked to a project. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, description: { type: "string" }, project_id: { type: "string" } }, required: ["title"] } } },
+    { type: "function", function: { name: "task_list", description: "List personal tasks, optionally filtered by status or project. Read-only.", parameters: { type: "object", properties: { status: { type: "string", enum: ["open","in_progress","done","cancelled"] }, project_id: { type: "string" } }, required: [] } } },
+    { type: "function", function: { name: "task_update", description: "Change the status of one personal task. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["open","in_progress","done","cancelled"] } }, required: ["id","status"] } } },
   ];
 }
 
@@ -1463,6 +1502,40 @@ function mapWolfToolCall(call) {
     const id = String(args.id || "").trim();
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("شناسه یادآوری معتبر نیست.");
     return { type: "schedule.cancel", args: { id } };
+  }
+  if (name === "project_create") {
+    if (Object.keys(args).some(key => !["name","description"].includes(key))) throw new Error("پارامتر اضافی برای پروژه مجاز نیست.");
+    const projectName = String(args.name || "").trim();
+    const description = String(args.description || "").trim();
+    if (!projectName || projectName.length > 120 || description.length > 1500) throw new Error("نام یا توضیح پروژه معتبر نیست.");
+    return { type: "project.create", args: { name: projectName, description } };
+  }
+  if (name === "project_list") {
+    if (Object.keys(args).length) throw new Error("فهرست پروژه‌ها پارامتر نمی‌پذیرد.");
+    return { type: "project.list", args: {} };
+  }
+  if (name === "task_create") {
+    if (Object.keys(args).some(key => !["title","description","project_id"].includes(key))) throw new Error("پارامتر اضافی برای وظیفه مجاز نیست.");
+    const title = String(args.title || "").trim();
+    const description = String(args.description || "").trim();
+    const project_id = String(args.project_id || "").trim();
+    if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id))) throw new Error("عنوان، توضیح یا شناسه پروژه معتبر نیست.");
+    return { type: "task.create", args: { title, description, project_id: project_id || null } };
+  }
+  if (name === "task_list") {
+    if (Object.keys(args).some(key => !["status","project_id"].includes(key))) throw new Error("پارامتر اضافی برای فهرست وظایف مجاز نیست.");
+    const status = String(args.status || "").trim();
+    const project_id = String(args.project_id || "").trim();
+    if (status && !["open","in_progress","done","cancelled"].includes(status)) throw new Error("وضعیت وظیفه معتبر نیست.");
+    if (project_id && !/^[0-9a-f-]{36}$/i.test(project_id)) throw new Error("شناسه پروژه معتبر نیست.");
+    return { type: "task.list", args: { status: status || null, project_id: project_id || null } };
+  }
+  if (name === "task_update") {
+    if (Object.keys(args).some(key => !["id","status"].includes(key))) throw new Error("پارامتر اضافی برای تغییر وظیفه مجاز نیست.");
+    const id = String(args.id || "").trim();
+    const status = String(args.status || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
+    return { type: "task.update", args: { id, status } };
   }
   throw new Error("این ابزار در فهرست ابزارهای مجاز WOLF AI نیست.");
 }
@@ -2268,6 +2341,56 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     await log(env, ownerId, "schedule.reminder_cancelled", "schedule", id, {});
     return { tool: action.type, read_only: false, schedule_id: id, status: "cancelled" };
   }
+  if (action.type === "project.create") {
+    if (!ownerId) throw new Error("مالک پروژه مشخص نیست.");
+    const name = String(action.args.name || "").trim();
+    const description = String(action.args.description || "").trim();
+    if (!name || name.length > 120 || description.length > 1500) throw new Error("اطلاعات پروژه معتبر نیست.");
+    const duplicate = await env.DB.prepare("SELECT id FROM projects WHERE lower(name)=lower(?) LIMIT 1").bind(name).first();
+    if (duplicate) throw new Error("پروژه‌ای با همین نام وجود دارد.");
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO projects (id,name,description,status) VALUES (?,?,?,'active')").bind(id,name,description || null).run();
+    await log(env, ownerId, "project.created", "project", id, { name });
+    return { tool: action.type, read_only: false, project_id: id, name, status: "active" };
+  }
+  if (action.type === "project.list") {
+    const rows = await env.DB.prepare("SELECT id,name,description,status,created_at,updated_at FROM projects ORDER BY updated_at DESC LIMIT 100").all();
+    return { tool: action.type, read_only: true, projects: rows.results || [] };
+  }
+  if (action.type === "task.create") {
+    if (!ownerId) throw new Error("مالک وظیفه مشخص نیست.");
+    const title = String(action.args.title || "").trim();
+    const description = String(action.args.description || "").trim();
+    const projectId = action.args.project_id || null;
+    if (!title || title.length > 180 || description.length > 3000) throw new Error("اطلاعات وظیفه معتبر نیست.");
+    if (projectId) {
+      const project = await env.DB.prepare("SELECT id FROM projects WHERE id=? LIMIT 1").bind(projectId).first();
+      if (!project) throw new Error("پروژه انتخاب‌شده پیدا نشد.");
+    }
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO tasks (id,title,description,project_id,status,risk_level,requested_by) VALUES (?,?,?,?, 'open','low',?)")
+      .bind(id,title,description || null,projectId,String(ownerId)).run();
+    await log(env, ownerId, "task.personal_created", "task", id, { title, project_id: projectId });
+    return { tool: action.type, read_only: false, task_id: id, title, status: "open", project_id: projectId };
+  }
+  if (action.type === "task.list") {
+    if (!ownerId) throw new Error("مالک وظایف مشخص نیست.");
+    const rows = await env.DB.prepare(
+      "SELECT t.id,t.title,t.description,t.status,t.project_id,p.name AS project_name,t.created_at,t.updated_at FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.requested_by=? AND t.status IN ('open','in_progress','done','cancelled') AND (? IS NULL OR t.status=?) AND (? IS NULL OR t.project_id=?) ORDER BY t.updated_at DESC LIMIT 100"
+    ).bind(String(ownerId),action.args.status || null,action.args.status || null,action.args.project_id || null,action.args.project_id || null).all();
+    return { tool: action.type, read_only: true, tasks: rows.results || [] };
+  }
+  if (action.type === "task.update") {
+    if (!ownerId) throw new Error("مالک وظیفه مشخص نیست.");
+    const id = String(action.args.id || "");
+    const status = String(action.args.status || "");
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
+    const result = await env.DB.prepare("UPDATE tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND requested_by=? AND status IN ('open','in_progress','done','cancelled')")
+      .bind(status,id,String(ownerId)).run();
+    if (!Number(result?.meta?.changes || 0)) throw new Error("وظیفه فعال پیدا نشد یا اجازه تغییر آن وجود ندارد.");
+    await log(env, ownerId, "task.personal_status_changed", "task", id, { status });
+    return { tool: action.type, read_only: false, task_id: id, status };
+  }
   throw new Error("ابزار مجاز نیست.");
 }
 
@@ -2909,7 +3032,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
       const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save","schedule.create","schedule.cancel"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
-      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list"]);
+      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list","project.list","task.list"]);
       const requiresApproval = actionList.some(item => !readOnlyTypes.has(item.type));
       if (!requiresApproval) {
         await env.DB.prepare("UPDATE tasks SET status='approved', approved_by=?, approved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind("policy:read_only", id).run();
