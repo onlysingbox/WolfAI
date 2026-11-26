@@ -202,9 +202,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private lateinit var securePrefs: android.content.SharedPreferences
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        tts = TextToSpeech(this, this)
-
-        // Never let a device-specific Android Keystore failure prevent the app UI from opening.
+        // Initialize secure storage defensively so a device-specific Keystore issue
+        // cannot prevent the first screen from being displayed.
         securePrefs = try {
             val master = MasterKey.Builder(this)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -243,6 +242,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             loadContacts = { readPhoneContacts() },
             loadCalendarEvents = { readCalendarEvents() }
         ) }
+
+        // Speech services are optional. Start them only after the first frame is queued,
+        // and never let a vendor TTS implementation crash application startup.
+        window.decorView.post {
+            try {
+                tts = TextToSpeech(applicationContext, this)
+            } catch (error: Exception) {
+                android.util.Log.e("WOLF_STARTUP", "Text-to-speech unavailable; continuing without voice", error)
+                tts = null
+            }
+        }
     }
     private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/status").openConnection() as HttpURLConnection)
