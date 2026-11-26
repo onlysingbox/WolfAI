@@ -54,12 +54,12 @@ jobs:
           name: wolf-ai-agent-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: warn
-      - name: Upload stable signed release APK
+      - name: Upload stable signed release APK (direct APK, no ZIP)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: wolf-ai-agent-release
           path: app/build/outputs/apk/release/app-release.apk
+          archive: false
           if-no-files-found: warn
       - name: Android emulator smoke test
         uses: reactivecircus/android-emulator-runner@v2
