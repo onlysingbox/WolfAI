@@ -36,3 +36,44 @@ test("checks due time safely", () => {
 test("formats a reminder without exposing internal data", () => {
   assert.equal(formatReminderText({ title: "Pay rent", message: "Before noon" }), "⏰ یادآوری WOLF AI\n\nPay rent\n\nBefore noon");
 });
+
+import { validateCompanionAction } from "../src/worker.js";
+
+test("allows a future reminder only in the scheduling capability", () => {
+  const action = validateCompanionAction("scheduling", {
+    type: "schedule.create",
+    args: {
+      title: "Pay rent",
+      message: "Before noon",
+      due_at: "2030-05-01T10:30:00+02:00",
+      timezone: "Europe/Berlin"
+    }
+  });
+  assert.equal(action.type, "schedule.create");
+  assert.equal(action.args.due_at, "2030-05-01T08:30:00.000Z");
+});
+
+test("rejects reminder creation under an unrelated capability", () => {
+  assert.throws(() => validateCompanionAction("finance", {
+    type: "schedule.create",
+    args: {
+      title: "Pay rent",
+      message: "Before noon",
+      due_at: "2030-05-01T10:30:00+02:00",
+      timezone: "Europe/Berlin"
+    }
+  }));
+});
+
+test("rejects unexpected reminder fields", () => {
+  assert.throws(() => validateCompanionAction("scheduling", {
+    type: "schedule.create",
+    args: {
+      title: "Pay rent",
+      message: "Before noon",
+      due_at: "2030-05-01T10:30:00+02:00",
+      timezone: "Europe/Berlin",
+      execute_now: true
+    }
+  }));
+});
