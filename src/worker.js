@@ -1,3 +1,5 @@
+import { normalizeReminderSchedule, isReminderDue, formatReminderText } from "./scheduler.js";
+
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
   headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" }
@@ -616,6 +618,9 @@ async function createTask(env, title, ownerId, action = null, requestText = null
     if (item?.type === "github.workflow_runs") return "بررسی اجرای گردش‌کار: " + String(item.args?.repo || "");
     if (item?.type === "finance.add_entry") return "ثبت رکورد مالی: " + String(item.args?.category || "");
     if (item?.type === "finance.summary") return "گزارش مالی";
+    if (item?.type === "schedule.create") return "ساخت یادآوری: " + String(item.args?.title || "یادآوری");
+    if (item?.type === "schedule.list") return "فهرست یادآوری‌ها";
+    if (item?.type === "schedule.cancel") return "لغو یادآوری: " + String(item.args?.id || "");
     if (item?.type === "research.search") return "جست‌وجوی وب: " + String(item.args?.query || "");
     if (item?.type === "research.open") return "خواندن صفحه وب: " + String(item.args?.url || "");
     if (item?.type === "system.health") return "بررسی سلامت WOLF AI";
@@ -623,9 +628,9 @@ async function createTask(env, title, ownerId, action = null, requestText = null
   };
   const taskTitle = actions.length === 1 ? describe(actions[0]) : actions.length > 1 ? "مأموریت چندمرحله‌ای: " + actions.map(describe).join("؛ ").slice(0, 180) : String(title || "مأموریت جدید").slice(0, 240);
   const description = action ? "WOLF_ACTION:" + JSON.stringify(action) : null;
-  const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open"]);
+  const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list"]);
   const plan = actions.length
-    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : item.type?.startsWith("research.") ? "research" : "general", title: item.type, action: item.type, approval_required: !readOnlyTypes.has(item.type) }))
+    ? actions.map((item, index) => ({ step: index + 1, capability: item.type?.startsWith("github.") ? "software_engineering" : item.type?.startsWith("artifact.") ? "files_documents" : item.type?.startsWith("finance.") ? "finance" : item.type?.startsWith("memory.") ? "personal_memory" : item.type?.startsWith("research.") ? "research" : item.type?.startsWith("schedule.") ? "scheduling" : "general", title: item.type, action: item.type, approval_required: !readOnlyTypes.has(item.type) }))
     : [{ step: 1, capability: "general", title: taskTitle, action: "planning", approval_required: true }];
   const approvalSummary = actions.length ? "نیازمند تأیید مالک: " + taskTitle : "بررسی و برنامه‌ریزی وظیفه: " + taskTitle;
   await env.DB.prepare("INSERT INTO tasks (id, title, description, status, risk_level, requested_by) VALUES (?, ?, ?, 'pending_approval', 'low', ?)")
@@ -1348,6 +1353,9 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "artifact_search", description: "Search the owner's private WOLF AI document library by title or content. Read-only.", parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } } },
     { type: "function", function: { name: "finance_add_entry", description: "Record an income or expense in the owner's private WOLF AI ledger. This records information only and does not move money. amount_minor is the smallest currency unit (for example USD cents; whole rials for IRR). Requires owner approval.", parameters: { type: "object", properties: { entry_type: { type: "string", enum: ["income","expense"] }, category: { type: "string" }, amount_minor: { type: "integer", description: "Amount in the smallest currency unit, e.g. 2500 for USD 25.00 or whole rials for IRR" }, currency: { type: "string" }, occurred_at: { type: "string" }, description: { type: "string" } }, required: ["entry_type","category","amount_minor","currency","occurred_at"] } } },
     { type: "function", function: { name: "finance_summary", description: "Summarize recorded income and expenses in the owner's WOLF AI ledger for a date range. Read-only.", parameters: { type: "object", properties: { start_date: { type: "string" }, end_date: { type: "string" }, currency: { type: "string" } }, required: ["start_date","end_date"] } } }
+    { type: "function", function: { name: "schedule_create", description: "Create a one-time private reminder. due_at must be ISO 8601 with explicit UTC offset or Z. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, message: { type: "string" }, due_at: { type: "string" }, timezone: { type: "string" } }, required: ["title","message","due_at"] } } },
+    { type: "function", function: { name: "schedule_list", description: "List the owner's recent reminders and delivery status. Read-only.", parameters: { type: "object", properties: {}, required: [] } } },
+    { type: "function", function: { name: "schedule_cancel", description: "Cancel one active reminder by its exact ID. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
   ];
 }
 
@@ -1428,6 +1436,20 @@ function mapWolfToolCall(call) {
     if (!content || content.length > 18000 || !commit_message || commit_message.length > 200) throw new Error("محتوای فایل یا پیام commit خالی، بیش از حد طولانی یا نامعتبر است.");
     if (repo.toLowerCase() === "onlysingbox") throw new Error("نام مخزن باید نام یک repository باشد، نه نام مالک.");
     return { type: name === "github_create_file" ? "github.create_file" : "github.update_file", args: { repo, path, content, commit_message } };
+  }
+  if (name === "schedule_create") {
+    if (Object.keys(args).some(key => !["title","message","due_at","timezone"].includes(key))) throw new Error("پارامتر اضافی برای یادآوری مجاز نیست.");
+    return { type: "schedule.create", args: normalizeReminderSchedule(args) };
+  }
+  if (name === "schedule_list") {
+    if (Object.keys(args).length) throw new Error("فهرست یادآوری پارامتر نمی‌پذیرد.");
+    return { type: "schedule.list", args: {} };
+  }
+  if (name === "schedule_cancel") {
+    if (Object.keys(args).some(key => key !== "id")) throw new Error("پارامتر اضافی برای لغو یادآوری مجاز نیست.");
+    const id = String(args.id || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("شناسه یادآوری معتبر نیست.");
+    return { type: "schedule.cancel", args: { id } };
   }
   throw new Error("این ابزار در فهرست ابزارهای مجاز WOLF AI نیست.");
 }
@@ -2207,6 +2229,32 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
       previous_sha: action.args.expected_sha || null
     };
   }
+  if (action.type === "schedule.create") {
+    if (!ownerId) throw new Error("مالک یادآوری مشخص نیست.");
+    const reminder = normalizeReminderSchedule(action.args);
+    const id = crypto.randomUUID();
+    const task = { kind: "reminder", title: reminder.title, message: reminder.message, created_by: "owner-approved" };
+    await env.DB.prepare("INSERT INTO schedules (id, owner_id, title, schedule_spec, timezone, task_json, status, next_run_at) VALUES (?, ?, ?, 'once', ?, ?, 'active', ?)")
+      .bind(id, String(ownerId), reminder.title, reminder.timezone, JSON.stringify(task), reminder.due_at).run();
+    await log(env, ownerId, "schedule.reminder_created", "schedule", id, { title: reminder.title, due_at: reminder.due_at, timezone: reminder.timezone });
+    return { tool: action.type, read_only: false, schedule_id: id, title: reminder.title, due_at: reminder.due_at, timezone: reminder.timezone, status: "active" };
+  }
+  if (action.type === "schedule.list") {
+    if (!ownerId) throw new Error("مالک یادآوری مشخص نیست.");
+    const rows = await env.DB.prepare("SELECT id,title,schedule_spec,timezone,status,next_run_at,last_run_at,created_at FROM schedules WHERE owner_id=? ORDER BY created_at DESC LIMIT 50")
+      .bind(String(ownerId)).all();
+    return { tool: action.type, read_only: true, reminders: rows.results || [] };
+  }
+  if (action.type === "schedule.cancel") {
+    if (!ownerId) throw new Error("مالک یادآوری مشخص نیست.");
+    const id = String(action.args.id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("شناسه یادآوری معتبر نیست.");
+    const result = await env.DB.prepare("UPDATE schedules SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status='active'")
+      .bind(id, String(ownerId)).run();
+    if (!Number(result?.meta?.changes || 0)) throw new Error("یادآوری فعال پیدا نشد یا قبلاً تعیین تکلیف شده است.");
+    await log(env, ownerId, "schedule.reminder_cancelled", "schedule", id, {});
+    return { tool: action.type, read_only: false, schedule_id: id, status: "cancelled" };
+  }
   throw new Error("ابزار مجاز نیست.");
 }
 
@@ -2846,9 +2894,9 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
       }
       const id = await createTask(env, userText.slice(0, 220), userId, action, userText);
       const actionList = action.type === "agent.sequence" ? action.args.steps : [action];
-      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type));
+      const isWrite = actionList.some(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save","schedule.create","schedule.cancel"].includes(item.type));
       const preface = assistant.content || (language === "fa" ? "درخواستت را فهمیدم و مراحل آن را آماده کردم." : "I understand. I prepared the requested operation.");
-      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open"]);
+      const readOnlyTypes = new Set(["system.health","github.list_repos","github.workflow_runs","github.get_file","memory.search","artifact.search","finance.summary","research.search","research.open","schedule.list"]);
       const requiresApproval = actionList.some(item => !readOnlyTypes.has(item.type));
       if (!requiresApproval) {
         await env.DB.prepare("UPDATE tasks SET status='approved', approved_by=?, approved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?").bind("policy:read_only", id).run();
@@ -2915,7 +2963,7 @@ async function handleNaturalMessage(env, chatId, userId, userText) {
         if (item.type === "finance.add_entry") detail += " | " + item.args.entry_type + " | " + item.args.category + " | " + item.args.amount_minor + " " + item.args.currency + " | " + item.args.occurred_at;
         return detail;
       }).join("\n");
-      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save"].includes(item.type)).map((item, index) => {
+      const preview = isWrite ? actionList.filter(item => ["github.create_file","github.update_file","artifact.create","finance.add_entry","memory.save","schedule.create","schedule.cancel"].includes(item.type)).map((item, index) => {
         if (item.type === "memory.save") return "\nWrite step " + (index + 1) + ": SAVE TO PRIVATE MEMORY\nCategory: " + item.args.category + "\nKey: " + item.args.key + "\nExact value to save:\n" + item.args.value;
         if (item.type === "artifact.create") return "\nWrite step " + (index + 1) + ": SAVE DOCUMENT\nTitle: " + item.args.title + "\nKind: " + item.args.kind + "\nExact document content:\n" + item.args.content;
         if (item.type === "finance.add_entry") return "\nWrite step " + (index + 1) + ": RECORD LEDGER ENTRY\nType: " + item.args.entry_type + "\nCategory: " + item.args.category + "\nAmount: " + item.args.amount_minor + " " + item.args.currency + "\nDate: " + item.args.occurred_at + "\nDescription: " + (item.args.description || "-") + "\nThis records information only; no money is moved.";
@@ -2990,6 +3038,40 @@ async function processQueuedDirectSearch(env, update) {
     });
     await reply(env, chatId, "جست‌وجوی وب کامل نشد: " + String(error?.message || error).slice(0, 600));
   }
+}
+
+async function runDueSchedules(env) {
+  if (!env.DB || !env.BOT_TOKEN || !env.ADMIN_TELEGRAM_ID) return { processed: 0, skipped: true };
+  if (await getSetting(env, "companion_master_enabled", "true") !== "true") return { processed: 0, paused: true };
+  const rows = await env.DB.prepare(
+    "SELECT id,owner_id,title,task_json,next_run_at FROM schedules WHERE status='active' AND next_run_at IS NOT NULL ORDER BY next_run_at LIMIT 50"
+  ).all();
+  let processed = 0;
+  for (const row of rows.results || []) {
+    if (!isReminderDue(row.next_run_at)) continue;
+    const claimedAt = new Date().toISOString();
+    const claim = await env.DB.prepare(
+      "UPDATE schedules SET status='running',last_run_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='active' AND next_run_at=?"
+    ).bind(claimedAt, row.id, row.next_run_at).run();
+    if (Number(claim?.meta?.changes || 0) !== 1) continue;
+    try {
+      const task = safeJson(row.task_json, {});
+      if (task.kind !== "reminder") throw new Error("نوع زمان‌بندی پشتیبانی نمی‌شود.");
+      await telegram(env, "sendMessage", {
+        chat_id: String(env.ADMIN_TELEGRAM_ID),
+        text: formatReminderText({ title: row.title || task.title, message: task.message })
+      });
+      await env.DB.prepare("UPDATE schedules SET status='completed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'").bind(row.id).run();
+      await log(env, row.owner_id, "schedule.reminder_delivered", "schedule", row.id, { due_at: row.next_run_at });
+      processed++;
+    } catch (error) {
+      const task = safeJson(row.task_json, {});
+      task.last_error = String(error?.message || error).slice(0, 500);
+      await env.DB.prepare("UPDATE schedules SET status='failed',task_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'").bind(JSON.stringify(task), row.id).run();
+      await log(env, row.owner_id, "schedule.reminder_failed", "schedule", row.id, { error: task.last_error });
+    }
+  }
+  return { processed };
 }
 
 export default {
@@ -3143,6 +3225,9 @@ async function companionArtifacts(request, env) {
     if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/dashboard")) return html();
     if (url.pathname.startsWith("/api/")) return json({ ok: false, error: "Not implemented in this version" }, 501);
     return json({ ok: false, error: "Not found" }, 404);
+  },
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runDueSchedules(env).catch(error => console.error("WOLF scheduled reminders failed", String(error?.stack || error))));
   },
   async queue(batch, env, ctx) {
     for (const message of batch.messages) {
