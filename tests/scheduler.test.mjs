@@ -101,3 +101,16 @@ test("rejects project writes under a different capability", () => {
     args: { name: "Personal project", description: "" }
   }));
 });
+
+test("allows reminder listing as read-only scheduling action", () => {
+  const action = validateCompanionAction("scheduling", { type: "schedule.list", args: {} });
+  assert.equal(action.type, "schedule.list");
+});
+
+test("validates reminder cancellation by exact UUID", () => {
+  const action = validateCompanionAction("scheduling", {
+    type: "schedule.cancel",
+    args: { id: "00000000-0000-4000-8000-000000000001" }
+  });
+  assert.equal(action.args.id, "00000000-0000-4000-8000-000000000001");
+});
