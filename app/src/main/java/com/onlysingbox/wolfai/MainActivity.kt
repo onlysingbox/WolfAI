@@ -775,7 +775,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-                    Image(painter=painterResource(R.drawable.wolf_logo), contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
+                    Image(painter=painterResource(R.drawable.wolf_logo_photo), contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
                     Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
                         Text("WOLF AI", style=MaterialTheme.typography.headlineLarge, color=MaterialTheme.colorScheme.onBackground)
                         Text("YOUR SMART AI AGENT", color=Cyan, style=MaterialTheme.typography.labelMedium)
