@@ -999,6 +999,7 @@ function validateCompanionReadOnlyAction(capability, action) {
     web_research: ["research.search", "research.open"],
     personal_memory: ["memory.search"],
     personal_operations: ["project.list", "task.list"],
+    scheduling: ["schedule.list"],
     files_documents: ["artifact.search", "github.get_file"],
     finance: ["finance.summary"]
   };
@@ -1088,6 +1089,12 @@ function validateCompanionAction(capability, action) {
       return { type: "task.update", args: { id, status } };
     }
   }
+  if (capability === "scheduling" && action?.type === "schedule.list") return validateCompanionReadOnlyAction(capability, action);
+  if (capability === "scheduling" && action?.type === "schedule.cancel") {
+    const args = action.args || {};
+    if (Object.keys(args).some(key => key !== "id") || !/^[0-9a-f-]{36}$/i.test(String(args.id || ""))) throw new Error("شناسه یادآوری معتبر نیست.");
+    return { type: "schedule.cancel", args: { id: String(args.id) } };
+  }
   if (capability === "scheduling" && action?.type === "schedule.create") {
     if (!action.args || typeof action.args !== "object" || Array.isArray(action.args) ||
         Object.keys(action.args).some(key => !["title","message","due_at","timezone"].includes(key))) {
@@ -1121,7 +1128,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
   const input=safeJson(step.input_json,{});
   const language=detectMessageLanguage(String(input.details||step.title));
-  const system = "Convert the approved step into exactly one validated action JSON. Return only {\"type\":string,\"args\":object}. Read-only action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}, project.list {}, task.list {status?,project_id?}. For capability scheduling only, you may prepare schedule.create {title,message,due_at,timezone}; due_at must be a future ISO 8601 timestamp with an explicit UTC offset or Z, and timezone must be a valid IANA name. This is only a prepared proposal; it will require a second explicit owner approval before insertion. For capability personal_operations, you may prepare exactly one of project.create {name,description}, task.create {title,description,project_id?}, task.update {id,status}, project.list {}, or task.list {status?,project_id?}. Creating or changing records requires a second explicit owner approval. Do not invent IDs; if a task update lacks a real task ID, return unsupported. Never prepare messaging, calls, device control, purchases, arbitrary writes, deletes, or infrastructure changes. Match the requested capability. If details do not contain enough information, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, times, timezone, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
+  const system = "Convert the approved step into exactly one validated action JSON. Return only {\"type\":string,\"args\":object}. Read-only action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}, project.list {}, task.list {status?,project_id?}, schedule.list {}. For capability scheduling only, you may prepare schedule.create {title,message,due_at,timezone} or schedule.cancel {id}; schedule.list is read-only. Cancellation requires the exact existing schedule ID.  due_at must be a future ISO 8601 timestamp with an explicit UTC offset or Z, and timezone must be a valid IANA name. This is only a prepared proposal; it will require a second explicit owner approval before insertion. For capability personal_operations, you may prepare exactly one of project.create {name,description}, task.create {title,description,project_id?}, task.update {id,status}, project.list {}, or task.list {status?,project_id?}. Creating or changing records requires a second explicit owner approval. Do not invent IDs; if a task update lacks a real task ID, return unsupported. Never prepare messaging, calls, device control, purchases, arbitrary writes, deletes, or infrastructure changes. Match the requested capability. If details do not contain enough information, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, times, timezone, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
   try {
     const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
     const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/i,"").trim();
@@ -1144,7 +1151,7 @@ async function executeCompanionReadOnlyAction(env, capability, action, ownerId) 
   }
   // This wrapper deliberately accepts only a single validated read-only action.
   // It never accepts agent.sequence or any write-capable action type.
-  const allowedTypes = new Set(["research.search", "research.open", "memory.search", "artifact.search", "finance.summary", "github.get_file", "project.list", "task.list"]);
+  const allowedTypes = new Set(["research.search", "research.open", "memory.search", "artifact.search", "finance.summary", "github.get_file", "project.list", "task.list", "schedule.list"]);
   if (!allowedTypes.has(validated.type)) throw new Error("این عملیات در موتور خواندنی مجاز نیست.");
   return await executeApprovedAction(env, validated, null, 1, ownerId);
 }
@@ -1191,7 +1198,7 @@ async function executeCompanionMissionStep(request, env, missionId) {
   }
   try{
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
-    const output=["schedule.create","project.create","task.create","task.update"].includes(action.type)
+    const output=["schedule.create","schedule.cancel","project.create","task.create","task.update"].includes(action.type)
       ? await executeApprovedAction(env, action, null, 1, String(device.owner_id))
       : await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF هنگام اجرا فعال شد؛ نتیجه برای ادامه مأموریت نادیده گرفته شد.");
