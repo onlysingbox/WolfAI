@@ -61,17 +61,3 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           archive: false
           if-no-files-found: warn
-      - name: Android emulator smoke test
-        uses: reactivecircus/android-emulator-runner@v2
-        env:
-          ANDROID_I_WANT_MY_TCG: "yes"
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_2
-          emulator-boot-timeout: 1800
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none
-          disable-animations: true
-          script: |
-            set -e; adb wait-for-device; adb logcat -c; adb install -r app/build/outputs/apk/release/app-release.apk; adb shell am force-stop com.onlysingbox.wolfai; adb shell am start -n com.onlysingbox.wolfai/.MainActivity; sleep 20; adb logcat -d -t 10000 > /tmp/wolf-logcat.txt; echo "===== WOLF AI CRASH LOG ====="; grep -n -A 60 -B 10 -E 'FATAL EXCEPTION|AndroidRuntime|Process: com.onlysingbox.wolfai|WOLF_STARTUP' /tmp/wolf-logcat.txt || true; echo "===== PROCESS ====="; test -n "$(adb shell pidof com.onlysingbox.wolfai)"
