@@ -48,7 +48,8 @@ jobs:
           python3 -m pip install --quiet Pillow
           python3 scripts/generate_launcher_icons.py
           test -s app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          test -s app/src/main/res/mipmap-xxxhdpi/wolf_launcher_foreground.png\n      - name: Build debug APK
+          test -s app/src/main/res/mipmap-xxxhdpi/wolf_launcher_foreground.png
+      - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - name: Build stable signed release APK
         if: always()
