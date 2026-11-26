@@ -77,3 +77,27 @@ test("rejects unexpected reminder fields", () => {
     }
   }));
 });
+
+test("allows a personal task only under personal_operations", () => {
+  const action = validateCompanionAction("personal_operations", {
+    type: "task.create",
+    args: { title: "Review project", description: "Check milestones" }
+  });
+  assert.equal(action.type, "task.create");
+  assert.equal(action.args.title, "Review project");
+  assert.equal(action.args.project_id, null);
+});
+
+test("rejects unsafe task status values", () => {
+  assert.throws(() => validateCompanionAction("personal_operations", {
+    type: "task.update",
+    args: { id: "00000000-0000-4000-8000-000000000001", status: "delete_everything" }
+  }));
+});
+
+test("rejects project writes under a different capability", () => {
+  assert.throws(() => validateCompanionAction("finance", {
+    type: "project.create",
+    args: { name: "Personal project", description: "" }
+  }));
+});
