@@ -48,6 +48,18 @@ jobs:
       - name: Build stable signed release APK
         if: always()
         run: gradle --no-daemon assembleRelease
+      - name: Verify release APK signature and identity
+        if: success()
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$APKSIGNER" verify --verbose "$APK"
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='5' versionName='0.5.0'"
+          "$AAPT" dump resources "$APK" | grep -F "wolf_logo_photo"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
