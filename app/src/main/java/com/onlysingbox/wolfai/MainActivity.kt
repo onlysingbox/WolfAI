@@ -203,11 +203,27 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this, this)
-        val master = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        securePrefs = EncryptedSharedPreferences.create(this, "wolf_secure", master,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-        File(filesDir, "wolf_storage").apply { listOf("history", "memory", "notes", "files", "audio").forEach { File(this, it).mkdirs() } }
+
+        // Never let a device-specific Android Keystore failure prevent the app UI from opening.
+        securePrefs = try {
+            val master = MasterKey.Builder(this)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                this,
+                "wolf_secure",
+                master,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (error: Exception) {
+            android.util.Log.e("WOLF_STARTUP", "Encrypted preferences unavailable; using local fallback", error)
+            getSharedPreferences("wolf_secure_fallback", MODE_PRIVATE)
+        }
+
+        File(filesDir, "wolf_storage").apply {
+            listOf("history", "memory", "notes", "files", "audio").forEach { File(this, it).mkdirs() }
+        }
         setContent { WolfApp(
             token = securePrefs.getString("device_token", "") ?: "",
             saveToken = { securePrefs.edit().putString("device_token", it).apply() },
