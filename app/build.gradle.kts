@@ -20,9 +20,8 @@ android {
         applicationId = "com.onlysingbox.wolfai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.6.3"
-        ndk { abiFilters += setOf("arm64-v8a") }
+        versionCode = 10
+        versionName = "0.6.4"
     }
     signingConfigs {
         if (hasReleaseSigning) {
@@ -40,6 +39,13 @@ android {
                 signingConfig = signingConfigs.getByName("wolfRelease")
             }
             isMinifyEnabled = false
+        }
+    }
+    // Store native libraries compressed and let Android extract them during install.
+    // This avoids relying on direct-from-APK native library loading on vendor ROMs.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
     compileOptions {
