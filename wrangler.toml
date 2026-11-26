@@ -12,3 +12,6 @@ BOT_USERNAME = "OnlyWolfbot"
 
 [ai]
 binding = "AI"
+
+[triggers]
+crons = ["* * * * *"]
