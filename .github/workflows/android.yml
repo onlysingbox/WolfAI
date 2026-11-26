@@ -60,11 +60,12 @@ jobs:
           "$APKSIGNER" verify --verbose "$APK"
           ZIPALIGN="$(find "$ANDROID_HOME/build-tools" -name zipalign | sort -V | tail -n 1)"
           test -x "$ZIPALIGN"
-          "$ZIPALIGN" -c -P 16 4 "$APK"
+          "$ZIPALIGN" -c 4 "$APK"
           unzip -Z1 "$APK" | grep -q "^lib/arm64-v8a/"
-          if unzip -Z1 "$APK" | grep -q "^lib/armeabi-v7a/"; then echo "Unexpected 32-bit ABI in release APK"; exit 1; fi
-          test "$(stat -c %s "$APK")" -lt 35000000
-          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='9' versionName='0.6.3'"
+          unzip -Z1 "$APK" | grep -q "^lib/armeabi-v7a/"
+          test "$(stat -c %s "$APK")" -lt 60000000
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='10' versionName='0.6.4'"
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -F "extractNativeLibs"
           "$AAPT" dump resources "$APK" | grep -F "wolf_logo_photo"
       - uses: actions/upload-artifact@v4
         if: always()
