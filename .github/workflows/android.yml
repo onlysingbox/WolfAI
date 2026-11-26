@@ -64,7 +64,7 @@ jobs:
           unzip -Z1 "$APK" | grep -q "^lib/arm64-v8a/"
           unzip -Z1 "$APK" | grep -q "^lib/armeabi-v7a/"
           test "$(stat -c %s "$APK")" -lt 60000000
-          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='11' versionName='0.6.5'"
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='12' versionName='0.6.6'"
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -F "extractNativeLibs"
           "$AAPT" dump resources "$APK" | grep -F "wolf_logo_photo"
       - uses: actions/upload-artifact@v4
