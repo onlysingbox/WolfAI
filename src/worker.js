@@ -3302,4 +3302,4 @@ async function companionArtifacts(request, env) {
     }
   }
 };
-export { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider };
+export { validateCompanionReadOnlyAction, validateCompanionAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider, runDueSchedules };
