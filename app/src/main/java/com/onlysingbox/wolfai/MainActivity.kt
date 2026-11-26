@@ -200,87 +200,11 @@ private data class CalendarEvent(val title: String, val begin: Long, val end: Lo
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private lateinit var securePrefs: android.content.SharedPreferences
-    private fun installCrashCapture() {
-        val crashFile = File(filesDir, "wolf_startup_crash.txt")
-        val previous = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
-            runCatching {
-                crashFile.writeText(
-                    "WOLF AI startup crash\\nThread: ${thread.name}\\n\\n" +
-                    android.util.Log.getStackTraceString(error).takeLast(30000)
-                )
-            }
-            if (previous != null) {
-                previous.uncaughtException(thread, error)
-            } else {
-                android.os.Process.killProcess(android.os.Process.myPid())
-            }
-        }
-    }
-
-    private fun showCrashReportIfPresent(): Boolean {
-        val crashFile = File(filesDir, "wolf_startup_crash.txt")
-        if (!crashFile.exists()) return false
-        val report = runCatching { crashFile.readText() }.getOrDefault("گزارش خطا قابل خواندن نیست.")
-        val root = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            val pad = (16 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, pad)
-            setBackgroundColor(android.graphics.Color.rgb(7, 20, 38))
-        }
-        val heading = android.widget.TextView(this).apply {
-            text = "گزارش خطای WOLF AI"
-            textSize = 22f
-            setTextColor(android.graphics.Color.WHITE)
-        }
-        root.addView(heading)
-        val explanation = android.widget.TextView(this).apply {
-            text = "برنامه در اجرای قبلی متوقف شده است. متن زیر علت فنی خطاست. آن را کپی کن و همین‌جا بفرست."
-            textSize = 14f
-            setTextColor(android.graphics.Color.LTGRAY)
-            setPadding(0, 12, 0, 12)
-        }
-        root.addView(explanation)
-        val scroll = android.widget.ScrollView(this)
-        val body = android.widget.TextView(this).apply {
-            text = report
-            textSize = 12f
-            setTextColor(android.graphics.Color.WHITE)
-            setTextIsSelectable(true)
-        }
-        scroll.addView(body)
-        root.addView(scroll, android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f
-        ))
-        val copy = android.widget.Button(this).apply {
-            text = "کپی گزارش خطا"
-            setOnClickListener {
-                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("WOLF AI crash report", report))
-                android.widget.Toast.makeText(this@MainActivity, "گزارش کپی شد؛ آن را اینجا ارسال کن.", android.widget.Toast.LENGTH_LONG).show()
-            }
-        }
-        root.addView(copy)
-        val retry = android.widget.Button(this).apply {
-            text = "پاک‌کردن گزارش و اجرای دوباره"
-            setOnClickListener {
-                crashFile.delete()
-                val launch = packageManager.getLaunchIntentForPackage(packageName)
-                finish()
-                if (launch != null) startActivity(launch)
-            }
-        }
-        root.addView(retry)
-        setContentView(root)
-        return true
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        installCrashCapture()
-        if (showCrashReportIfPresent()) return
-        // Initialize secure storage defensively so a device-specific Keystore issue
-        // cannot prevent the first screen from being displayed.
+        tts = TextToSpeech(this, this)
+
+        // Never let a device-specific Android Keystore failure prevent the app UI from opening.
         securePrefs = try {
             val master = MasterKey.Builder(this)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -319,17 +243,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             loadContacts = { readPhoneContacts() },
             loadCalendarEvents = { readCalendarEvents() }
         ) }
-
-        // Speech services are optional. Start them only after the first frame is queued,
-        // and never let a vendor TTS implementation crash application startup.
-        window.decorView.post {
-            try {
-                tts = TextToSpeech(applicationContext, this)
-            } catch (error: Exception) {
-                android.util.Log.e("WOLF_STARTUP", "Text-to-speech unavailable; continuing without voice", error)
-                tts = null
-            }
-        }
     }
     private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/status").openConnection() as HttpURLConnection)
