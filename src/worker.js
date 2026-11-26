@@ -1054,6 +1054,17 @@ function validateCompanionReadOnlyAction(capability, action) {
   throw new Error("این عملیات فقط‌خواندنی پشتیبانی نمی‌شود.");
 }
 
+function validateCompanionAction(capability, action) {
+  if (capability === "scheduling" && action?.type === "schedule.create") {
+    if (!action.args || typeof action.args !== "object" || Array.isArray(action.args) ||
+        Object.keys(action.args).some(key => !["title","message","due_at","timezone"].includes(key))) {
+      throw new Error("پارامترهای یادآوری نامعتبر هستند.");
+    }
+    return { type: "schedule.create", args: normalizeReminderSchedule(action.args) };
+  }
+  return validateCompanionReadOnlyAction(capability, action);
+}
+
 async function getOwnedCompanionMission(env, missionId, ownerId) {
   return await env.DB.prepare(
     "SELECT id,status,owner_id FROM agent_runs WHERE id=? AND owner_id=? LIMIT 1"
@@ -1073,16 +1084,16 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   const step=await env.DB.prepare("SELECT id,capability,title,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
   if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
   if(step.status!=="approved_pending_execution" || Number(step.approval_required)!==1 || String(step.approved_by)!==String(device.owner_id)) return json({ok:false,error:"تأیید مالک برای این مرحله معتبر نیست."},409);
-  const supported = new Set(["web_research","personal_memory","files_documents","finance"]);
+  const supported = new Set(["web_research","personal_memory","files_documents","finance","scheduling"]);
   if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
   const input=safeJson(step.input_json,{});
   const language=detectMessageLanguage(String(input.details||step.title));
-  const system = "Convert the approved step into exactly one read-only action JSON. Return only {\"type\":string,\"args\":object}. Allowed action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. No writes, messages, calls, device control, purchases, deletes, or scheduling. Match the requested capability. If the step requires a write or unsupported action, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
+  const system = "Convert the approved step into exactly one validated action JSON. Return only {\"type\":string,\"args\":object}. Read-only action types: research.search {query}, research.open {url}, memory.search {query}, artifact.search {query}, finance.summary {start_date,end_date,currency?}, system.health {}, github.list_repos {}, github.workflow_runs {repo}, github.get_file {repo,path}. For capability scheduling only, you may prepare schedule.create {title,message,due_at,timezone}; due_at must be a future ISO 8601 timestamp with an explicit UTC offset or Z, and timezone must be a valid IANA name. This is only a prepared proposal; it will require a second explicit owner approval before insertion. Never prepare messaging, calls, device control, purchases, arbitrary writes, deletes, or infrastructure changes. Match the requested capability. If details do not contain enough information, return {\"type\":\"unsupported\",\"args\":{}}. Do not invent dates, times, timezone, URLs, repository names, paths, or amounts. Use only facts explicitly present in the step details.";
   try {
     const result=await runWolfModel(env,[{role:"system",content:system},{role:"user",content:"Capability: "+step.capability+"\nStep title: "+step.title+"\nStep details: "+String(input.details||"")}],"auto",String(input.details||step.title));
     const raw=String(result.answer||"").replace(/^\x60{3}(?:json)?\s*/i,"").replace(/\s*\x60{3}$/i,"").trim();
     const action=JSON.parse(raw);
-    const prepared=validateCompanionReadOnlyAction(step.capability,action);
+    const prepared=validateCompanionAction(step.capability,action);
     const updated=await env.DB.prepare("UPDATE agent_steps SET input_json=?,status='awaiting_execution_approval' WHERE id=? AND run_id=? AND status='approved_pending_execution'")
       .bind(JSON.stringify({details:input.details||"",prepared_action:prepared}),step.id,missionId).run();
     if(!updated?.meta?.changes) return json({ok:false,error:"وضعیت مرحله هم‌زمان تغییر کرده است."},409);
@@ -1134,7 +1145,7 @@ async function executeCompanionMissionStep(request, env, missionId) {
   if(step.status!=="awaiting_execution_approval" || Number(step.approval_required)!==1 || String(step.approved_by)!==String(device.owner_id)) return json({ok:false,error:"ابتدا عملیات دقیق این مرحله را جداگانه و با حساب مالک تأیید کن."},409);
   const input=safeJson(step.input_json,{});
   let action;
-  try { action=validateCompanionReadOnlyAction(step.capability,input.prepared_action); }
+  try { action=validateCompanionAction(step.capability,input.prepared_action); }
   catch(error) { return json({ok:false,error:"عملیات ذخیره‌شده از اعتبارسنجی امنیتی عبور نکرد: "+String(error?.message||error).slice(0,180)},403); }
   const claim=await claimCompanionMissionStep(env,{
     stepId:step.id,missionId,stepNo,ownerId:String(device.owner_id)
@@ -1147,13 +1158,15 @@ async function executeCompanionMissionStep(request, env, missionId) {
   }
   try{
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF فعال شد؛ مرحله اجرا نشد.");
-    const output=await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
+    const output=action.type === "schedule.create"
+      ? await executeApprovedAction(env, action, null, 1, String(device.owner_id))
+      : await executeCompanionReadOnlyAction(env,step.capability,action,String(device.owner_id));
     if(await getSetting(env,"companion_master_enabled","true")!=="true") throw new Error("MASTER OFF هنگام اجرا فعال شد؛ نتیجه برای ادامه مأموریت نادیده گرفته شد.");
     await env.DB.prepare("UPDATE agent_steps SET status='completed',output_json=?,completed_at=CURRENT_TIMESTAMP,error_text=NULL WHERE id=? AND status='running'").bind(JSON.stringify(output).slice(0,12000),step.id).run();
     const pending=await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND status NOT IN ('completed','rejected')").bind(missionId).first();
     const nextStatus=Number(pending?.n||0)===0?"completed":"approved_pending_execution";
     await env.DB.prepare("UPDATE agent_runs SET status=?,result_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(nextStatus,JSON.stringify({last_step:stepNo,completed:nextStatus==="completed"}).slice(0,12000),missionId).run();
-    await log(env,device.owner_id,"companion.mission_step_executed","agent_step",step.id,{action_type:action.type,read_only:true});
+    await log(env,device.owner_id,"companion.mission_step_executed","agent_step",step.id,{action_type:action.type,read_only:output.read_only !== false});
     return json({ok:true,mission_id:missionId,step_no:stepNo,status:"completed",result:output,mission_status:nextStatus});
   }catch(error){
     await env.DB.prepare("UPDATE agent_steps SET status='failed',error_text=?,completed_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'").bind(String(error?.message||error).slice(0,1500),step.id).run();
