@@ -122,3 +122,8 @@ test("rejects invalid ISO 8601 UTC offsets", () => {
     due_at: "2030-05-01T10:30:00+15:00"
   }, Date.parse("2030-01-01T00:00:00Z")));
 });
+
+test("allows project and task listing as read-only personal operations", () => {
+  assert.equal(validateCompanionAction("personal_operations", { type: "project.list", args: {} }).type, "project.list");
+  assert.equal(validateCompanionAction("personal_operations", { type: "task.list", args: { status: "open" } }).args.status, "open");
+});
