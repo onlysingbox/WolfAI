@@ -793,22 +793,31 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            runCatching {
-                val resolver = context.contentResolver
-                var displayName = "document"
-                resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) displayName = cursor.getString(0) ?: displayName
+            fileStatus = "در حال وارد کردن فایل..."
+            scope.launch {
+                val imported = runCatching {
+                    withContext(Dispatchers.IO) {
+                        val resolver = context.contentResolver
+                        var displayName = "document"
+                        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) displayName = cursor.getString(0) ?: displayName
+                        }
+                        val safeName = displayName.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(100).ifBlank { "document" }
+                        val destination = File(storageRoot, "files").apply { mkdirs() }
+                        var target = File(destination, safeName)
+                        var suffix = 1
+                        while (target.exists()) { target = File(destination, "${target.nameWithoutExtension}_${suffix++}.${target.extension}") }
+                        resolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
+                            ?: error("خواندن فایل ممکن نشد")
+                        target.name
+                    }
                 }
-                val safeName = displayName.replace(Regex("[^a-zA-Z0-9._ -]"), "_").take(100).ifBlank { "document" }
-                val destination = File(storageRoot, "files").apply { mkdirs() }
-                var target = File(destination, safeName)
-                var suffix = 1
-                while (target.exists()) { target = File(destination, "${target.nameWithoutExtension}_${suffix++}.${target.extension}") }
-                resolver.openInputStream(uri)?.use { input -> target.outputStream().use { output -> input.copyTo(output) } }
-                    ?: error("خواندن فایل ممکن نشد")
-                fileStatus = "فایل «${target.name}» وارد شد."
-                filesRefresh++
-            }.onFailure { fileStatus = "واردکردن فایل ناموفق بود: ${it.message}" }
+                imported.onSuccess {
+                    fileStatus = "فایل «$it» وارد شد."
+                    filesRefresh++
+                    storageRefresh++
+                }.onFailure { fileStatus = "واردکردن فایل ناموفق بود: ${it.message}" }
+            }
         }
     }
     var pendingExportFile by remember { mutableStateOf<File?>(null) }
@@ -816,11 +825,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         val source = pendingExportFile
         pendingExportFile = null
         if (uri != null && source != null && source.exists()) {
-            runCatching {
-                context.contentResolver.openOutputStream(uri)?.use { output -> source.inputStream().use { input -> input.copyTo(output) } }
-                    ?: error("ساخت فایل خروجی ممکن نشد")
-            }.onSuccess { fileStatus = "فایل «${source.name}» در حافظه انتخاب‌شده ذخیره شد." }
-             .onFailure { fileStatus = "خروجی گرفتن ناموفق بود: ${it.message}" }
+            fileStatus = "در حال ساخت فایل خروجی..."
+            scope.launch {
+                val exported = runCatching {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            source.inputStream().use { input -> input.copyTo(output) }
+                        } ?: error("ساخت فایل خروجی ممکن نشد")
+                    }
+                }
+                exported.onSuccess { fileStatus = "فایل «${source.name}» در حافظه انتخاب‌شده ذخیره شد." }
+                    .onFailure { fileStatus = "خروجی گرفتن ناموفق بود: ${it.message}" }
+            }
         } else if (uri != null) fileStatus = "فایل منبع برای خروجی پیدا نشد."
     }
     val speechLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -1059,20 +1075,34 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                                 fileStatus = "نتیجه خواندن: ${file.name}"
                                             }
                                         } else {
-                                            previewText=when(ext) {
-                                                "txt","md","csv","json","log" -> runCatching { file.readText(Charsets.UTF_8).take(12000) }.getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
-                                                "docx" -> runCatching {
-                                                    java.util.zip.ZipFile(file).use { zip ->
-                                                        val entry=zip.getEntry("word/document.xml")
-                                                        if(entry==null) "متن قابل استخراج در این فایل پیدا نشد." else zip.getInputStream(entry).bufferedReader().use { xml ->
-                                                            xml.readText().replace(Regex("</w:p>"),"\n").replace(Regex("<[^>]+>")," ").replace("&amp;","&").replace("&lt;","<").replace("&gt;",">").replace(Regex("[ \\t]+")," ").take(12000)
-                                                        }
+                                            previewText = ""
+                                            fileStatus = "در حال خواندن فایل..."
+                                            scope.launch {
+                                                val extracted = withContext(Dispatchers.IO) {
+                                                    when (ext) {
+                                                        "txt", "md", "csv", "json", "log" ->
+                                                            runCatching { file.readText(Charsets.UTF_8).take(12000) }
+                                                                .getOrElse { "خواندن فایل ناموفق بود: ${it.message}" }
+                                                        "docx" -> runCatching {
+                                                            java.util.zip.ZipFile(file).use { zip ->
+                                                                val entry = zip.getEntry("word/document.xml")
+                                                                if (entry == null) "متن قابل استخراج در این فایل پیدا نشد." else
+                                                                    zip.getInputStream(entry).bufferedReader().use { xml ->
+                                                                        xml.readText().replace(Regex("</w:p>"), "\n")
+                                                                            .replace(Regex("<[^>]+>"), " ")
+                                                                            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                                                                            .replace(Regex("[ \\t]+"), " ").take(12000)
+                                                                    }
+                                                            }
+                                                        }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
+                                                        "xlsx" -> runCatching { readXlsxText(file) }
+                                                            .getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
+                                                        else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
                                                     }
-                                                }.getOrElse { "استخراج Word ناموفق بود: ${it.message}" }
-                                                "xlsx" -> runCatching { readXlsxText(file) }.getOrElse { "استخراج Excel ناموفق بود: ${it.message}" }
-                                                else -> "خواندن داخلی قالب .$ext هنوز اضافه نشده است. فایل اصلی محفوظ است."
+                                                }
+                                                previewText = extracted
+                                                fileStatus = "نتیجه خواندن: ${file.name}"
                                             }
-                                            fileStatus="نتیجه خواندن: ${file.name}"
                                         }
                                     }) { Text("خواندن") }
                                     TextButton(onClick={
@@ -1090,9 +1120,17 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 OutlinedTextField(value=previewText,onValueChange={previewText=it},modifier=Modifier.fillMaxWidth(),minLines=5,maxLines=14,label={Text("متن استخراج‌شده")})
                                 val editable = previewFile?.extension?.lowercase() in listOf("txt","md","csv","json","log")
                                 if(editable) Button(onClick={
-                                    runCatching { previewFile?.writeText(previewText,Charsets.UTF_8) ?: error("فایلی انتخاب نشده") }
-                                        .onSuccess { fileStatus="تغییرات در فایل ذخیره شد." }
-                                        .onFailure { fileStatus="ذخیره تغییرات ناموفق بود: ${it.message}" }
+                                    val target = previewFile
+                                    val content = previewText
+                                    scope.launch {
+                                        val saved = runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                target?.writeText(content, Charsets.UTF_8) ?: error("فایلی انتخاب نشده")
+                                            }
+                                        }
+                                        saved.onSuccess { fileStatus="تغییرات در فایل ذخیره شد." }
+                                            .onFailure { fileStatus="ذخیره تغییرات ناموفق بود: ${it.message}" }
+                                    }
                                 },modifier=Modifier.fillMaxWidth()) { Text("ذخیره تغییرات در فایل") }
                                 else Text("ویرایش پیش‌نمایش فقط برای فایل‌های متنی قابل ذخیره است؛ فایل اصلی Word و Excel دست‌نخورده می‌ماند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                             }
@@ -1120,7 +1158,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             if (!paired) OutlinedButton(onClick={localMode=false;storagePrefs.safeEdit { putBoolean("local_mode", false) };showSettings=false;status="برای اتصال ابری، کد اتصال را وارد کن."},modifier=Modifier.fillMaxWidth()) { Text("رفتن به صفحه اتصال موتور ابری") }
                             Text("حریم خصوصی و کنترل",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                             Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("WOLF AI AGENT • نسخه 0.3",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
+                            Text("WOLF AI AGENT • نسخه ${BuildConfig.VERSION_NAME}",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         }
                     }
                 } else if (showContacts) {
