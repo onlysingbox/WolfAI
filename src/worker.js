@@ -1028,6 +1028,18 @@ function validateCompanionReadOnlyAction(capability, action) {
         (url.port && url.port !== "443")) throw new Error("فقط نشانی HTTPS عمومی و بدون پورت سفارشی مجاز است.");
     return { type: action.type, args: { url: url.toString() } };
   }
+  if (action.type === "project.list" || action.type === "schedule.list") {
+    if (!onlyKeys([])) throw new Error("این فهرست پارامتر نمی‌پذیرد.");
+    return { type: action.type, args: {} };
+  }
+  if (action.type === "task.list") {
+    if (!onlyKeys(["status","project_id"])) throw new Error("پارامتر اضافی برای فهرست وظایف مجاز نیست.");
+    const status = String(args.status || "").trim();
+    const project_id = String(args.project_id || "").trim();
+    if (status && !["open","in_progress","done","cancelled"].includes(status)) throw new Error("وضعیت وظیفه معتبر نیست.");
+    if (project_id && !/^[0-9a-f-]{36}$/i.test(project_id)) throw new Error("شناسه پروژه معتبر نیست.");
+    return { type: action.type, args: { status: status || null, project_id: project_id || null } };
+  }
   if (action.type === "memory.search" || action.type === "artifact.search") {
     if (!onlyKeys(["query"])) throw new Error("پارامتر اضافی در جست‌وجوی آرشیو مجاز نیست.");
     return { type: action.type, args: { query: requiredText("query", 300) } };
