@@ -1,17 +1,6 @@
 name: Build WOLF AI Android
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - "app/**"
-      - "*.gradle.kts"
-      - "settings.gradle.kts"
-      - ".github/workflows/android.yml"
-      - "src/**"
-      - "tests/**"
-      - "package.json"
-      - "migrations/**"
-      - "wrangler.toml"
 jobs:
   build:
     runs-on: ubuntu-latest
