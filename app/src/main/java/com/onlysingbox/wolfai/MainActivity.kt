@@ -58,6 +58,19 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.text.PDFTextStripper
 
+private fun SharedPreferences.safeString(key: String, fallback: String = ""): String =
+    runCatching { getString(key, fallback) ?: fallback }.getOrDefault(fallback)
+
+private fun SharedPreferences.safeBoolean(key: String, fallback: Boolean): Boolean =
+    runCatching { getBoolean(key, fallback) }.getOrDefault(fallback)
+
+private fun SharedPreferences.safeInt(key: String, fallback: Int): Int =
+    runCatching { getInt(key, fallback) }.getOrDefault(fallback)
+
+private inline fun SharedPreferences.safeEdit(update: SharedPreferences.Editor.() -> Unit) {
+    runCatching { edit().apply { update() }.apply() }
+}
+
 private const val BASE_URL = "https://wolfai.onlysingbox.workers.dev"
 private val Navy = Color(0xFF071426)
 private val Panel = Color(0xFF10243D)
@@ -200,10 +213,32 @@ private data class CalendarEvent(val title: String, val begin: Long, val end: Lo
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
     private lateinit var securePrefs: android.content.SharedPreferences
+
+    private fun installCrashCapture() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            runCatching {
+                val directory = File(filesDir, "wolf_storage")
+                directory.mkdirs()
+                File(directory, "last_crash.txt").writeText(
+                    "WOLF AI startup/runtime crash\nThread: ${thread.name}\n" +
+                        android.util.Log.getStackTraceString(error)
+                )
+            }
+            if (previous != null) {
+                previous.uncaughtException(thread, error)
+            } else {
+                android.os.Process.killProcess(android.os.Process.myPid())
+                kotlin.system.exitProcess(10)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        tts = TextToSpeech(this, this)
+        installCrashCapture()
 
+        // Keep optional speech-engine startup out of the critical first-frame path.
         // Never let a device-specific Android Keystore failure prevent the app UI from opening.
         securePrefs = try {
             val master = MasterKey.Builder(this)
@@ -221,28 +256,44 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             getSharedPreferences("wolf_secure_fallback", MODE_PRIVATE)
         }
 
-        File(filesDir, "wolf_storage").apply {
-            listOf("history", "memory", "notes", "files", "audio").forEach { File(this, it).mkdirs() }
-        }
+        val storageRoot = File(filesDir, "wolf_storage")
+        runCatching {
+            storageRoot.mkdirs()
+            listOf("history", "memory", "notes", "files", "audio").forEach { File(storageRoot, it).mkdirs() }
+        }.onFailure { android.util.Log.e("WOLF_STARTUP", "Could not prepare local storage", it) }
+        val crashFile = File(storageRoot, "last_crash.txt")
+        val previousCrash = runCatching {
+            if (crashFile.isFile) crashFile.readText().take(6000) else ""
+        }.getOrDefault("")
+
         setContent { WolfApp(
-            token = securePrefs.getString("device_token", "") ?: "",
-            saveToken = { securePrefs.edit().putString("device_token", it).apply() },
-            send = { text, history, model -> apiChat(securePrefs.getString("device_token", "") ?: "", text, history, model) },
-            createMission = { text -> apiCreateMission(securePrefs.getString("device_token", "") ?: "", text) },
-            listMissions = { apiListMissions(securePrefs.getString("device_token", "") ?: "") },
-            decideMission = { id, decision -> apiMissionDecision(securePrefs.getString("device_token", "") ?: "", id, decision) },
-            prepareMissionStep = { id, step -> apiMissionStep(securePrefs.getString("device_token", "") ?: "", id, step, "prepare") },
-            executeMissionStep = { id, step -> apiMissionStep(securePrefs.getString("device_token", "") ?: "", id, step, "execute") },
-            setRemoteMaster = { enabled -> apiMaster(securePrefs.getString("device_token", "") ?: "", enabled) },
-            loadProviderStatus = { apiProviderStatus(securePrefs.getString("device_token", "") ?: "") },
-            speak = { text -> tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") },
-            stopSpeaking = { tts?.stop() },
+            token = securePrefs.safeString("device_token"),
+            saveToken = { value -> securePrefs.safeEdit { putString("device_token", value) } },
+            send = { text, history, model -> apiChat(securePrefs.safeString("device_token"), text, history, model) },
+            createMission = { text -> apiCreateMission(securePrefs.safeString("device_token"), text) },
+            listMissions = { apiListMissions(securePrefs.safeString("device_token")) },
+            decideMission = { id, decision -> apiMissionDecision(securePrefs.safeString("device_token"), id, decision) },
+            prepareMissionStep = { id, step -> apiMissionStep(securePrefs.safeString("device_token"), id, step, "prepare") },
+            executeMissionStep = { id, step -> apiMissionStep(securePrefs.safeString("device_token"), id, step, "execute") },
+            setRemoteMaster = { enabled -> apiMaster(securePrefs.safeString("device_token"), enabled) },
+            loadProviderStatus = { apiProviderStatus(securePrefs.safeString("device_token")) },
+            speak = { text -> runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") } },
+            stopSpeaking = { runCatching { tts?.stop() } },
             storagePrefs = securePrefs,
-            storageRoot = File(filesDir, "wolf_storage"),
-            historyFile = File(filesDir, "wolf_storage/history/chat.json"),
+            storageRoot = storageRoot,
+            historyFile = File(storageRoot, "history/chat.json"),
             loadContacts = { readPhoneContacts() },
-            loadCalendarEvents = { readCalendarEvents() }
+            loadCalendarEvents = { readCalendarEvents() },
+            startupCrashReport = previousCrash
         ) }
+
+        // Initialize TTS only after Compose has had a chance to draw the first screen.
+        window.decorView.post {
+            if (!isFinishing && tts == null) {
+                runCatching { tts = TextToSpeech(applicationContext, this) }
+                    .onFailure { android.util.Log.e("WOLF_STARTUP", "Text-to-speech initialization failed", it) }
+            }
+        }
     }
     private suspend fun apiProviderStatus(token: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/status").openConnection() as HttpURLConnection)
@@ -332,8 +383,19 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         result
     }
 
-    override fun onInit(status: Int) { if (status == TextToSpeech.SUCCESS) tts?.language = Locale("fa", "IR") }
-    override fun onDestroy() { tts?.stop(); tts?.shutdown(); super.onDestroy() }
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            runCatching { tts?.language = Locale("fa", "IR") }
+                .onFailure { android.util.Log.w("WOLF_TTS", "Persian TTS language setup failed", it) }
+        }
+    }
+
+    override fun onDestroy() {
+        runCatching { tts?.stop() }
+        runCatching { tts?.shutdown() }
+        tts = null
+        super.onDestroy()
+    }
 
     private suspend fun apiCreateMission(token: String, text: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/missions").openConnection() as HttpURLConnection)
@@ -425,14 +487,25 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
-    var localMode by remember { mutableStateOf(storagePrefs.getBoolean("local_mode", false)) }
+    var localMode by remember { mutableStateOf(storagePrefs.safeBoolean("local_mode", false)) }
+    var showStartupCrash by remember { mutableStateOf(startupCrashReport.isNotBlank()) }
     var pairCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var status by remember { mutableStateOf("آماده گفتگو") }
+    var status by remember { mutableStateOf(if (startupCrashReport.isBlank()) "آماده گفتگو" else "گزارش خطای اجرای قبلی ذخیره شده است.") }
     val context = androidx.compose.ui.platform.LocalContext.current
+    if (showStartupCrash) {
+        AlertDialog(
+            onDismissRequest = { showStartupCrash = false },
+            title = { Text("گزارش خطای اجرای قبلی WOLF AI") },
+            text = { Text(startupCrashReport.take(6000), maxLines = 18) },
+            confirmButton = {
+                TextButton(onClick = { showStartupCrash = false }) { Text("متوجه شدم") }
+            }
+        )
+    }
     fun findPhoneNumberByName(query: String): String? {
         if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
         context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
@@ -486,14 +559,14 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var missionBusy by remember { mutableStateOf(false) }
     var missionStatus by remember { mutableStateOf("برای ساخت طرح مأموریت، درخواستت را بنویس.") }
     var missions by remember { mutableStateOf(JSONArray()) }
-    var selectedModel by remember { mutableStateOf(storagePrefs.getString("ai_model", "auto") ?: "auto") }
+    var selectedModel by remember { mutableStateOf(storagePrefs.safeString("ai_model", "auto")) }
     var providerStatus by remember { mutableStateOf<JSONObject?>(null) }
     var providerStatusError by remember { mutableStateOf("وضعیت موتورها هنوز دریافت نشده است.") }
     var providerStatusBusy by remember { mutableStateOf(false) }
     var showModels by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
-    var darkTheme by remember { mutableStateOf(storagePrefs.getBoolean("dark_theme", true)) }
-    var masterEnabled by remember { mutableStateOf(storagePrefs.getBoolean("master_enabled", true)) }
+    var darkTheme by remember { mutableStateOf(storagePrefs.safeBoolean("dark_theme", true)) }
+    var masterEnabled by remember { mutableStateOf(storagePrefs.safeBoolean("master_enabled", true)) }
     var storageRefresh by remember { mutableIntStateOf(0) }
     var noteTitle by remember { mutableStateOf("") }
     var noteBody by remember { mutableStateOf("") }
@@ -503,7 +576,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var editingNote by remember { mutableStateOf<File?>(null) }
     var pendingDeleteBucket by remember { mutableStateOf<Pair<String, File>?>(null) }
     var showClearChatConfirm by remember { mutableStateOf(false) }
-    var quotaGb by remember { mutableFloatStateOf(storagePrefs.getInt("storage_quota_gb", 60).toFloat()) }
+    var quotaGb by remember { mutableFloatStateOf(storagePrefs.safeInt("storage_quota_gb", 60).toFloat()) }
     val storageBuckets = remember(storageRefresh) { listOf("history" to "تاریخچه گفتگوها", "memory" to "حافظه بلندمدت", "notes" to "یادداشت‌ها", "files" to "فایل‌ها", "audio" to "صدا و ضبط‌ها").map { (key, label) -> key to (label to File(storageRoot, key).apply { mkdirs() }) } }
     fun folderBytes(file: File): Long = if (!file.exists()) 0L else if (file.isFile) file.length() else (file.listFiles()?.sumOf { folderBytes(it) } ?: 0L)
     val usedBytes = storageBuckets.sumOf { folderBytes(it.second.second) }
@@ -805,7 +878,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Button(onClick={
                         masterEnabled=!masterEnabled
-                        storagePrefs.edit().putBoolean("master_enabled",masterEnabled).apply()
+                        storagePrefs.safeEdit { putBoolean("master_enabled", masterEnabled) }
                         if(!masterEnabled){activeRequest?.cancel();activeRequest=null;busy=false;status="WOLF خاموش شد"} else status="WOLF فعال شد"
                         if (paired) scope.launch { runCatching { setRemoteMaster(masterEnabled) }.onFailure { status="همگام‌سازی ناموفق: ${it.message}" } }
                     }, colors=ButtonDefaults.buttonColors(containerColor=if(masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if(masterEnabled) "خاموش" else "فعال‌سازی") }
@@ -1016,11 +1089,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             Text("ظاهر برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.SpaceBetween) {
                                 Column(Modifier.weight(1f)) { Text("تم تاریک",color=MaterialTheme.colorScheme.onSurface);Text("انتخاب ظاهر روشن یا تاریک",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall) }
-                                Switch(checked=darkTheme,onCheckedChange={darkTheme=it;storagePrefs.edit().putBoolean("dark_theme",it).apply()})
+                                Switch(checked=darkTheme,onCheckedChange={darkTheme=it;storagePrefs.safeEdit { putBoolean("dark_theme", it) }})
                             }
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                FilterChip(selected=darkTheme,onClick={darkTheme=true;storagePrefs.edit().putBoolean("dark_theme",true).apply()},label={Text("تاریک")})
-                                FilterChip(selected=!darkTheme,onClick={darkTheme=false;storagePrefs.edit().putBoolean("dark_theme",false).apply()},label={Text("روشن")})
+                                FilterChip(selected=darkTheme,onClick={darkTheme=true;storagePrefs.safeEdit { putBoolean("dark_theme", true) }},label={Text("تاریک")})
+                                FilterChip(selected=!darkTheme,onClick={darkTheme=false;storagePrefs.safeEdit { putBoolean("dark_theme", false) }},label={Text("روشن")})
                             }
                         }
                     }
@@ -1028,7 +1101,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("فعال‌سازی کنترل پیشرفته برنامه‌ها")}
                             Text(if(WolfAccessibilityService.active!=null) "کنترل پیشرفته فعال است." else "برای کنترل عناصر داخل برنامه‌ها، این دسترسی را فقط در صورت تمایل از تنظیمات اندروید فعال کن.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
-                            if (!paired) OutlinedButton(onClick={localMode=false;storagePrefs.edit().putBoolean("local_mode",false).apply();showSettings=false;status="برای اتصال ابری، کد اتصال را وارد کن."},modifier=Modifier.fillMaxWidth()) { Text("رفتن به صفحه اتصال موتور ابری") }
+                            if (!paired) OutlinedButton(onClick={localMode=false;storagePrefs.safeEdit { putBoolean("local_mode", false) };showSettings=false;status="برای اتصال ابری، کد اتصال را وارد کن."},modifier=Modifier.fillMaxWidth()) { Text("رفتن به صفحه اتصال موتور ابری") }
                             Text("حریم خصوصی و کنترل",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                             Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("WOLF AI AGENT • نسخه 0.3",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
@@ -1137,7 +1210,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("auto" to "خودکار", "glm" to "GLM", "zai" to "Z.ai GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
-                            FilterChip(selected = selectedModel == key, enabled = providerIsConfigured(key), onClick = { selectedModel = key; storagePrefs.edit().putString("ai_model", key).apply() }, label = { Text(label) })
+                            FilterChip(selected = selectedModel == key, enabled = providerIsConfigured(key), onClick = { selectedModel = key; storagePrefs.safeEdit { putString("ai_model", key) } }, label = { Text(label) })
                         }
                     }
                     val providerItems = providerStatus?.optJSONArray("providers") ?: JSONArray()
@@ -1165,7 +1238,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("سقف مصرف WOLF: %.0f GB".format(quotaGb), color = Color.White)
                     Slider(value = quotaGb, onValueChange = { quotaGb = it }, valueRange = 20f..200f, steps = 17)
-                    Button(onClick = { storagePrefs.edit().putInt("storage_quota_gb", quotaGb.toInt()).apply(); status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
+                    Button(onClick = { storagePrefs.safeEdit { putInt("storage_quota_gb", quotaGb.toInt()) }; status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
                     Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = Color.LightGray)
 
                     HorizontalDivider(color = Color(0xFF33445E))
@@ -1259,7 +1332,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }) { Text(if (busy) "در حال اتصال..." else "اتصال WOLF") }
                     Text("برای اتصال موتور ابری، کد یک‌بارمصرف را از روش اتصال مالک دریافت کن. این اتصال فقط برای قابلیت‌های آنلاین است.", color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedButton(onClick={localMode=true;storagePrefs.edit().putBoolean("local_mode",true).apply();status="حالت محلی فعال است؛ ابزارهای گوشی بدون تلگرام کار می‌کنند."},modifier=Modifier.fillMaxWidth()) { Text("ادامه بدون تلگرام، حالت محلی") }
+                    OutlinedButton(onClick={localMode=true;storagePrefs.safeEdit { putBoolean("local_mode", true) };status="حالت محلی فعال است؛ ابزارهای گوشی بدون تلگرام کار می‌کنند."},modifier=Modifier.fillMaxWidth()) { Text("ادامه بدون تلگرام، حالت محلی") }
                 } else {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(status, color=Cyan, modifier = Modifier.weight(1f))
