@@ -79,7 +79,6 @@ jobs:
             adb shell am start -n com.onlysingbox.wolfai/.MainActivity
             sleep 20
             adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep -q 'com.onlysingbox.wolfai'
-            if adb logcat -d -t 5000 | grep -E 'FATAL EXCEPTION|Process: com.onlysingbox.wolfai' | grep -q 'FATAL EXCEPTION'; then
-              adb logcat -d -t 5000 | grep -A 40 -B 5 'FATAL EXCEPTION'
-              exit 1
-            fi
+            adb logcat -d -t 5000 > /tmp/wolf-logcat.txt
+            if grep -q 'FATAL EXCEPTION' /tmp/wolf-logcat.txt; then exit 1; fi
+            adb shell pidof com.onlysingbox.wolfai
