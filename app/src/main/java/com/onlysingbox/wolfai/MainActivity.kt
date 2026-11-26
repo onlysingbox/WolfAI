@@ -12,6 +12,7 @@ import android.provider.CalendarContract
 import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.speech.RecognizerIntent
@@ -21,7 +22,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -868,7 +869,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-                    Image(painter=painterResource(R.drawable.wolf_logo_photo), contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
+                    val wolfLogoImage = remember(context) {
+                        runCatching {
+                            BitmapFactory.decodeResource(context.resources, R.drawable.wolf_logo_photo)?.asImageBitmap()
+                        }.onFailure {
+                            android.util.Log.e("WOLF_IMAGE", "Logo image could not be decoded; using safe fallback", it)
+                        }.getOrNull()
+                    }
+                    if (wolfLogoImage != null) {
+                        Image(bitmap=wolfLogoImage, contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
+                    } else {
+                        Text("🐺", modifier=Modifier.size(76.dp), fontSize=42.sp)
+                    }
                     Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
                         Text("WOLF AI", style=MaterialTheme.typography.headlineLarge, color=MaterialTheme.colorScheme.onBackground)
                         Text("YOUR SMART AI AGENT", color=Cyan, style=MaterialTheme.typography.labelMedium)
