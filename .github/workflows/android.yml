@@ -58,7 +58,7 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
           "$APKSIGNER" verify --verbose "$APK"
-          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='6' versionName='0.6.0'"
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.onlysingbox.wolfai' versionCode='7' versionName='0.6.1'"
           "$AAPT" dump resources "$APK" | grep -F "wolf_logo_photo"
       - uses: actions/upload-artifact@v4
         if: always()
