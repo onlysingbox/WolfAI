@@ -263,7 +263,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }.onFailure { android.util.Log.e("WOLF_STARTUP", "Could not prepare local storage", it) }
         val crashFile = File(storageRoot, "last_crash.txt")
         val previousCrash = runCatching {
-            if (crashFile.isFile) crashFile.readText().take(6000) else ""
+            if (crashFile.isFile) {
+                val report = crashFile.readText().take(6000)
+                crashFile.delete()
+                report
+            } else ""
         }.getOrDefault("")
 
         setContent { WolfApp(
