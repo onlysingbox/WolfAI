@@ -43,7 +43,12 @@ jobs:
           test -n "$WOLF_KEYSTORE_PASSWORD"
           printf '%s' "$WOLF_KEYSTORE_BASE64" | base64 --decode > "$WOLF_KEYSTORE_FILE"
           test -s "$WOLF_KEYSTORE_FILE"
-      - name: Generate WOLF AI launcher icons from the app logo\n        run: |\n          python3 -m pip install --quiet Pillow\n          python3 scripts/generate_launcher_icons.py\n          test -s app/src/main/res/mipmap-xxxhdpi/ic_launcher.png\n          test -s app/src/main/res/mipmap-xxxhdpi/wolf_launcher_foreground.png\n      - name: Build debug APK
+      - name: Generate WOLF AI launcher icons from the app logo
+        run: |
+          python3 -m pip install --quiet Pillow
+          python3 scripts/generate_launcher_icons.py
+          test -s app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          test -s app/src/main/res/mipmap-xxxhdpi/wolf_launcher_foreground.png\n      - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - name: Build stable signed release APK
         if: always()
