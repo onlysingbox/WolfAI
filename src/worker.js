@@ -1089,7 +1089,6 @@ function validateCompanionAction(capability, action) {
     }
   }
   if (capability === "scheduling" && action?.type === "schedule.create") {
-  if (capability === "scheduling" && action?.type === "schedule.create") {
     if (!action.args || typeof action.args !== "object" || Array.isArray(action.args) ||
         Object.keys(action.args).some(key => !["title","message","due_at","timezone"].includes(key))) {
       throw new Error("پارامترهای یادآوری نامعتبر هستند.");
@@ -1118,7 +1117,7 @@ async function prepareCompanionMissionStep(request, env, missionId) {
   const step=await env.DB.prepare("SELECT id,capability,title,input_json,status,approval_required,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId,stepNo).first();
   if(!step) return json({ok:false,error:"مرحله پیدا نشد."},404);
   if(step.status!=="approved_pending_execution" || Number(step.approval_required)!==1 || String(step.approved_by)!==String(device.owner_id)) return json({ok:false,error:"تأیید مالک برای این مرحله معتبر نیست."},409);
-  const supported = new Set(["web_research","personal_memory","files_documents","finance","scheduling"]);
+  const supported = new Set(["web_research","personal_memory","files_documents","finance","scheduling","personal_operations"]);
   if(!supported.has(step.capability)) return json({ok:false,error:"این قابلیت هنوز در موتور اجرای امن پشتیبانی نمی‌شود؛ به بررسی دستی نیاز دارد."},422);
   const input=safeJson(step.input_json,{});
   const language=detectMessageLanguage(String(input.details||step.title));
