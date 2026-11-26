@@ -114,3 +114,11 @@ test("validates reminder cancellation by exact UUID", () => {
   });
   assert.equal(action.args.id, "00000000-0000-4000-8000-000000000001");
 });
+
+test("rejects invalid ISO 8601 UTC offsets", () => {
+  assert.throws(() => normalizeReminderSchedule({
+    title: "Test",
+    message: "Test",
+    due_at: "2030-05-01T10:30:00+15:00"
+  }, Date.parse("2030-01-01T00:00:00Z")));
+});
