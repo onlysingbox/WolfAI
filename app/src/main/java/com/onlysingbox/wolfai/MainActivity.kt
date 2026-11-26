@@ -20,6 +20,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -771,8 +774,14 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         }
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("🐺 WOLF AI",style=MaterialTheme.typography.headlineLarge,color=MaterialTheme.colorScheme.onBackground)
-                Text("AGENT  •  دستیار هوشمند شخصی",color=MaterialTheme.colorScheme.secondary)
+                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                    Image(painter=painterResource(R.drawable.wolf_logo), contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
+                    Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                        Text("WOLF AI", style=MaterialTheme.typography.headlineLarge, color=MaterialTheme.colorScheme.onBackground)
+                        Text("YOUR SMART AI AGENT", color=Cyan, style=MaterialTheme.typography.labelMedium)
+                        Text("دستیار هوشمند شخصی", color=MaterialTheme.colorScheme.secondary, style=MaterialTheme.typography.bodySmall)
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween, verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(if(masterEnabled) "WOLF فعال است" else "فعالیت‌های خودکار متوقف است", color=if(masterEnabled) Cyan else Gold, style=MaterialTheme.typography.labelLarge)
