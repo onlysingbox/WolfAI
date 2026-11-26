@@ -25,6 +25,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -883,7 +885,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             )
         }
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
                     val wolfLogoImage = remember(context) {
                         runCatching {
@@ -929,6 +931,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
                     item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false } }
                 }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if(showDeviceTools) {
                     Text("کنترل برنامه‌ها و گوشی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleLarge)
                     Text(deviceStatus,color=Cyan)
@@ -1137,6 +1141,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }
                 } else if(showSettings) {
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("تنظیمات برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
                     Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -1160,6 +1165,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             Text("مجوزها هنگام استفاده از قابلیت مربوطه درخواست می‌شوند. تماس، پیامک و عملیات حساس بدون تأیید مستقیم انجام نمی‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("WOLF AI AGENT • نسخه ${BuildConfig.VERSION_NAME}",color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.labelMedium)
                         }
+                    }
                     }
                 } else if (showContacts) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1401,19 +1407,16 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(
                             value = message,
                             onValueChange = { message = it },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.fillMaxWidth(),
                             enabled = masterEnabled && !busy,
                             label = { Text("با WOLF صحبت کن...") },
                             maxLines = 4
                         )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalIconButton(
                             enabled = masterEnabled && !busy,
                             onClick = {
@@ -1463,8 +1466,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                 }
                             }
                         ) { Icon(Icons.Default.Send, contentDescription = "ارسال پیام") }
+
+                        }
                     }
                     Text("میکروفون فقط با لمس دکمه فعال می‌شود. صدای خام ذخیره نمی‌شود.", color=Color.LightGray, style=MaterialTheme.typography.bodySmall)
+                }
+                    }
                 }
             }
         }
