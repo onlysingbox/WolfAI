@@ -1478,21 +1478,84 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             Text("پاک کردن گفتگو", color = Color(0xFFFF7777))
                         }
                     }
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                        items(chat) { item ->
-                            Card(colors=CardDefaults.cardColors(containerColor=if(item.first=="تو") MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface), shape=RoundedCornerShape(16.dp)) {
-                                Column(Modifier.padding(12.dp)) { Text(item.first, color=Gold); Text(item.second, color=MaterialTheme.colorScheme.onSurface) }
+                    if (chat.isEmpty()) {
+                        Card(
+                            Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+                        ) {
+                            Column(
+                                Modifier.fillMaxWidth().padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Text("سلام، من WOLF هستم.", color = MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.headlineSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                                Text("درخواستت را بنویس. می‌توانم برنامه‌ریزی کنم، تحقیق کنم، فایل‌ها را بررسی کنم و کارها را مرحله‌به‌مرحله با تأیید تو پیش ببرم.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium,
+                                    lineHeight = 23.sp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.fillMaxWidth()) {
+                                    listOf("تحقیق و وب", "مدیریت کارها", "فایل و اسناد").forEach { item ->
+                                        Surface(shape = RoundedCornerShape(50), color = Color(0xFF123C59)) {
+                                            Text(item, Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                                color = Color(0xFF9DE8FF), style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumn(
+                        Modifier.weight(1f).fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(chat) { item ->
+                            val isUser = item.first == "تو"
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                            ) {
+                                Card(
+                                    Modifier.fillMaxWidth(if (isUser) 0.88f else 0.96f),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isUser) Color(0xFF123C59) else MaterialTheme.colorScheme.surface
+                                    ),
+                                    shape = RoundedCornerShape(
+                                        topStart = 19.dp, topEnd = 19.dp,
+                                        bottomEnd = if (isUser) 5.dp else 19.dp,
+                                        bottomStart = if (isUser) 19.dp else 5.dp
+                                    ),
+                                    border = if (isUser) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+                                ) {
+                                    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+                                        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text(if (isUser) "شما" else "WOLF AI",
+                                            color = if (isUser) Color(0xFF79DFFF) else MaterialTheme.colorScheme.primary,
+                                            style = MaterialTheme.typography.labelMedium)
+                                        Text(item.second, color = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Card(
+                        Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(22.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(9.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         OutlinedTextField(
                             value = message,
                             onValueChange = { message = it },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = masterEnabled && !busy,
-                            label = { Text("با WOLF صحبت کن...") },
-                            maxLines = 4
+                            label = { Text("پیامت را برای WOLF بنویس...") },
+                            maxLines = 4,
+                            shape = RoundedCornerShape(16.dp)
                         )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalIconButton(
@@ -1546,8 +1609,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         ) { Icon(Icons.Default.Send, contentDescription = "ارسال پیام") }
 
                         }
+                        }
                     }
-                    Text("میکروفون فقط با لمس دکمه فعال می‌شود. صدای خام ذخیره نمی‌شود.", color=Color.LightGray, style=MaterialTheme.typography.bodySmall)
+                    Text("میکروفون فقط با لمس دکمه فعال می‌شود. صدای خام ذخیره نمی‌شود.",
+                        color=MaterialTheme.colorScheme.onSurfaceVariant, style=MaterialTheme.typography.bodySmall)
                 }
                     }
                 }
