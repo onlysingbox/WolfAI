@@ -2368,7 +2368,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     const name = String(action.args.name || "").trim();
     const description = String(action.args.description || "").trim();
     if (!name || name.length > 120 || description.length > 1500) throw new Error("اطلاعات پروژه معتبر نیست.");
-    const duplicate = await env.DB.prepare("SELECT id FROM projects WHERE lower(name)=lower(?) AND (owner_id=? OR owner_id IS NULL) LIMIT 1").bind(name,String(ownerId)).first();
+    const duplicate = await env.DB.prepare("SELECT id FROM projects WHERE lower(name)=lower(?) AND owner_id=? LIMIT 1").bind(name,String(ownerId)).first();
     if (duplicate) throw new Error("پروژه‌ای با همین نام وجود دارد.");
     const id = crypto.randomUUID();
     await env.DB.prepare("INSERT INTO projects (id,owner_id,name,description,status) VALUES (?,?,?,?, 'active')").bind(id,String(ownerId),name,description || null).run();
@@ -2377,7 +2377,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
   }
   if (action.type === "project.list") {
     if (!ownerId) throw new Error("مالک پروژه‌ها مشخص نیست.");
-    const rows = await env.DB.prepare("SELECT id,name,description,status,created_at,updated_at FROM projects WHERE owner_id=? OR owner_id IS NULL ORDER BY updated_at DESC LIMIT 100").bind(String(ownerId)).all();
+    const rows = await env.DB.prepare("SELECT id,name,description,status,created_at,updated_at FROM projects WHERE owner_id=? ORDER BY updated_at DESC LIMIT 100").bind(String(ownerId)).all();
     return { tool: action.type, read_only: true, projects: rows.results || [] };
   }
   if (action.type === "task.create") {
@@ -2389,7 +2389,7 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     const priority = String(action.args.priority || "normal");
     if (!title || title.length > 180 || description.length > 3000 || !["low","normal","high","urgent"].includes(priority)) throw new Error("اطلاعات وظیفه معتبر نیست.");
     if (projectId) {
-      const project = await env.DB.prepare("SELECT id FROM projects WHERE id=? AND (owner_id=? OR owner_id IS NULL) LIMIT 1").bind(projectId,String(ownerId)).first();
+      const project = await env.DB.prepare("SELECT id FROM projects WHERE id=? AND owner_id=? LIMIT 1").bind(projectId,String(ownerId)).first();
       if (!project) throw new Error("پروژه انتخاب‌شده پیدا نشد.");
     }
     const id = crypto.randomUUID();
