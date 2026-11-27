@@ -39,6 +39,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -489,7 +491,23 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
 @Composable
 private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
-    FilterChip(selected=selected,onClick=onClick,label={Text(label)},shape=RoundedCornerShape(14.dp))
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (selected) Color(0xFF123C59) else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, if (selected) Color(0xFF25C8F4) else MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
+        shadowElevation = if (selected) 3.dp else 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            if (selected) Box(Modifier.size(7.dp).background(Color(0xFF35D5FF), RoundedCornerShape(50)))
+            Text(label, color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelLarge)
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -885,51 +903,111 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             )
         }
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).imePadding().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-                    val wolfLogoImage = remember(context) {
-                        runCatching {
-                            BitmapFactory.decodeResource(context.resources, R.drawable.wolf_logo_photo)?.asImageBitmap()
-                        }.onFailure {
-                            android.util.Log.e("WOLF_IMAGE", "Logo image could not be decoded; using safe fallback", it)
-                        }.getOrNull()
-                    }
-                    if (wolfLogoImage != null) {
-                        Image(bitmap=wolfLogoImage, contentDescription="WOLF AI logo", modifier=Modifier.size(76.dp), contentScale=ContentScale.Fit)
-                    } else {
-                        Text("🐺", modifier=Modifier.size(76.dp), fontSize=42.sp)
-                    }
-                    Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
-                        Text("WOLF AI", style=MaterialTheme.typography.headlineLarge, color=MaterialTheme.colorScheme.onBackground)
-                        Text("YOUR SMART AI AGENT", color=Cyan, style=MaterialTheme.typography.labelMedium)
-                        Text("دستیار هوشمند شخصی", color=MaterialTheme.colorScheme.secondary, style=MaterialTheme.typography.bodySmall)
+            Column(
+                Modifier.fillMaxSize().padding(padding).imePadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(26.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 5.dp)
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(Brush.linearGradient(listOf(Color(0xFF071426), Color(0xFF123B59), Color(0xFF0A2238))))
+                            .padding(horizontal = 18.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        val wolfLogoImage = remember(context) {
+                            runCatching { BitmapFactory.decodeResource(context.resources, R.drawable.wolf_logo_photo)?.asImageBitmap() }
+                                .onFailure { android.util.Log.e("WOLF_IMAGE", "Logo image could not be decoded; using safe fallback", it) }
+                                .getOrNull()
+                        }
+                        Box(
+                            Modifier.size(68.dp).background(Color(0xFF183D59), RoundedCornerShape(21.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (wolfLogoImage != null) {
+                                Image(bitmap = wolfLogoImage, contentDescription = "WOLF AI logo",
+                                    modifier = Modifier.size(60.dp), contentScale = ContentScale.Fit)
+                            } else Text("🐺", fontSize = 37.sp)
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("WOLF AI", color = Color.White, style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold)
+                            Text("PERSONAL AI AGENT", color = Color(0xFF4BD7FF),
+                                style = MaterialTheme.typography.labelMedium, letterSpacing = 1.5.sp)
+                            Text("دستیار هوشمند شخصی", color = Color(0xFFD5E5F2),
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        Surface(shape = RoundedCornerShape(50), color = Color(0x3328D7A0),
+                            border = BorderStroke(1.dp, Color(0x6655E2B0))) {
+                            Text("PRIVATE", Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                color = Color(0xFF80F0C2), style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween, verticalAlignment=Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(if(masterEnabled) "WOLF فعال است" else "فعالیت‌های خودکار متوقف است", color=if(masterEnabled) Cyan else Gold, style=MaterialTheme.typography.labelLarge)
-                        Text(status, color=MaterialTheme.colorScheme.onSurfaceVariant, style=MaterialTheme.typography.bodySmall, maxLines=1)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            Modifier.size(10.dp).background(
+                                if (masterEnabled) Color(0xFF35D6A0) else Gold,
+                                RoundedCornerShape(50)
+                            )
+                        )
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(if (masterEnabled) "دستیار آماده است" else "فعالیت‌های خودکار متوقف است",
+                                color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
+                            Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                masterEnabled = !masterEnabled
+                                storagePrefs.safeEdit { putBoolean("master_enabled", masterEnabled) }
+                                if (!masterEnabled) { activeRequest?.cancel(); activeRequest = null; busy = false; status = "WOLF خاموش شد" }
+                                else status = "WOLF فعال شد"
+                                if (paired) scope.launch {
+                                    runCatching { setRemoteMaster(masterEnabled) }
+                                        .onFailure { status = "همگام‌سازی ناموفق: ${it.message}" }
+                                }
+                            },
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = if (masterEnabled) Color(0xFF542D37) else Color(0xFF15533F),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = PaddingValues(horizontal = 15.dp, vertical = 9.dp)
+                        ) { Text(if (masterEnabled) "توقف" else "فعال‌سازی") }
                     }
-                    Button(onClick={
-                        masterEnabled=!masterEnabled
-                        storagePrefs.safeEdit { putBoolean("master_enabled", masterEnabled) }
-                        if(!masterEnabled){activeRequest?.cancel();activeRequest=null;busy=false;status="WOLF خاموش شد"} else status="WOLF فعال شد"
-                        if (paired) scope.launch { runCatching { setRemoteMaster(masterEnabled) }.onFailure { status="همگام‌سازی ناموفق: ${it.message}" } }
-                    }, colors=ButtonDefaults.buttonColors(containerColor=if(masterEnabled) Color(0xFF9B3030) else Color(0xFF16734B))) { Text(if(masterEnabled) "خاموش" else "فعال‌سازی") }
                 }
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(vertical=4.dp)) {
-                    item { NavigationChip("گفتگو",!showStorage&&!showContacts&&!showDeviceTools&&!showModels&&!showMissions&&!showSettings) { showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("مخاطبین",showContacts) { showContacts=true;showStorage=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false; if(context.checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts=it;contactsStatus="${it.size} شماره مخاطب خوانده شد." }.onFailure { contactsStatus=it.message ?: "خطا در خواندن مخاطبین" } } else contactsPermission.launch(Manifest.permission.READ_CONTACTS) } }
-                    item { NavigationChip("ابزارهای گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false } }
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(vertical = 2.dp)
+                ) {
+                    item { NavigationChip("گفتگو",!showStorage&&!showContacts&&!showDeviceTools&&!showModels&&!showMissions&&!showSettings&&!showNotifications&&!showPlanner&&!showFiles) { showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
+                    item { NavigationChip("مخاطبین",showContacts) { showContacts=true;showStorage=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false; if(context.checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts=it;contactsStatus="${it.size} شماره مخاطب خوانده شد." }.onFailure { contactsStatus=it.message ?: "خطا در خواندن مخاطبین" } } else contactsPermission.launch(Manifest.permission.READ_CONTACTS) } }
+                    item { NavigationChip("ابزار گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
                     if (paired) {
-                        item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
-                        item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false } }
+                        item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
+                        item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
                     }
                     item { NavigationChip("اعلان‌ها",showNotifications) { showNotifications=true;showPlanner=false;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("تقویم و یادآور",showPlanner) { showPlanner=true;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false } }
-                    item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false } }
+                    item { NavigationChip("تقویم",showPlanner) { showPlanner=true;showFiles=false;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false } }
+                    item { NavigationChip("فایل‌ها",showFiles) { showFiles=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false } }
+                    item { NavigationChip("حافظه",showStorage) { showStorage=true;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
+                    item { NavigationChip("تنظیمات",showSettings) { showSettings=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showNotifications=false;showPlanner=false;showFiles=false } }
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
