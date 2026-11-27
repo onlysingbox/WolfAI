@@ -176,3 +176,24 @@ test("validates task priority and deadline in owner-approved actions", () => {
     type: "task.create", args: { title: "Bad", priority: "critical" }
   }));
 });
+
+test("allows updating a task deadline and priority without changing status", () => {
+  const action = validateCompanionAction("personal_operations", {
+    type: "task.update",
+    args: {
+      id: "00000000-0000-4000-8000-000000000001",
+      due_at: "2030-06-01T12:00:00+03:30",
+      priority: "high"
+    }
+  });
+  assert.equal(action.args.due_at, "2030-06-01T08:30:00.000Z");
+  assert.equal(action.args.priority, "high");
+  assert.equal(action.args.status, undefined);
+});
+
+test("rejects task updates that contain no actual changes", () => {
+  assert.throws(() => validateCompanionAction("personal_operations", {
+    type: "task.update",
+    args: { id: "00000000-0000-4000-8000-000000000001" }
+  }));
+});
