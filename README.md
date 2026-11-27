@@ -27,7 +27,8 @@ These are product targets, not a claim that every connector or action is already
 - Natural-language Telegram chat; slash commands are optional for normal conversation
 - Conversation history stored in D1
 - Owner-scoped personal projects and task lists, with explicit approval for create/update operations
-- One-time reminders with timezone validation, owner approval, scheduled delivery through Telegram, and delivery/failure status tracking
+- Tasks support optional timezone-aware deadlines and four priority levels
+- One-time and recurring daily/weekly/monthly reminders with timezone-aware scheduling, owner approval, scheduled Telegram delivery, and delivery/failure status tracking
 - Owner-approved private long-term memory stored in D1, injected into relevant future conversations, searchable through natural language and `/memory`
 - Response language setting: automatic, always English, or always Persian
 - Approval-first operation model for external actions
@@ -35,7 +36,7 @@ These are product targets, not a claim that every connector or action is already
 
 ## Agent platform data layer
 
-Migrations `migrations/0002_agent_platform.sql` and `migrations/0003_project_owner_scope.sql` add durable storage for:
+Migrations `migrations/0002_agent_platform.sql`, `migrations/0003_project_owner_scope.sql`, and `migrations/0004_task_due_priority.sql` add durable storage for:
 - Multi-step agent runs and individual steps
 - Connected-service integration metadata and status
 - Verified contacts and recipient identifiers
