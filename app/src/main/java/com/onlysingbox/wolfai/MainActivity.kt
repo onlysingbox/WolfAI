@@ -521,6 +521,16 @@ private fun WolfPageHeader(title: String, subtitle: String, eyebrow: String = "W
 }
 
 @Composable
+private fun WolfSectionLabel(title: String) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+        Box(Modifier.width(4.dp).height(20.dp).background(Color(0xFF28C9F4), RoundedCornerShape(4.dp)))
+        Text(title, color = MaterialTheme.colorScheme.onSurface,
+            style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+    }
+}
+
+@Composable
 private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
     Surface(
         onClick = onClick,
@@ -1045,7 +1055,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 if(showDeviceTools) {
                     WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
                     Text(deviceStatus,color=Cyan)
-                    Text("تنظیم هشدار",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    WolfSectionLabel("تنظیم هشدار")
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                         OutlinedTextField(alarmHour,{alarmHour=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("ساعت")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
                         OutlinedTextField(alarmMinute,{alarmMinute=it.filter(Char::isDigit).take(2)},modifier=Modifier.weight(1f),label={Text("دقیقه")},singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Number))
@@ -1055,7 +1065,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }) { Text("تنظیم") }
                     }
                     HorizontalDivider()
-                    Text("برنامه‌های نصب‌شده",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    WolfSectionLabel("برنامه‌های نصب‌شده")
                     OutlinedTextField(appSearch,{appSearch=it},modifier=Modifier.fillMaxWidth(),label={Text("جست‌وجوی برنامه")},singleLine=true)
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                         items(launchableApps.filter{it.loadLabel(context.packageManager).toString().contains(appSearch,true)}) { app ->
@@ -1126,7 +1136,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     },modifier=Modifier.fillMaxWidth()){Text("افزودن رویداد به تقویم")}
                     OutlinedButton(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))},modifier=Modifier.fillMaxWidth()){Text("تنظیم دسترسی اعلان‌ها")}
                     HorizontalDivider()
-                    Text("رویدادهای تقویم",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                    WolfSectionLabel("رویدادهای تقویم")
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
                         Button(onClick={
                             if(context.checkSelfPermission(Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED) {
@@ -1227,7 +1237,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }
                     if(previewText.isNotBlank()) {
-                        Text("پیش‌نمایش متن",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
+                        WolfSectionLabel("پیش‌نمایش متن")
                         Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surfaceVariant)) {
                             Column(Modifier.fillMaxWidth().padding(12.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(value=previewText,onValueChange={previewText=it},modifier=Modifier.fillMaxWidth(),minLines=5,maxLines=14,label={Text("متن استخراج‌شده")})
@@ -1310,7 +1320,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items((0 until missions.length()).map { missions.getJSONObject(it) }) { mission ->
                             val plan = mission.optJSONObject("plan") ?: JSONObject()
-                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
                                     Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
@@ -1411,7 +1421,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = Color.LightGray)
 
                     HorizontalDivider(color = Color(0xFF33445E))
-                    Text("یادداشت‌های شخصی", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    WolfSectionLabel("یادداشت‌های شخصی")
                     Text(noteStatus, color = Cyan, style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(value = noteTitle, onValueChange = { noteTitle = it }, modifier = Modifier.fillMaxWidth(), label = { Text("عنوان یادداشت") }, singleLine = true)
                     OutlinedTextField(value = noteBody, onValueChange = { noteBody = it }, modifier = Modifier.fillMaxWidth(), label = { Text("متن یادداشت") }, minLines = 3, maxLines = 6)
@@ -1463,7 +1473,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         items(storageBuckets) { bucket ->
                             val (key, pair) = bucket
                             val (label, dir) = pair
-                            Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
                                 Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(label, color = Color.White)
