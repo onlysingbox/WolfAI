@@ -608,14 +608,49 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var deviceStatus by remember { mutableStateOf("اجرای برنامه‌ها و تنظیم هشدار گوشی") }
     val launchableApps = remember(showDeviceTools) { if (!showDeviceTools) emptyList() else context.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).distinctBy { it.activityInfo.packageName }.sortedBy { it.loadLabel(context.packageManager).toString().lowercase() } }
     var pendingCallNumber by remember { mutableStateOf<String?>(null) }
+    var pendingCallType by remember { mutableStateOf("phone") }
+    var pendingCallLabel by remember { mutableStateOf("") }
     val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val number = pendingCallNumber
         pendingCallNumber = null
         if (granted && !number.isNullOrBlank()) {
             runCatching { context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))) }
-                .onSuccess { status = "تماس برقرار شد یا در حال برقراری است." }
+                .onSuccess { status = "درخواست شماره‌گیری به اندروید ارسال شد؛ پاسخ‌گویی مخاطب تأیید نشده است." }
                 .onFailure { status = "شروع تماس ناموفق بود: ${it.message}" }
         } else if (!granted) status = "مجوز تماس داده نشد؛ تماس برقرار نشد."
+    }
+    fun confirmPendingCall() {
+        val number = pendingCallNumber ?: return
+        val type = pendingCallType
+        pendingCallNumber = null
+        pendingCallType = "phone"
+        pendingCallLabel = ""
+        when (type) {
+            "whatsapp" -> {
+                val digits = number.filter { it.isDigit() }
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")).setPackage("com.whatsapp")
+                runCatching { context.startActivity(intent) }
+                    .onSuccess { status = "گفتگوی واتساپ باز شد؛ برای شروع تماس، دکمه تماس را خودت در واتساپ بزن." }
+                    .onFailure { status = "بازکردن واتساپ ناموفق بود: ${it.message}" }
+            }
+            "telegram" -> {
+                val digits = number.filter { it.isDigit() }
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?phone=$digits")).setPackage("org.telegram.messenger")
+                runCatching { context.startActivity(intent) }
+                    .onSuccess { status = "مخاطب تلگرام باز شد؛ برای شروع تماس، دکمه تماس را خودت در تلگرام بزن." }
+                    .onFailure { status = "بازکردن تلگرام ناموفق بود: ${it.message}" }
+            }
+            else -> {
+                if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number)))) }
+                        .onSuccess { status = "درخواست شماره‌گیری به اندروید ارسال شد؛ پاسخ‌گویی مخاطب تأیید نشده است." }
+                        .onFailure { status = "شروع تماس ناموفق بود: ${it.message}" }
+                } else {
+                    pendingCallNumber = number
+                    callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+                }
+            }
+        }
     }
     var contacts by remember { mutableStateOf<List<Pair<String,String>>>(emptyList()) }
     var contactSearch by remember { mutableStateOf("") }
@@ -717,18 +752,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. برای تماس تلگرام، شماره مخاطب یا نام ذخیره‌شده‌اش لازم است."
             val digits = number.filter { it.isDigit() }
             val telegram = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?phone=$digits")).setPackage("org.telegram.messenger")
-            if (telegram.resolveActivity(context.packageManager) == null) return "تلگرام اصلی نصب نیست یا پیوند تماس را پشتیبانی نمی‌کند."
-            context.startActivity(telegram)
-            scope.launch {
-                kotlinx.coroutines.delay(2200)
-                val service = WolfAccessibilityService.active
-                val clicked = service?.clickVisibleTextExact("Voice Call") == true ||
-                    service?.clickVisibleTextExact("Voice call") == true ||
-                    service?.clickVisibleTextExact("تماس صوتی") == true
-                status = if (clicked) "گزینه تماس تلگرام انتخاب شد؛ وضعیت برقراری تماس را در خود تلگرام بررسی کن."
-                    else "مخاطب تلگرام باز شد، اما دکمه تماس به‌صورت امن و قابل‌تشخیص پیدا نشد."
-            }
-            return "مخاطب تلگرام باز شد؛ در حال بررسی گزینه تماس."
+            if (telegram.resolveActivity(context.packageManager) == null) return "تلگرام اصلی نصب نیست یا پیوند مخاطب را پشتیبانی نمی‌کند."
+            pendingCallNumber = number
+            pendingCallType = "telegram"
+            pendingCallLabel = "تماس تلگرام با شماره $number"
+            return "درخواست آماده است؛ برای بازکردن مخاطب تلگرام و ادامه تماس باید آن را تأیید کنی."
         }
         if (isWhatsappCall && callIntent) {
             val target = raw.substringAfter("به ", raw.substringAfter("با واتساپ", raw.substringAfter("با whatsapp", ""))).replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
@@ -737,28 +765,19 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val digits = number.filter { it.isDigit() }
             val wa = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")).setPackage("com.whatsapp")
             if (wa.resolveActivity(context.packageManager) == null) return "واتساپ نصب نیست یا لینک مخاطب را باز نمی‌کند."
-            context.startActivity(wa)
-            scope.launch {
-                kotlinx.coroutines.delay(1800)
-                val service = WolfAccessibilityService.active
-                val clicked = service?.clickVisibleTextExact("Voice call") == true ||
-                    service?.clickVisibleTextExact("Voice Call") == true ||
-                    service?.clickVisibleTextExact("تماس صوتی") == true
-                status = if (clicked) "دکمه تماس واتساپ انتخاب شد؛ اگر واتساپ تأیید دیگری خواست آن را بررسی کن." else "گفتگوی مخاطب در واتساپ باز شد؛ دکمه تماس در این نسخه خودکار پیدا نشد."
-            }
-            return "گفتگوی مخاطب در واتساپ باز شد؛ در حال بررسی دکمه تماس."
+            pendingCallNumber = number
+            pendingCallType = "whatsapp"
+            pendingCallLabel = "تماس واتساپ با شماره $number"
+            return "درخواست آماده است؛ برای بازکردن گفتگوی واتساپ و ادامه تماس باید آن را تأیید کنی."
         }
         if (callIntent) {
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
                 ?: raw.substringAfter("با ", raw.substringAfter("به ", "")).let { findPhoneNumberByName(it.replace("زنگ بزن", "").replace("تماس بگیر", "").trim()) }
             if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام یا شماره را دقیق بنویس و مجوز مخاطبین را فعال کن."
-            if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-                context.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(number))))
-                return "درخواست تماس مستقیم ارسال شد."
-            }
             pendingCallNumber = number
-            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
-            return "برای برقراری تماس مستقیم، مجوز تماس اندروید درخواست شد."
+            pendingCallType = "phone"
+            pendingCallLabel = "تماس تلفنی مستقیم با شماره $number"
+            return "درخواست تماس آماده است؛ پیش از شماره‌گیری، جزئیات را تأیید کن."
         }
         if (command.contains("خواندن صفحه") || command.contains("متن صفحه") || command.contains("read screen")) {
             val service = WolfAccessibilityService.active ?: return "برای خواندن صفحه، ابتدا دسترسی کنترل پیشرفته WOLF را در تنظیمات فعال کن."
@@ -941,6 +960,40 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }) { Text("پاک کردن", color = Color(0xFFFF7777)) }
                 },
                 dismissButton = { TextButton(onClick = { showClearChatConfirm = false }) { Text("انصراف") } }
+            )
+        }
+        if (!pendingCallNumber.isNullOrBlank()) {
+            AlertDialog(
+                onDismissRequest = {
+                    pendingCallNumber = null
+                    pendingCallType = "phone"
+                    pendingCallLabel = ""
+                    status = "درخواست تماس لغو شد؛ هیچ تماسی آغاز نشد."
+                },
+                title = { Text("تأیید تماس") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(pendingCallLabel)
+                        Text(
+                            if (pendingCallType == "phone")
+                                "با تأیید، اندروید درخواست شماره‌گیری مستقیم را اجرا می‌کند. تماس فقط پس از اجازه سیستم آغاز می‌شود."
+                            else
+                                "با تأیید، فقط مخاطب در برنامه مربوط باز می‌شود. شروع تماس را باید خودت داخل همان برنامه انجام دهی.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { confirmPendingCall() }) { Text("تأیید و ادامه") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingCallNumber = null
+                        pendingCallType = "phone"
+                        pendingCallLabel = ""
+                        status = "درخواست تماس لغو شد؛ هیچ تماسی آغاز نشد."
+                    }) { Text("لغو") }
+                }
             )
         }
         Scaffold(containerColor=MaterialTheme.colorScheme.background) { padding ->
