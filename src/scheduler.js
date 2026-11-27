@@ -101,3 +101,14 @@ export function nextReminderRunAt(repeat, previousRunAt, timezone = "UTC", now =
   }
   throw new Error("محاسبه زمان بعدی یادآوری از محدوده مجاز خارج شد.");
 }
+
+export function normalizeTaskDueAt(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  if (!/(?:Z|[+-](?:(?:0\\d|1[0-3]):[0-5]\\d|14:00))$/i.test(text)) {
+    throw new Error("مهلت وظیفه باید ISO 8601 همراه با منطقه زمانی یا اختلاف UTC باشد.");
+  }
+  const timestamp = Date.parse(text);
+  if (!Number.isFinite(timestamp)) throw new Error("مهلت وظیفه معتبر نیست.");
+  return new Date(timestamp).toISOString();
+}
