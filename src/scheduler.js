@@ -105,7 +105,7 @@ export function nextReminderRunAt(repeat, previousRunAt, timezone = "UTC", now =
 export function normalizeTaskDueAt(value) {
   const text = String(value || "").trim();
   if (!text) return null;
-  if (!/(?:Z|[+-](?:(?:0\\d|1[0-3]):[0-5]\\d|14:00))$/i.test(text)) {
+  if (!/(?:Z|[+-](?:(?:0\d|1[0-3]):[0-5]\d|14:00))$/i.test(text)) {
     throw new Error("مهلت وظیفه باید ISO 8601 همراه با منطقه زمانی یا اختلاف UTC باشد.");
   }
   const timestamp = Date.parse(text);
