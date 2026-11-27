@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeReminderSchedule, isReminderDue, formatReminderText, nextReminderRunAt } from "../src/scheduler.js";
+import { normalizeReminderSchedule, isReminderDue, formatReminderText, nextReminderRunAt, normalizeTaskDueAt } from "../src/scheduler.js";
 
 test("normalizes a future reminder and timezone", () => {
   const result = normalizeReminderSchedule({
@@ -154,4 +154,25 @@ test("calculates monthly reminders without overflowing short months", () => {
 
 test("one-time reminders do not get rescheduled", () => {
   assert.equal(nextReminderRunAt("once", "2030-01-01T10:00:00Z", "UTC"), null);
+});
+
+test("normalizes task deadlines with an explicit UTC offset", () => {
+  assert.equal(normalizeTaskDueAt("2030-05-01T10:30:00+02:00"), "2030-05-01T08:30:00.000Z");
+  assert.equal(normalizeTaskDueAt(undefined), null);
+});
+
+test("rejects task deadlines without an explicit timezone", () => {
+  assert.throws(() => normalizeTaskDueAt("2030-05-01T10:30:00"));
+});
+
+test("validates task priority and deadline in owner-approved actions", () => {
+  const action = validateCompanionAction("personal_operations", {
+    type: "task.create",
+    args: { title: "Submit report", due_at: "2030-05-01T10:30:00Z", priority: "urgent" }
+  });
+  assert.equal(action.args.due_at, "2030-05-01T10:30:00.000Z");
+  assert.equal(action.args.priority, "urgent");
+  assert.throws(() => validateCompanionAction("personal_operations", {
+    type: "task.create", args: { title: "Bad", priority: "critical" }
+  }));
 });
