@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeReminderSchedule, isReminderDue, formatReminderText } from "../src/scheduler.js";
+import { normalizeReminderSchedule, isReminderDue, formatReminderText, nextReminderRunAt } from "../src/scheduler.js";
 
 test("normalizes a future reminder and timezone", () => {
   const result = normalizeReminderSchedule({
@@ -126,4 +126,32 @@ test("rejects invalid ISO 8601 UTC offsets", () => {
 test("allows project and task listing as read-only personal operations", () => {
   assert.equal(validateCompanionAction("personal_operations", { type: "project.list", args: {} }).type, "project.list");
   assert.equal(validateCompanionAction("personal_operations", { type: "task.list", args: { status: "open" } }).args.status, "open");
+});
+
+test("normalizes recurring reminder intervals", () => {
+  const result = normalizeReminderSchedule({
+    title: "Daily check", message: "Review tasks",
+    due_at: "2030-05-01T09:00:00-04:00", timezone: "America/New_York", repeat: "daily"
+  }, Date.parse("2030-01-01T00:00:00Z"));
+  assert.equal(result.repeat, "daily");
+});
+
+test("rejects unsupported reminder repeat intervals", () => {
+  assert.throws(() => normalizeReminderSchedule({
+    title: "Bad", message: "Bad", due_at: "2030-05-01T10:00:00Z", repeat: "hourly"
+  }, Date.parse("2030-01-01T00:00:00Z")));
+});
+
+test("calculates the next daily reminder in its local timezone across DST", () => {
+  const next = nextReminderRunAt("daily", "2030-03-09T14:00:00.000Z", "America/New_York", Date.parse("2030-03-09T14:00:00.000Z"));
+  assert.equal(next, "2030-03-10T13:00:00.000Z");
+});
+
+test("calculates monthly reminders without overflowing short months", () => {
+  const next = nextReminderRunAt("monthly", "2030-01-31T10:00:00.000Z", "UTC", Date.parse("2030-01-31T10:00:00.000Z"));
+  assert.equal(next, "2030-02-28T10:00:00.000Z");
+});
+
+test("one-time reminders do not get rescheduled", () => {
+  assert.equal(nextReminderRunAt("once", "2030-01-01T10:00:00Z", "UTC"), null);
 });
