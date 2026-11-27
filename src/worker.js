@@ -1109,7 +1109,6 @@ function validateCompanionAction(capability, action) {
           (hasPriority && !["low","normal","high","urgent"].includes(priority))) throw new Error("شناسه یا اطلاعات تغییر وظیفه معتبر نیست.");
       return { type: "task.update", args: { id, status: hasStatus ? status : undefined, due_at, priority: hasPriority ? priority : undefined } };
     }
-    }
   }
   if (capability === "scheduling" && action?.type === "schedule.list") return validateCompanionReadOnlyAction(capability, action);
   if (capability === "scheduling" && action?.type === "schedule.cancel") {
