@@ -1,4 +1,4 @@
-import { normalizeReminderSchedule, isReminderDue, formatReminderText, nextReminderRunAt } from "./scheduler.js";
+import { normalizeReminderSchedule, isReminderDue, formatReminderText, nextReminderRunAt, normalizeTaskDueAt } from "./scheduler.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), {
   status,
@@ -1085,12 +1085,14 @@ function validateCompanionAction(capability, action) {
     }
     if (action?.type === "task.create") {
       const args = action.args || {};
-      if (Object.keys(args).some(key => !["title","description","project_id"].includes(key))) throw new Error("پارامتر اضافی وظیفه مجاز نیست.");
+      if (Object.keys(args).some(key => !["title","description","project_id","due_at","priority"].includes(key))) throw new Error("پارامتر اضافی وظیفه مجاز نیست.");
       const title = String(args.title || "").trim();
       const description = String(args.description || "").trim();
       const project_id = String(args.project_id || "").trim();
-      if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id))) throw new Error("عنوان یا اطلاعات وظیفه معتبر نیست.");
-      return { type: "task.create", args: { title, description, project_id: project_id || null } };
+      const priority = String(args.priority || "normal").trim();
+      const due_at = normalizeTaskDueAt(args.due_at);
+      if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id)) || !["low","normal","high","urgent"].includes(priority)) throw new Error("عنوان، توضیح، شناسه پروژه یا اولویت معتبر نیست.");
+      return { type: "task.create", args: { title, description, project_id: project_id || null, due_at, priority } };
     }
     if (action?.type === "task.update") {
       const args = action.args || {};
@@ -1423,7 +1425,7 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "schedule_cancel", description: "Cancel one active reminder by its exact ID. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
     { type: "function", function: { name: "project_create", description: "Create a personal project in WOLF AI. Requires owner approval.", parameters: { type: "object", properties: { name: { type: "string" }, description: { type: "string" } }, required: ["name"] } } },
     { type: "function", function: { name: "project_list", description: "List personal projects. Read-only.", parameters: { type: "object", properties: {}, required: [] } } },
-    { type: "function", function: { name: "task_create", description: "Create a personal task, optionally linked to a project. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, description: { type: "string" }, project_id: { type: "string" } }, required: ["title"] } } },
+    { type: "function", function: { name: "task_create", description: "Create a personal task with optional project, ISO 8601 deadline and priority. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, description: { type: "string" }, project_id: { type: "string" }, due_at: { type: "string", description: "ISO 8601 with explicit UTC offset or Z" }, priority: { type: "string", enum: ["low","normal","high","urgent"] } }, required: ["title"] } } },
     { type: "function", function: { name: "task_list", description: "List personal tasks, optionally filtered by status or project. Read-only.", parameters: { type: "object", properties: { status: { type: "string", enum: ["open","in_progress","done","cancelled"] }, project_id: { type: "string" } }, required: [] } } },
     { type: "function", function: { name: "task_update", description: "Change the status of one personal task. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["open","in_progress","done","cancelled"] } }, required: ["id","status"] } } },
   ];
@@ -1533,12 +1535,14 @@ function mapWolfToolCall(call) {
     return { type: "project.list", args: {} };
   }
   if (name === "task_create") {
-    if (Object.keys(args).some(key => !["title","description","project_id"].includes(key))) throw new Error("پارامتر اضافی برای وظیفه مجاز نیست.");
+    if (Object.keys(args).some(key => !["title","description","project_id","due_at","priority"].includes(key))) throw new Error("پارامتر اضافی برای وظیفه مجاز نیست.");
     const title = String(args.title || "").trim();
     const description = String(args.description || "").trim();
     const project_id = String(args.project_id || "").trim();
-    if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id))) throw new Error("عنوان، توضیح یا شناسه پروژه معتبر نیست.");
-    return { type: "task.create", args: { title, description, project_id: project_id || null } };
+    const priority = String(args.priority || "normal").trim();
+    const due_at = normalizeTaskDueAt(args.due_at);
+    if (!title || title.length > 180 || description.length > 3000 || (project_id && !/^[0-9a-f-]{36}$/i.test(project_id)) || !["low","normal","high","urgent"].includes(priority)) throw new Error("عنوان، توضیح، شناسه پروژه یا اولویت معتبر نیست.");
+    return { type: "task.create", args: { title, description, project_id: project_id || null, due_at, priority } };
   }
   if (name === "task_list") {
     if (Object.keys(args).some(key => !["status","project_id"].includes(key))) throw new Error("پارامتر اضافی برای فهرست وظایف مجاز نیست.");
@@ -2381,21 +2385,23 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
     const title = String(action.args.title || "").trim();
     const description = String(action.args.description || "").trim();
     const projectId = action.args.project_id || null;
-    if (!title || title.length > 180 || description.length > 3000) throw new Error("اطلاعات وظیفه معتبر نیست.");
+    const dueAt = normalizeTaskDueAt(action.args.due_at);
+    const priority = String(action.args.priority || "normal");
+    if (!title || title.length > 180 || description.length > 3000 || !["low","normal","high","urgent"].includes(priority)) throw new Error("اطلاعات وظیفه معتبر نیست.");
     if (projectId) {
       const project = await env.DB.prepare("SELECT id FROM projects WHERE id=? AND (owner_id=? OR owner_id IS NULL) LIMIT 1").bind(projectId,String(ownerId)).first();
       if (!project) throw new Error("پروژه انتخاب‌شده پیدا نشد.");
     }
     const id = crypto.randomUUID();
-    await env.DB.prepare("INSERT INTO tasks (id,title,description,project_id,status,risk_level,requested_by) VALUES (?,?,?,?, 'open','low',?)")
-      .bind(id,title,description || null,projectId,String(ownerId)).run();
-    await log(env, ownerId, "task.personal_created", "task", id, { title, project_id: projectId });
-    return { tool: action.type, read_only: false, task_id: id, title, status: "open", project_id: projectId };
+    await env.DB.prepare("INSERT INTO tasks (id,title,description,project_id,status,risk_level,requested_by,due_at,priority) VALUES (?,?,?,?, 'open','low',?,?,?)")
+      .bind(id,title,description || null,projectId,String(ownerId),dueAt,priority).run();
+    await log(env, ownerId, "task.personal_created", "task", id, { title, project_id: projectId, due_at: dueAt, priority });
+    return { tool: action.type, read_only: false, task_id: id, title, status: "open", project_id: projectId, due_at: dueAt, priority };
   }
   if (action.type === "task.list") {
     if (!ownerId) throw new Error("مالک وظایف مشخص نیست.");
     const rows = await env.DB.prepare(
-      "SELECT t.id,t.title,t.description,t.status,t.project_id,p.name AS project_name,t.created_at,t.updated_at FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.requested_by=? AND t.status IN ('open','in_progress','done','cancelled') AND (? IS NULL OR t.status=?) AND (? IS NULL OR t.project_id=?) ORDER BY t.updated_at DESC LIMIT 100"
+      "SELECT t.id,t.title,t.description,t.status,t.project_id,p.name AS project_name,t.due_at,t.priority,t.created_at,t.updated_at FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.requested_by=? AND t.status IN ('open','in_progress','done','cancelled') AND (? IS NULL OR t.status=?) AND (? IS NULL OR t.project_id=?) ORDER BY t.updated_at DESC LIMIT 100"
     ).bind(String(ownerId),action.args.status || null,action.args.status || null,action.args.project_id || null,action.args.project_id || null).all();
     return { tool: action.type, read_only: true, tasks: rows.results || [] };
   }
