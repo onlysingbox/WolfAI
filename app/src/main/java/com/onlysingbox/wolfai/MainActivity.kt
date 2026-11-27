@@ -490,6 +490,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 }
 
 @Composable
+private fun WolfPageHeader(title: String, subtitle: String, eyebrow: String = "WOLF AI WORKSPACE") {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(46.dp).background(Color(0xFF123C59), RoundedCornerShape(15.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✦", color = Color(0xFF55D9FF), style = MaterialTheme.typography.headlineSmall)
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(eyebrow, color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp)
+                Text(title, color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall, lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
 private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
     Surface(
         onClick = onClick,
@@ -1012,7 +1043,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if(showDeviceTools) {
-                    Text("کنترل برنامه‌ها و گوشی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleLarge)
+                    WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
                     Text(deviceStatus,color=Cyan)
                     Text("تنظیم هشدار",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -1043,7 +1074,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("بازکردن تنظیمات VPN به معنی روشن‌شدن تونل نیست؛ اتصال واقعی به API رسمی سرویس نیاز دارد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 }
                 else if(showNotifications) {
-                    Text("صندوق اعلان‌های گوشی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    WolfPageHeader("اعلان‌های گوشی","اعلان‌های دریافت‌شده را در یک نمای مرتب بررسی کن","NOTIFICATIONS")
                     Text("اعلان‌های جدید پس از فعال‌سازی دسترسی، فقط روی همین دستگاه نمایش داده می‌شوند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                         Button(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))}){Text("فعال‌سازی دسترسی")}
@@ -1067,7 +1098,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     Text("این بخش تاریخچه پیام‌های خصوصی را از برنامه‌ها استخراج نمی‌کند؛ فقط اعلان‌هایی را می‌بیند که اندروید پس از فعال‌سازی دسترسی به WOLF تحویل می‌دهد.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                 } else if(showPlanner) {
-                    Text("تقویم و برنامه‌ریزی",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    WolfPageHeader("تقویم و برنامه‌ریزی","ساخت رویداد و مرور برنامه‌های ثبت‌شده در گوشی","CALENDAR")
                     Text("عنوان، تاریخ، ساعت و مکان را مشخص کن. ذخیره نهایی در تقویم گوشی فقط پس از تأیید خودت انجام می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     OutlinedTextField(eventTitle,{eventTitle=it},modifier=Modifier.fillMaxWidth(),label={Text("عنوان رویداد")},singleLine=true)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -1127,7 +1158,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("WOLF فقط رویدادهای ۷ روز گذشته تا ۹۰ روز آینده را می‌خواند؛ هیچ رویدادی را تغییر یا حذف نمی‌کند.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Text(plannerStatus,color=MaterialTheme.colorScheme.primary)
                 } else if(showFiles) {
-                    Text("مدیریت فایل‌ها و اسناد",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    WolfPageHeader("فایل‌ها و اسناد","ورود، خواندن، ویرایش و خروجی گرفتن از فایل‌های شخصی","DOCUMENTS")
                     Text("PDF، Word، Excel، تصویر، صوت و فایل‌های متنی را وارد کن. فایل اصلی در فضای خصوصی WOLF کپی می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
                     Text(fileStatus,color=MaterialTheme.colorScheme.primary)
@@ -1220,7 +1251,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                 } else if(showSettings) {
                     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("تنظیمات برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.headlineSmall)
+                    WolfPageHeader("تنظیمات WOLF","ظاهر، مجوزها و کنترل‌های حریم خصوصی برنامه","PREFERENCES")
                     Card(Modifier.fillMaxWidth(),colors=CardDefaults.cardColors(containerColor=MaterialTheme.colorScheme.surface)) {
                         Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                             Text("ظاهر برنامه",color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.titleMedium)
@@ -1269,7 +1300,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("WOLF فقط شماره‌ها را می‌خواند؛ تماس و پیامک در برنامه پیش‌فرض گوشی باز می‌شوند و ارسال خودکار انجام نمی‌شود.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
                 } else if (showMissions) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("مأموریت‌های WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                        WolfPageHeader("مأموریت‌های هوشمند","درخواست‌های چندمرحله‌ای را بررسی و با تأیید خودت اجرا کن","MISSIONS")
                         TextButton(onClick = { showMissions = false }) { Text("بازگشت") }
                     }
                     Text("طرح‌ها و مراحل در این صفحه قابل خواندن و پیمایش هستند. هیچ اقدام بیرونی بدون تأیید تو اجرا نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodyMedium)
@@ -1332,7 +1363,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                     }
                 } else if (showModels) {
-                    Text("انتخاب موتور", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    WolfPageHeader("موتورهای هوش مصنوعی","وضعیت اتصال و موتور فعال را مدیریت کن","AI ENGINES")
                     Text("وضعیت زیر از خود Worker خوانده می‌شود؛ موتورِ بدون اتصال قابل انتخاب نیست.", color = Color.LightGray)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (providerStatusBusy) "در حال بررسی..." else if (providerStatus != null) "وضعیت سرور دریافت شد" else providerStatusError, color = if (providerStatus != null) Cyan else Gold, modifier = Modifier.weight(1f))
@@ -1361,7 +1392,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "zai" -> "Z.ai GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 else if (showStorage) {
-                    Text("مدیریت حافظه WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
+                    WolfPageHeader("حافظه و یادداشت‌ها","فضای محلی، یادداشت‌ها و فایل‌های ذخیره‌شده را مدیریت کن","PRIVATE STORAGE")
                     Text("مصرف‌شده: %.2f از %.0f گیگابایت".format(usedGb, quotaGb), color = Cyan)
                     LinearProgressIndicator(progress = { usagePercent }, modifier = Modifier.fillMaxWidth())
                     if (usagePercent >= 0.9f || phoneFreeGb < 1.0) {
