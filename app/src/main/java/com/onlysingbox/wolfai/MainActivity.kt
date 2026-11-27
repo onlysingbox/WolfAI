@@ -1287,18 +1287,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                     }
                 } else if (showContacts) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("مخاطبین گوشی", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
-                        TextButton(onClick = { showContacts = false }) { Text("بازگشت") }
+                    WolfPageHeader("مخاطبین گوشی","جست‌وجو و دسترسی سریع به تماس و پیامک","CONTACTS")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showContacts = false }) { Text("بازگشت به گفتگو") }
                     }
-                    Text(contactsStatus, color = Cyan)
+                    Text(contactsStatus, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(contactSearch, { contactSearch = it }, modifier = Modifier.fillMaxWidth(), label = { Text("جست‌وجوی نام یا شماره") }, singleLine = true)
                     LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(contacts.filter { it.first.contains(contactSearch, true) || it.second.contains(contactSearch, true) }) { item ->
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))) {
                                 Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(item.first, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                        Text(item.first, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
                                         Text(item.second, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_DIAL).setData(android.net.Uri.parse("tel:" + android.net.Uri.encode(item.second)))) }) { Text("تماس") }
@@ -1307,13 +1307,13 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                         }
                     }
-                    Text("WOLF فقط شماره‌ها را می‌خواند؛ تماس و پیامک در برنامه پیش‌فرض گوشی باز می‌شوند و ارسال خودکار انجام نمی‌شود.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                    Text("WOLF فقط شماره‌ها را می‌خواند؛ تماس و پیامک در برنامه پیش‌فرض گوشی باز می‌شوند و ارسال خودکار انجام نمی‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 } else if (showMissions) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        WolfPageHeader("مأموریت‌های هوشمند","درخواست‌های چندمرحله‌ای را بررسی و با تأیید خودت اجرا کن","MISSIONS")
-                        TextButton(onClick = { showMissions = false }) { Text("بازگشت") }
+                    WolfPageHeader("مأموریت‌های هوشمند","درخواست‌های چندمرحله‌ای را بررسی و با تأیید خودت اجرا کن","MISSIONS")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showMissions = false }) { Text("بازگشت به گفتگو") }
                     }
-                    Text("طرح‌ها و مراحل در این صفحه قابل خواندن و پیمایش هستند. هیچ اقدام بیرونی بدون تأیید تو اجرا نمی‌شود.", color = Gold, style = MaterialTheme.typography.bodyMedium)
+                    Text("طرح‌ها و مراحل در این صفحه قابل خواندن و پیمایش هستند. هیچ اقدام بیرونی بدون تأیید تو اجرا نمی‌شود.", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium)
                     OutlinedTextField(missionText, { missionText = it }, modifier = Modifier.fillMaxWidth(), enabled = masterEnabled && !missionBusy, label = { Text("چه کاری انجام بدهم؟") }, minLines = 2, maxLines = 4)
                     Button(enabled = masterEnabled && missionText.isNotBlank() && !missionBusy, onClick = { val request = missionText.trim(); missionBusy = true; missionStatus = "در حال ساخت طرح امن..."; scope.launch { runCatching { createMission(request) }.onSuccess { mission -> missionText = ""; missionStatus = "طرح ذخیره شد و همه مراحل در انتظار تأیید هستند."; missions = JSONArray().put(mission).also { current -> for (i in 0 until missions.length()) current.put(missions.getJSONObject(i)) } }.onFailure { missionStatus = it.message ?: "ساخت مأموریت ناموفق بود" }; missionBusy = false } }) { Text(if (missionBusy) "در حال برنامه‌ریزی..." else "ساخت طرح مأموریت") }
                     Text(missionStatus, color = Cyan)
@@ -1322,7 +1322,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             val plan = mission.optJSONObject("plan") ?: JSONObject()
                             Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                    Text(plan.optString("summary", mission.optString("request", "مأموریت")), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
                                     Text("وضعیت: " + mission.optString("status", "awaiting_approval"), color = Gold)
                                     val steps = plan.optJSONArray("steps") ?: JSONArray()
                                     val stepStates = mission.optJSONArray("steps") ?: JSONArray()
@@ -1333,10 +1333,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         val stepNo = i + 1
                                         HorizontalDivider(color = Color(0xFF33445E), thickness = 1.dp)
                                         Text("مرحله $stepNo: ${step.optString("title")}", color = Cyan, style = MaterialTheme.typography.titleMedium)
-                                        Text(step.optString("details"), color = Color.LightGray, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
-                                        Text("قابلیت: ${step.optString("capability")}\nوضعیت: $stepStatus", color = Gold, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
+                                        Text(step.optString("details"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyLarge, lineHeight = 24.sp)
+                                        Text("قابلیت: ${step.optString("capability")}\nوضعیت: $stepStatus", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
                                         state.optJSONObject("prepared_action")?.let { prepared ->
-                                            Text("عملیات دقیق آماده‌شده: " + prepared.toString(), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                                            Text("عملیات دقیق آماده‌شده: " + prepared.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                         }
                                         if (mission.optString("status") == "approved_pending_execution" && stepStatus == "approved_pending_execution") {
                                             OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = {
@@ -1374,7 +1374,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     }
                 } else if (showModels) {
                     WolfPageHeader("موتورهای هوش مصنوعی","وضعیت اتصال و موتور فعال را مدیریت کن","AI ENGINES")
-                    Text("وضعیت زیر از خود Worker خوانده می‌شود؛ موتورِ بدون اتصال قابل انتخاب نیست.", color = Color.LightGray)
+                    Text("وضعیت زیر از خود Worker خوانده می‌شود؛ موتورِ بدون اتصال قابل انتخاب نیست.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(if (providerStatusBusy) "در حال بررسی..." else if (providerStatus != null) "وضعیت سرور دریافت شد" else providerStatusError, color = if (providerStatus != null) Cyan else Gold, modifier = Modifier.weight(1f))
                         OutlinedButton(enabled = !providerStatusBusy && paired, onClick = {
@@ -1398,7 +1398,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         if (item.optString("id") == "auto" || item.optString("id") == "deepseek") continue
                         Text((item.optString("label") + " | " + if (item.optBoolean("configured")) "پیکربندی شده" else "نیازمند اتصال یا کلید"), color = if (item.optBoolean("configured")) Cyan else Gold, style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("کلیدها فقط در Cloudflare ذخیره می‌شوند. Gemini در طرح رایگان ممکن است از داده‌ها برای بهبود محصولات Google استفاده کند؛ اطلاعات محرمانه نفرست. Workers AI در طرح رایگان روزانه ۱۰٬۰۰۰ Neuron دارد؛ در طرح پولی مصرف اضافه ممکن است هزینه داشته باشد. برای جلوگیری از هزینه، طرح پولی را فعال نکن.", color = Gold, style = MaterialTheme.typography.bodySmall)
+                    Text("کلیدها فقط در Cloudflare ذخیره می‌شوند. Gemini در طرح رایگان ممکن است از داده‌ها برای بهبود محصولات Google استفاده کند؛ اطلاعات محرمانه نفرست. Workers AI در طرح رایگان روزانه ۱۰٬۰۰۰ Neuron دارد؛ در طرح پولی مصرف اضافه ممکن است هزینه داشته باشد. برای جلوگیری از هزینه، طرح پولی را فعال نکن.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "zai" -> "Z.ai GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
                 }
                 else if (showStorage) {
@@ -1415,10 +1415,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     } else if (usagePercent >= 0.8f) {
                         Text("هشدار: بیش از ۸۰٪ سهم حافظه مصرف شده است.", color = Gold)
                     }
-                    Text("سقف مصرف WOLF: %.0f GB".format(quotaGb), color = Color.White)
+                    Text("سقف مصرف WOLF: %.0f GB".format(quotaGb), color = MaterialTheme.colorScheme.onSurface)
                     Slider(value = quotaGb, onValueChange = { quotaGb = it }, valueRange = 20f..200f, steps = 17)
                     Button(onClick = { storagePrefs.safeEdit { putInt("storage_quota_gb", quotaGb.toInt()) }; status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
-                    Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = Color.LightGray)
+                    Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                     HorizontalDivider(color = Color(0xFF33445E))
                     WolfSectionLabel("یادداشت‌های شخصی")
@@ -1450,10 +1450,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         items(savedNotes.filter { file -> file.readText(Charsets.UTF_8).contains(noteSearch, ignoreCase = true) }) { file ->
                             val raw = runCatching { file.readText(Charsets.UTF_8) }.getOrDefault("")
                             val title = raw.lineSequence().firstOrNull()?.removePrefix("# ")?.ifBlank { file.nameWithoutExtension } ?: file.nameWithoutExtension
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Panel)) {
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))) {
                                 Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text(title, color = Color.White, style = MaterialTheme.typography.titleSmall)
-                                    Text(raw.lineSequence().drop(2).joinToString("\n").take(240), color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                                    Text(title, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
+                                    Text(raw.lineSequence().drop(2).joinToString("\n").take(240), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         TextButton(onClick = {
                                             editingNote = file
@@ -1476,8 +1476,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
                                 Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(label, color = Color.White)
-                                        Text("%.2f GB".format(folderBytes(dir) / (1024.0 * 1024 * 1024)), color = Color.LightGray)
+                                        Text(label, color = MaterialTheme.colorScheme.onSurface)
+                                        Text("%.2f GB".format(folderBytes(dir) / (1024.0 * 1024 * 1024)), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     if (key == "files" || key == "audio") {
                                         TextButton(onClick = { pendingDeleteBucket = label to dir }) { Text("پاک‌سازی") }
@@ -1486,7 +1486,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             }
                         }
                     }
-                    Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = Color.LightGray, style = MaterialTheme.typography.bodySmall)
+                    Text("پاک‌سازی فقط فایل‌ها یا صداها را حذف می‌کند. تاریخچه و حافظه بلندمدت دست‌نخورده می‌مانند. افزایش سقف، ظرفیت فیزیکی گوشی را زیاد نمی‌کند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 } else if (!paired && !localMode) {
                     Text("اتصال امن به WOLF", color = Color.White, style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(pairCode, { pairCode = it.filter(Char::isDigit).take(6) }, label = { Text("کد ۶ رقمی تلگرام") }, singleLine = true, keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
