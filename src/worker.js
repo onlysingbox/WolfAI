@@ -1096,11 +1096,19 @@ function validateCompanionAction(capability, action) {
     }
     if (action?.type === "task.update") {
       const args = action.args || {};
-      if (Object.keys(args).some(key => !["id","status"].includes(key))) throw new Error("پارامتر اضافی تغییر وظیفه مجاز نیست.");
+      if (Object.keys(args).some(key => !["id","status","due_at","priority"].includes(key))) throw new Error("پارامتر اضافی تغییر وظیفه مجاز نیست.");
       const id = String(args.id || "").trim();
+      const hasStatus = Object.prototype.hasOwnProperty.call(args,"status");
+      const hasDue = Object.prototype.hasOwnProperty.call(args,"due_at");
+      const hasPriority = Object.prototype.hasOwnProperty.call(args,"priority");
       const status = String(args.status || "").trim();
-      if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
-      return { type: "task.update", args: { id, status } };
+      const due_at = hasDue ? normalizeTaskDueAt(args.due_at) : undefined;
+      const priority = String(args.priority || "").trim();
+      if (!/^[0-9a-f-]{36}$/i.test(id) || (!hasStatus && !hasDue && !hasPriority) ||
+          (hasStatus && !["open","in_progress","done","cancelled"].includes(status)) ||
+          (hasPriority && !["low","normal","high","urgent"].includes(priority))) throw new Error("شناسه یا اطلاعات تغییر وظیفه معتبر نیست.");
+      return { type: "task.update", args: { id, status: hasStatus ? status : undefined, due_at, priority: hasPriority ? priority : undefined } };
+    }
     }
   }
   if (capability === "scheduling" && action?.type === "schedule.list") return validateCompanionReadOnlyAction(capability, action);
@@ -1427,7 +1435,7 @@ function wolfFunctionTools() {
     { type: "function", function: { name: "project_list", description: "List personal projects. Read-only.", parameters: { type: "object", properties: {}, required: [] } } },
     { type: "function", function: { name: "task_create", description: "Create a personal task with optional project, ISO 8601 deadline and priority. Requires owner approval.", parameters: { type: "object", properties: { title: { type: "string" }, description: { type: "string" }, project_id: { type: "string" }, due_at: { type: "string", description: "ISO 8601 with explicit UTC offset or Z" }, priority: { type: "string", enum: ["low","normal","high","urgent"] } }, required: ["title"] } } },
     { type: "function", function: { name: "task_list", description: "List personal tasks, optionally filtered by status or project. Read-only.", parameters: { type: "object", properties: { status: { type: "string", enum: ["open","in_progress","done","cancelled"] }, project_id: { type: "string" } }, required: [] } } },
-    { type: "function", function: { name: "task_update", description: "Change the status of one personal task. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["open","in_progress","done","cancelled"] } }, required: ["id","status"] } } },
+    { type: "function", function: { name: "task_update", description: "Update a personal task status, deadline, or priority. Provide at least one change. Requires owner approval.", parameters: { type: "object", properties: { id: { type: "string" }, status: { type: "string", enum: ["open","in_progress","done","cancelled"] }, due_at: { type: "string", description: "ISO 8601 with explicit UTC offset or Z; null clears the deadline" }, priority: { type: "string", enum: ["low","normal","high","urgent"] } }, required: ["id"] } } },
   ];
 }
 
@@ -1553,11 +1561,18 @@ function mapWolfToolCall(call) {
     return { type: "task.list", args: { status: status || null, project_id: project_id || null } };
   }
   if (name === "task_update") {
-    if (Object.keys(args).some(key => !["id","status"].includes(key))) throw new Error("پارامتر اضافی برای تغییر وظیفه مجاز نیست.");
+    if (Object.keys(args).some(key => !["id","status","due_at","priority"].includes(key))) throw new Error("پارامتر اضافی تغییر وظیفه مجاز نیست.");
     const id = String(args.id || "").trim();
     const status = String(args.status || "").trim();
-    if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
-    return { type: "task.update", args: { id, status } };
+    const hasStatus = Object.prototype.hasOwnProperty.call(args,"status");
+    const hasDue = Object.prototype.hasOwnProperty.call(args,"due_at");
+    const hasPriority = Object.prototype.hasOwnProperty.call(args,"priority");
+    const due_at = hasDue ? normalizeTaskDueAt(args.due_at) : undefined;
+    const priority = String(args.priority || "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(id) || (!hasStatus && !hasDue && !hasPriority) ||
+        (hasStatus && !["open","in_progress","done","cancelled"].includes(status)) ||
+        (hasPriority && !["low","normal","high","urgent"].includes(priority))) throw new Error("شناسه یا اطلاعات تغییر وظیفه معتبر نیست.");
+    return { type: "task.update", args: { id, status: hasStatus ? status : undefined, due_at, priority: hasPriority ? priority : undefined } };
   }
   throw new Error("این ابزار در فهرست ابزارهای مجاز WOLF AI نیست.");
 }
@@ -2408,13 +2423,18 @@ async function executeApprovedAction(env, action, runId = null, stepNo = 1, owne
   if (action.type === "task.update") {
     if (!ownerId) throw new Error("مالک وظیفه مشخص نیست.");
     const id = String(action.args.id || "");
-    const status = String(action.args.status || "");
-    if (!/^[0-9a-f-]{36}$/i.test(id) || !["open","in_progress","done","cancelled"].includes(status)) throw new Error("شناسه یا وضعیت وظیفه معتبر نیست.");
-    const result = await env.DB.prepare("UPDATE tasks SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND requested_by=? AND status IN ('open','in_progress','done','cancelled')")
-      .bind(status,id,String(ownerId)).run();
+    const sets = [];
+    const values = [];
+    if (action.args.status !== undefined) { sets.push("status=?"); values.push(action.args.status); }
+    if (action.args.due_at !== undefined) { sets.push("due_at=?"); values.push(action.args.due_at); }
+    if (action.args.priority !== undefined) { sets.push("priority=?"); values.push(action.args.priority); }
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !sets.length) throw new Error("شناسه یا اطلاعات تغییر وظیفه معتبر نیست.");
+    sets.push("updated_at=CURRENT_TIMESTAMP");
+    const result = await env.DB.prepare("UPDATE tasks SET " + sets.join(",") + " WHERE id=? AND requested_by=? AND status IN ('open','in_progress','done','cancelled')")
+      .bind(...values,id,String(ownerId)).run();
     if (!Number(result?.meta?.changes || 0)) throw new Error("وظیفه فعال پیدا نشد یا اجازه تغییر آن وجود ندارد.");
-    await log(env, ownerId, "task.personal_status_changed", "task", id, { status });
-    return { tool: action.type, read_only: false, task_id: id, status };
+    await log(env, ownerId, "task.personal_updated", "task", id, { status: action.args.status, due_at: action.args.due_at, priority: action.args.priority });
+    return { tool: action.type, read_only: false, task_id: id, status: action.args.status, due_at: action.args.due_at, priority: action.args.priority };
   }
   throw new Error("ابزار مجاز نیست.");
 }
