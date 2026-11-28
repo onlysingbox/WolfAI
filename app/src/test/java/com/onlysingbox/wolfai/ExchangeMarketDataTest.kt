@@ -22,6 +22,11 @@ class ExchangeMarketDataTest {
     }
 
     @Test
+    fun convertsBitpinTomanQuotesToRialWithoutChangingTomanDisplay() {
+        assertEquals(1_000_000.0, ExchangeMarketData.bitpinTomanToRial(100_000.0), 0.0)
+    }
+
+    @Test
     fun convertsBitpinDailyChangeRatioToPercent() {
         assertEquals(-1.58, ExchangeMarketData.bitpinRatioToPercent(-0.0158)!!, 0.000001)
         assertEquals(0.42, ExchangeMarketData.bitpinRatioToPercent(0.0042)!!, 0.000001)
