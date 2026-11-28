@@ -35,17 +35,16 @@ This file records verified implementation, not planned features.
 - The owner can approve or reject a pending proposal from Android. Approval changes the run and steps to `approved_pending_execution`; rejection marks them `rejected`.
 - For supported read-only steps, Android can request an exact prepared action, display its JSON details, and require a second explicit tap before executing that action. It refreshes per-step status and displays the result/error. Unsupported capabilities remain unexecutable and require manual review.
 
-## AI provider implementation update (2026-11-25)
+## AI provider implementation update (2026-11-28)
 - Updated Groq from the retired `llama-3.3-70b-versatile` model to `openai/gpt-oss-120b` following Groq's August 16, 2026 shutdown notice for the old model.
-- Confirmed the Cloudflare model identifiers against current Cloudflare model documentation: `@cf/zai-org/glm-4.7-flash` and `@cf/google/gemma-4-26b-a4b-it`.
-- Added 25-second request timeouts to Gemini, Groq, and OpenRouter HTTP calls, plus OpenRouter application identification headers.
-- Android model selection now reads the authenticated `/api/companion/status` provider catalog. Engines without a configured binding/key are disabled rather than presented as selectable.
-- Added automated tests for configured-provider reporting, free-only routing order, and current model identifiers. These are configuration/routing tests, not live provider inference tests.
-- Live Worker configuration check on 2026-11-28: `AI`, `GROQ_API_KEY`, and `ZAI_API_KEY` bindings are present; Gemini and OpenRouter secrets are absent. Secret values are not readable through the configuration listing. Presence does not prove a key is valid, and no live inference request has been performed.
+- Strict zero-billing provider allowlist now permits only Z.AI `glm-4.7-flash` and Groq `openai/gpt-oss-120b`; automatic order is Z.AI then Groq. Gemini, OpenRouter, Cloudflare Workers AI, and all other model routes are blocked at the server dispatch boundary.
+- Android model picker now exposes only automatic, Z.AI free, and Groq free. If a previously saved model is no longer allowed/configured, the app resets selection to automatic.
+- Worker provider tests verify the catalog, automatic order, model IDs, and that blocked providers are rejected before network or AI calls.
+- Live Worker settings confirm `ZAI_API_KEY` and `GROQ_API_KEY` secret bindings exist. Their secret values cannot be read, and live inference with either saved key has not yet been confirmed.
 
 ## CI verification
 - Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
-- On 2026-11-28, Worker syntax/tests passed after adding the owner-memory deletion helper and regression tests (run `46171837768`). The Android Kotlin compile passed for the memory-workspace callbacks and UI (run `46171884423`); a newer compile for the cloud-document workspace was still running when this status file was updated.
+- On 2026-11-28, Worker syntax/tests passed after enforcing the zero-billing provider allowlist (run `46174447426`). The Android Kotlin compile passed for the memory-workspace callbacks and UI (run `46171884423`); a newer compile for the cloud-document workspace was still running when this status file was updated.
 - A Node built-in safety suite covers the mission action allowlist, capability matching, HTTPS/local-target rejection, finance date/currency validation, GitHub path traversal, extra-parameter rejection, MASTER OFF rejection, and owner-scoped lookup.
 - A separate Node 22 `node:sqlite` integration suite executes the actual D1-compatible SQL statements against an in-memory SQLite database. It checks owner isolation, duplicate concurrent claims, sequential step ordering, wrong-owner approvals, active sibling steps, and stopped missions. The workflow runs both suites before the Android build.
 - These tests exercise the SQL and state-transition contract locally; they do not contact the production Cloudflare D1 database or deploy the Worker. Live Cloudflare integration and device-level acceptance tests remain pending.
@@ -53,35 +52,34 @@ This file records verified implementation, not planned features.
 ## Not implemented or not end-to-end verified
 - Standalone pairing that does not require Telegram.
 - Fixed production signing key compatible with the first installed APK.
-- Server-side production deployment of the new companion endpoints, including private-memory and cloud-document read/delete routes.
 - Exact 60 GB per-category allocations and complete file management.
 - A complete provider quota dashboard with reset times and historical per-model usage. Provider APIs do not consistently expose this information; currently only returned usage metadata is forwarded, not a verified remaining-quota counter.
-- General agent missions are available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions and step states; POST creates up to 8 proposal steps). The authenticated decision endpoint approves/rejects the plan. The first execution phase adds a prepare-and-confirm path for a narrow allowlist of read-only actions. Each prepared action is stored per step and requires a separate user tap to execute. This is not yet a general-purpose executor; messaging, calling, device control, purchases, deletion, file writes, GitHub writes, scheduling and other side effects remain unavailable. Production deployment, D1 migration, and end-to-end execution tests remain pending.
+- General agent missions are available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions and step states; POST creates up to 8 proposal steps). The authenticated decision endpoint approves/rejects the plan. The first execution phase adds a prepare-and-confirm path for a narrow allowlist of read-only actions. Each prepared action is stored per step and requires a separate user tap to execute. This is not yet a general-purpose executor; messaging, calling, device control, purchases, deletion, file writes, GitHub writes, and other side effects remain unavailable. End-to-end execution tests on a paired Android device remain pending.
 - Email, calendar, messaging, browser automation and OAuth connectors inside Android. The calendar page currently reads/writes Android's local calendar only; it is not connected to a cloud calendar provider.
 - Crypto/market analysis center and exchange data integration.
 - Contacts resolution and confirmed phone/video calling.
 - App launch/control, accessibility automation and supported Android settings controls.
 - Document creation/editing for PDF, Word and Excel.
 - Turn-taking live voice with interruption.
-- End-to-end validation of the new memory and cloud-document screens against the deployed Worker; the source changes are committed but production deployment is still pending.
+- End-to-end validation of the memory and cloud-document screens against the newly deployed Worker on a paired Android device.
 - Full privacy, security, storage, and end-to-end device tests.
-- MASTER OFF is now enforced for model execution and queued WOLF work in source; production behavior remains unverified until the Worker is deployed with owner approval.
+- MASTER OFF is enforced in the deployed Worker at the shared AI model boundary and for queued WOLF work; final device-level behavior still requires acceptance testing.
 
 ## Release blockers
 1. Stable release signing is now configured in GitHub Actions through repository secrets, and a signed release APK artifact was successfully built in run 45553866282. The previously installed debug-signed APK cannot be updated in place; the user has already approved one uninstall/reinstall when the final stable APK is ready. Every future release must keep using the same persisted signing key and the unchanged application ID.
-2. The latest Worker source changes are not deployed to production. The owner has now authorized deployment, but the three external provider secrets are still absent. Deploy only after the provider setup is complete and then run authenticated live checks.
+2. The latest Worker deployment is live, and the production D1 database contains all 14 required application tables. The one-minute cron trigger was restored after deployment.
 3. CI builds and mocked provider tests do not prove live model access or device-level behavior. Real provider tests, Android pairing/chat tests, and final device acceptance remain required.
 
 Do not mark WOLF AI as ready until the provider setup, production deployment, live acceptance tests, and agreed product-scope checks are complete.
 
 ## Free provider setup
-The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git. As last checked on 2026-11-25, all three external secrets were absent from the live Worker settings:
+The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git. As checked on 2026-11-28, the live Worker has the Z.AI and Groq secret bindings configured:
 - Existing `ZAI_API_KEY` is configured for Z.AI `glm-4.7-flash`, whose model pricing is listed as free. Provider access and rate limits can change; no live inference test has yet confirmed the saved key.
 - Existing `GROQ_API_KEY` is configured for Groq `openai/gpt-oss-120b` on its free tier. Do not upgrade the Groq account to a paid tier if zero-cost use is required; no live inference test has yet confirmed the saved key.
 - Gemini and OpenRouter are not used. Their credentials are not required.
 - The existing Cloudflare `AI` binding remains configured but is intentionally not called by WOLF AI in strict zero-billing mode, because usage beyond the free allocation can be billed on paid plans.
 
-No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Cloudflare documents a 10,000-Neuron daily free allocation; on Workers Free, requests fail after the allocation, while Workers Paid can bill usage above it. Keep the account on Workers Free if no charge is acceptable. Gemini's free tier may use submitted content to improve Google products. Groq must remain on its Free tier; OpenRouter is pinned to the `:free` model. Exact remaining quota is shown only when a provider exposes reliable usage information.
+No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Cloudflare documents a 10,000-Neuron daily free allocation; on Workers Free, requests fail after the allocation, while Workers Paid can bill usage above it. Keep the account on Workers Free if no charge is acceptable. Groq must remain on its Free tier. Neither provider is guaranteed to have unlimited requests; if a free quota is exhausted, WOLF AI returns an error instead of switching to a paid model. Exact remaining quota is shown only when a provider exposes reliable usage information.
 
 ## Remaining agreed product work
 The provider adapters are one subsystem, not completion of WOLF. The Android app still needs the device-control permission/service layer, contact and call workflows, messaging intents/connectors, file/document workspace, scheduled tasks and approvals, market-data adapters, searchable memory controls, security/permission audit, full master-off enforcement across background jobs, and end-to-end tests. These must be implemented and verified before a final release is called ready.
