@@ -1169,8 +1169,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 onDismissRequest = {
                     pendingCallNumber = null
                     pendingCallType = "phone"
-                    pendingCallLabel = ""
-                    status = "درخواست تماس لغو شد؛ هیچ تماسی آغاز نشد."
+                    pendingCallLabel = ""; pendingCallMessage = ""; pendingCallSubject = ""
+                    status = "درخواست لغو شد؛ هیچ اقدامی انجام نشد."
                 },
                 title = { Text(if (pendingCallType == "email" || pendingCallType == "whatsapp_message") "تأیید پیش‌نویس پیام" else "تأیید تماس") },
                 text = {
@@ -1194,8 +1194,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     TextButton(onClick = {
                         pendingCallNumber = null
                         pendingCallType = "phone"
-                        pendingCallLabel = ""
-                        status = "درخواست تماس لغو شد؛ هیچ تماسی آغاز نشد."
+                        pendingCallLabel = ""; pendingCallMessage = ""; pendingCallSubject = ""
+                        status = "درخواست لغو شد؛ هیچ اقدامی انجام نشد."
                     }) { Text("لغو") }
                 }
             )
