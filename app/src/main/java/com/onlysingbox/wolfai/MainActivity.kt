@@ -1477,7 +1477,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         }
                         Text("داده‌ها فقط خواندنی‌اند. هیچ سفارش خرید یا فروشی ثبت نمی‌شود. قیمت ریال و تومان از یک داده بازار و با تبدیل ۱۰ به ۱ نمایش داده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
-                    if (marketSource == "global") Text("منابع: CoinGecko و CoinPaprika. داده جهانی است و قیمت صرافی‌ها را نشان نمی‌دهد.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    if (marketSource == "global") {
+                        Text("منابع: CoinGecko و CoinPaprika. داده جهانی است و قیمت صرافی‌ها را نشان نمی‌دهد.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Unit
                 } else if(showDeviceTools) {
                     WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
                     Text(deviceStatus,color=Cyan)
