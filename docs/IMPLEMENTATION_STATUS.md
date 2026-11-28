@@ -41,7 +41,7 @@ This file records verified implementation, not planned features.
 - Added 25-second request timeouts to Gemini, Groq, and OpenRouter HTTP calls, plus OpenRouter application identification headers.
 - Android model selection now reads the authenticated `/api/companion/status` provider catalog. Engines without a configured binding/key are disabled rather than presented as selectable.
 - Added automated tests for configured-provider reporting, free-only routing order, and current model identifiers. These are configuration/routing tests, not live provider inference tests.
-- Live Worker configuration check on 2026-11-25: `AI` binding is present; `GEMINI_API_KEY`, `GROQ_API_KEY`, and `OPENROUTER_API_KEY` are absent. Therefore only the two Cloudflare-bound engines are configured. No external-provider live tests can pass until the user adds those secrets.
+- Live Worker configuration check on 2026-11-28: `AI`, `GROQ_API_KEY`, and `ZAI_API_KEY` bindings are present; Gemini and OpenRouter secrets are absent. Secret values are not readable through the configuration listing. Presence does not prove a key is valid, and no live inference request has been performed.
 
 ## CI verification
 - Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
@@ -76,9 +76,9 @@ Do not mark WOLF AI as ready until the provider setup, production deployment, li
 
 ## Free provider setup
 The following Cloudflare Worker secrets are optional and are never stored in the APK or committed to Git. As last checked on 2026-11-25, all three external secrets were absent from the live Worker settings:
-- `GEMINI_API_KEY` for the Gemini 2.5 Flash free tier. Google states free-tier prompts may be used to improve its products; do not send sensitive/private material through this provider unless that policy is acceptable.
-- `GROQ_API_KEY` for Groq's Free tier using `openai/gpt-oss-120b`; do not upgrade the Groq account to a paid tier if zero-cost use is required.
-- `OPENROUTER_API_KEY` for the free-only model `meta-llama/llama-3.3-70b-instruct:free`. Provider access and rate limits can change.
+- Existing `ZAI_API_KEY` is configured for Z.AI `glm-4.7-flash`, whose model pricing is listed as free. Provider access and rate limits can change; no live inference test has yet confirmed the saved key.
+- Existing `GROQ_API_KEY` is configured for Groq `openai/gpt-oss-120b` on its free tier. Do not upgrade the Groq account to a paid tier if zero-cost use is required; no live inference test has yet confirmed the saved key.
+- Gemini and OpenRouter are not used. Their credentials are not required.
 - The existing Cloudflare `AI` binding remains configured but is intentionally not called by WOLF AI in strict zero-billing mode, because usage beyond the free allocation can be billed on paid plans.
 
 No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Cloudflare documents a 10,000-Neuron daily free allocation; on Workers Free, requests fail after the allocation, while Workers Paid can bill usage above it. Keep the account on Workers Free if no charge is acceptable. Gemini's free tier may use submitted content to improve Google products. Groq must remain on its Free tier; OpenRouter is pinned to the `:free` model. Exact remaining quota is shown only when a provider exposes reliable usage information.
