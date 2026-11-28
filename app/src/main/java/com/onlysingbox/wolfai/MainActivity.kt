@@ -1398,11 +1398,12 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     Text("تغییر ۲۴ ساعت: " + (quote.change24h?.let { String.format(Locale.US, "%.2f%%", it) } ?: "ناموجود"), color = quote.change24h?.let { if (it >= 0) Color(0xFF55D6A0) else Color(0xFFFF7777) } ?: MaterialTheme.colorScheme.onSurfaceVariant)
                                     Text("ارزش بازار: " + (quote.marketCapUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     Text("حجم ۲۴ ساعته: " + (quote.volume24hUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    Text("منبع: ${quote.source}" + (quote.updatedAt?.let { " | به‌روزرسانی: $it" } ?: ""), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
                     }
-                    Text("منبع: CoinGecko. این صفحه داده بازار جهانی را نشان می‌دهد، نه قیمت لحظه‌ای صرافی‌های Nobitex، Bitpin یا Saraf و نه سیگنال خریدوفروش.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text("منابع: CoinGecko و CoinPaprika (منبع هر نتیجه جداگانه درج شده است). این داده‌ها قیمت جهانی‌اند، نه قیمت لحظه‌ای Nobitex، Bitpin یا Saraf و نه سیگنال خریدوفروش.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
                 else if(showDeviceTools) {
                     WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
