@@ -1,12 +1,7 @@
 name: Build WOLF AI Android
 on:
-  push:
-    branches: [main]
-    paths:
-      - "app/**"
-      - "src/**"
-      - "tests/**"
-      - ".github/workflows/android.yml"
+  # Release APK creation is deliberately manual. Normal commits run only the
+  # Kotlin compile check and Worker safety tests; no APK is packaged/uploaded.
   workflow_dispatch:
 jobs:
   build:
@@ -42,10 +37,8 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
       - name: Build stable signed release APK
-        if: always()
         run: gradle --no-daemon assembleRelease
       - name: Verify release APK signature and identity
-        if: success()
         run: |
           APK="app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
@@ -64,15 +57,13 @@ jobs:
           "$AAPT" dump xmltree "$APK" AndroidManifest.xml | grep -F "extractNativeLibs"
           "$AAPT" dump resources "$APK" | grep -F "wolf_logo_photo"
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: wolf-ai-agent-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: warn
+          if-no-files-found: error
       - name: Upload stable signed release APK (direct APK, no ZIP)
-        if: always()
         uses: actions/upload-artifact@v7
         with:
           path: app/build/outputs/apk/release/app-release.apk
           archive: false
-          if-no-files-found: warn
+          if-no-files-found: error
