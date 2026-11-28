@@ -1112,7 +1112,6 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             }
         }
     }
-    var pendingExportFile by remember { mutableStateOf<File?>(null) }
     val exportPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val source = pendingExportFile
         pendingExportFile = null
