@@ -284,6 +284,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             decideMission = { id, decision -> apiMissionDecision(securePrefs.safeString("device_token"), id, decision) },
             prepareMissionStep = { id, step -> apiMissionStep(securePrefs.safeString("device_token"), id, step, "prepare") },
             executeMissionStep = { id, step -> apiMissionStep(securePrefs.safeString("device_token"), id, step, "execute") },
+            controlMission = { id, action -> apiMissionControl(securePrefs.safeString("device_token"), id, action) },
+            retryMissionStep = { id, step -> apiRetryMissionStep(securePrefs.safeString("device_token"), id, step) },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.safeString("device_token"), enabled) },
             loadProviderStatus = { apiProviderStatus(securePrefs.safeString("device_token")) },
             listMemory = { apiListMemory(securePrefs.safeString("device_token")) },
@@ -542,6 +544,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         } finally { conn.disconnect() }
     }
 
+    private suspend fun apiMissionControl(token: String, missionId: String, action: String): JSONObject = withContext(Dispatchers.IO) {
+        require(action == "pause" || action == "resume") { "عملیات کنترل مأموریت نامعتبر است." }
+        val conn = (URL("$BASE_URL/api/companion/missions/$missionId/control").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("action", action).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "کنترل مأموریت ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
+    }
+
+    private suspend fun apiRetryMissionStep(token: String, missionId: String, stepNo: Int): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/missions/$missionId/steps/retry").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("step_no", stepNo).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "تلاش مجدد مرحله ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
+    }
+
     private suspend fun apiListMissions(token: String): JSONArray = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/missions").openConnection() as HttpURLConnection)
         try {
@@ -640,7 +673,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, listArtifacts: suspend ()->JSONArray, getArtifact: suspend (String)->JSONObject, deleteArtifact: suspend (String)->JSONObject, createArtifact: suspend (String, String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, controlMission: suspend (String, String)->JSONObject, retryMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, listArtifacts: suspend ()->JSONArray, getArtifact: suspend (String)->JSONObject, deleteArtifact: suspend (String)->JSONObject, createArtifact: suspend (String, String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var localMode by remember { mutableStateOf(storagePrefs.safeBoolean("local_mode", false)) }
     var showStartupCrash by remember { mutableStateOf(startupCrashReport.isNotBlank()) }
@@ -1772,6 +1805,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                         state.optJSONObject("prepared_action")?.let { prepared ->
                                             Text("عملیات دقیق آماده‌شده: " + prepared.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                         }
+                                        if (mission.optString("status") == "execution_failed" && stepStatus == "failed") {
+                                            OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = {
+                                                missionBusy = true; missionStatus = "در حال بازنشانی امن مرحله $stepNo..."
+                                                scope.launch {
+                                                    runCatching { retryMissionStep(mission.optString("id"), stepNo) }
+                                                        .onSuccess { missionStatus = "مرحله برای آماده‌سازی دوباره برگشت؛ اجرای مجدد بدون تأیید جداگانه ممکن نیست." }
+                                                        .onFailure { missionStatus = it.message ?: "بازنشانی مرحله ناموفق بود" }
+                                                    runCatching { listMissions() }.onSuccess { missions = it }
+                                                    missionBusy = false
+                                                }
+                                            }) { Text("آماده‌سازی مجدد مرحله ناموفق") }
+                                        }
                                         if (mission.optString("status") == "approved_pending_execution" && stepStatus == "approved_pending_execution") {
                                             OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = {
                                                 missionBusy = true; missionStatus = "در حال آماده‌سازی عملیات خواندنی مرحله $stepNo..."
@@ -1801,7 +1846,31 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                             Button(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "approve") }.onSuccess { missionStatus = "طرح تأیید شد؛ هنوز اجرا نشده است." }.onFailure { missionStatus = it.message ?: "تأیید ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("تأیید طرح") }
                                             OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = { missionBusy = true; scope.launch { runCatching { decideMission(mission.optString("id"), "reject") }.onSuccess { missionStatus = "طرح رد شد." }.onFailure { missionStatus = it.message ?: "رد طرح ناموفق بود" }; runCatching { listMissions() }.onSuccess { missions = it }; missionBusy = false } }) { Text("رد طرح") }
                                         }
-                                    } else if (mission.optString("status") == "approved_pending_execution") { Text("تأیید شده، اما هنوز اجرا نشده است.", color = Gold) }
+                                    } else if (mission.optString("status") == "approved_pending_execution") {
+                                        Text("تأیید شده، اما هنوز اجرا نشده است.", color = Gold)
+                                        OutlinedButton(enabled = masterEnabled && !missionBusy, onClick = {
+                                            missionBusy = true
+                                            scope.launch {
+                                                runCatching { controlMission(mission.optString("id"), "pause") }
+                                                    .onSuccess { missionStatus = "مأموریت متوقف شد؛ هیچ مرحله فعالی در حال اجرا نبود." }
+                                                    .onFailure { missionStatus = it.message ?: "توقف مأموریت ناموفق بود" }
+                                                runCatching { listMissions() }.onSuccess { missions = it }
+                                                missionBusy = false
+                                            }
+                                        }) { Text("توقف موقت مأموریت") }
+                                    } else if (mission.optString("status") == "paused") {
+                                        Text("مأموریت متوقف است و هیچ مرحله جدیدی اجرا نمی‌شود.", color = Gold)
+                                        Button(enabled = masterEnabled && !missionBusy, onClick = {
+                                            missionBusy = true
+                                            scope.launch {
+                                                runCatching { controlMission(mission.optString("id"), "resume") }
+                                                    .onSuccess { missionStatus = "مأموریت ادامه یافت؛ مراحل همچنان به تأیید جداگانه نیاز دارند." }
+                                                    .onFailure { missionStatus = it.message ?: "ادامه مأموریت ناموفق بود" }
+                                                runCatching { listMissions() }.onSuccess { missions = it }
+                                                missionBusy = false
+                                            }
+                                        }) { Text("ادامه مأموریت") }
+                                    }
                                 }
                             }
                         }
