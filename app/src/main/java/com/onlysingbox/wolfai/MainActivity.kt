@@ -688,6 +688,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         return null
     }
     var showStorage by remember { mutableStateOf(false) }
+    var showMarket by remember { mutableStateOf(false) }
+    var marketQuery by remember { mutableStateOf("") }
+    var marketStatus by remember { mutableStateOf("نام یا نماد رمزارز را جست‌وجو کن.") }
+    var marketBusy by remember { mutableStateOf(false) }
+    var marketQuotes by remember { mutableStateOf<List<CoinQuote>>(emptyList()) }
     var remoteArtifacts by remember { mutableStateOf(JSONArray()) }
     var cloudDocTitle by remember { mutableStateOf("") }
     var cloudDocContent by remember { mutableStateOf("") }
@@ -1358,6 +1363,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     item { NavigationChip("گفتگو",!showStorage&&!showContacts&&!showDeviceTools&&!showModels&&!showMissions&&!showSettings&&!showNotifications&&!showPlanner&&!showFiles) { showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
                     item { NavigationChip("مخاطبین",showContacts) { showContacts=true;showStorage=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false; if(context.checkSelfPermission(Manifest.permission.READ_CONTACTS)==PackageManager.PERMISSION_GRANTED) scope.launch { runCatching { loadContacts() }.onSuccess { contacts=it;contactsStatus="${it.size} شماره مخاطب خوانده شد." }.onFailure { contactsStatus=it.message ?: "خطا در خواندن مخاطبین" } } else contactsPermission.launch(Manifest.permission.READ_CONTACTS) } }
                     item { NavigationChip("ابزار گوشی",showDeviceTools) { showDeviceTools=true;showStorage=false;showContacts=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
+                    item { NavigationChip("بازار رمزارز",showMarket) { showMarket=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
                     if (paired) {
                         item { NavigationChip("مأموریت‌ها",showMissions) { showMissions=true;showStorage=false;showContacts=false;showDeviceTools=false;showModels=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false;scope.launch { runCatching { listMissions() }.onSuccess { missions=it }.onFailure { missionStatus=it.message ?: "خطا در دریافت مأموریت‌ها" } } } }
                         item { NavigationChip("موتورها",showModels) { showModels=true;showStorage=false;showContacts=false;showDeviceTools=false;showMissions=false;showSettings=false;showNotifications=false;showPlanner=false;showFiles=false } }
@@ -1370,7 +1376,36 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if(showDeviceTools) {
+                if(showMarket) {
+                    WolfPageHeader("بازار رمزارز","جست‌وجوی قیمت و تغییرات بازار جهانی","CRYPTO MARKET")
+                    OutlinedTextField(marketQuery, { marketQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("نام یا نماد رمزارز، مثل Bitcoin یا BTC") }, singleLine = true)
+                    Button(enabled = marketQuery.isNotBlank() && !marketBusy, modifier = Modifier.fillMaxWidth(), onClick = {
+                        marketBusy = true
+                        marketStatus = "در حال دریافت داده‌های بازار..."
+                        scope.launch {
+                            runCatching { MarketData.search(marketQuery) }
+                                .onSuccess { marketQuotes = it; marketStatus = if (it.isEmpty()) "داده‌ای برای این رمزارز دریافت نشد." else "${it.size} نتیجه دریافت شد. داده‌ها از بازار جهانی هستند." }
+                                .onFailure { marketStatus = "دریافت بازار ناموفق بود: ${it.message}" }
+                            marketBusy = false
+                        }
+                    }) { Text(if (marketBusy) "در حال دریافت..." else "جست‌وجوی بازار") }
+                    Text(marketStatus, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(marketQuotes) { quote ->
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text("${quote.name} (${quote.symbol})", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                                    Text(if (quote.priceUsd.isFinite()) "$" + String.format(Locale.US, "%,.8f", quote.priceUsd).trimEnd('0').trimEnd('.') else "قیمت ناموجود", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineSmall)
+                                    Text("تغییر ۲۴ ساعت: " + (quote.change24h?.let { String.format(Locale.US, "%.2f%%", it) } ?: "ناموجود"), color = quote.change24h?.let { if (it >= 0) Color(0xFF55D6A0) else Color(0xFFFF7777) } ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("ارزش بازار: " + (quote.marketCapUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    Text("حجم ۲۴ ساعته: " + (quote.volume24hUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    Text("منبع: CoinGecko. این صفحه داده بازار جهانی را نشان می‌دهد، نه قیمت لحظه‌ای صرافی‌های Nobitex، Bitpin یا Saraf و نه سیگنال خریدوفروش.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                }
+                else if(showDeviceTools) {
                     WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
                     Text(deviceStatus,color=Cyan)
                     WolfSectionLabel("تنظیم هشدار")
