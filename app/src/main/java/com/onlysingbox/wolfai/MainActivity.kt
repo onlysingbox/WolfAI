@@ -704,28 +704,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             }
         )
     }
-    fun findPhoneNumberByName(query: String): String? {
-        contactLookupAmbiguous = false
-        if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
-        val found = mutableListOf<ContactPhone>()
-        context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
-            val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-            val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-            while (cursor.moveToNext()) found.add(ContactPhone(cursor.getString(nameCol).orEmpty(), cursor.getString(numberCol).orEmpty()))
-        }
-        return when (val resolution = ContactResolver.resolve(query, found)) {
-            is ContactLookup.Match -> resolution.contact.number
-            is ContactLookup.Ambiguous -> {
-                contactLookupAmbiguous = true
-                contacts = resolution.contacts.map { it.name to it.number }
-                contactSearch = query
-                contactsStatus = "چند مخاطب با این نام پیدا شد. شخص درست را از فهرست انتخاب کن؛ هیچ تماسی برقرار نشده است."
-                showContacts = true
-                null
-            }
-            ContactLookup.NotFound -> null
-        }
-    }
+
     var showStorage by remember { mutableStateOf(false) }
     var showMarket by remember { mutableStateOf(false) }
     var marketQuery by remember { mutableStateOf("") }
@@ -853,6 +832,28 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var contactSearch by remember { mutableStateOf("") }
     var contactsStatus by remember { mutableStateOf("برای مشاهده مخاطبین، مجوز گوشی لازم است.") }
     var contactLookupAmbiguous by remember { mutableStateOf(false) }
+    fun findPhoneNumberByName(query: String): String? {
+        contactLookupAmbiguous = false
+        if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        val found = mutableListOf<ContactPhone>()
+        context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
+            val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+            val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            while (cursor.moveToNext()) found.add(ContactPhone(cursor.getString(nameCol).orEmpty(), cursor.getString(numberCol).orEmpty()))
+        }
+        return when (val resolution = ContactResolver.resolve(query, found)) {
+            is ContactLookup.Match -> resolution.contact.number
+            is ContactLookup.Ambiguous -> {
+                contactLookupAmbiguous = true
+                contacts = resolution.contacts.map { it.name to it.number }
+                contactSearch = query
+                contactsStatus = "چند مخاطب با این نام پیدا شد. شخص درست را از فهرست انتخاب کن؛ هیچ تماسی برقرار نشده است."
+                showContacts = true
+                null
+            }
+            ContactLookup.NotFound -> null
+        }
+    }
     var showMissions by remember { mutableStateOf(false) }
     var missionText by remember { mutableStateOf("") }
     var missionBusy by remember { mutableStateOf(false) }
