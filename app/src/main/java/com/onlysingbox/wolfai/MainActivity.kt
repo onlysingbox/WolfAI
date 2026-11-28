@@ -816,7 +816,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         val providers = status.optJSONArray("providers") ?: JSONArray()
         val selectedAvailable = (0 until providers.length()).any { index ->
             val item = providers.optJSONObject(index)
-            item?.optString("id") == selectedModel && item.optBoolean("configured")
+            item != null && item.optString("id") == selectedModel && item.optBoolean("configured")
         }
         if (selectedModel != "auto" && !selectedAvailable) {
             selectedModel = "auto"
