@@ -103,7 +103,7 @@ object ExchangeMarketData {
             lastPriceRial = bitpinTomanToRial(price),
             change24hPercent = bitpinRatioToPercent(market.optDouble("daily_change_price", Double.NaN).takeIf { it.isFinite() }),
             highRial = market.optDouble("high", Double.NaN).takeIf { it.isFinite() }?.let(::bitpinTomanToRial),
-            lowRial = market.optDouble("low", Double.NaN).takeIf { it.isFinite() }?.times(10.0),
+            lowRial = market.optDouble("low", Double.NaN).takeIf { it.isFinite() }?.let(::bitpinTomanToRial),
             quoteVolumeRial = null,
             updatedAt = timestamp.takeIf { it.isFinite() && it > 0.0 }?.let {
                 Instant.ofEpochMilli((it * 1000.0).toLong()).toString()
