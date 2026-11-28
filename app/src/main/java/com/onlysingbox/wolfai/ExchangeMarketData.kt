@@ -4,6 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -86,11 +87,17 @@ object ExchangeMarketData {
 
     suspend fun bitpin(rawSymbol: String): ExchangeQuote = withContext(Dispatchers.IO) {
         val base = normalizeBaseSymbol(rawSymbol)
-        val root = JSONObject(get("https://api.bitpin.org/api/v1/mkt/tickers/"))
-        val status = root.optInt("status", 200)
-        if (status !in 200..299) error("بیت‌پین پاسخ معتبر نداد (HTTP $status).")
-        val rows = root.optJSONArray("body") ?: root.optJSONArray("results")
-            ?: error("ساختار پاسخ تیکر بیت‌پین تغییر کرده یا معتبر نیست.")
+        val response = JSONTokener(get("https://api.bitpin.org/api/v1/mkt/tickers/")).nextValue()
+        val rows = when (response) {
+            is JSONArray -> response
+            is JSONObject -> {
+                val status = response.optInt("status", 200)
+                if (status !in 200..299) error("بیت‌پین پاسخ معتبر نداد (HTTP $status).")
+                response.optJSONArray("body") ?: response.optJSONArray("results")
+                    ?: error("ساختار پاسخ تیکر بیت‌پین تغییر کرده یا معتبر نیست.")
+            }
+            else -> error("پاسخ تیکر بیت‌پین JSON معتبر نیست.")
+        }
         val market = findBitpinTicker(rows, base + "_IRT")
             ?: error("بازار ${base}/IRT در بیت‌پین پیدا نشد.")
         val price = market.optDouble("price", Double.NaN)
