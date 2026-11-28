@@ -19,6 +19,7 @@ This file records verified implementation, not planned features.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
 - Private long-term memory workspace in Android: authenticated owner-only listing, local search over the returned entries, and item deletion behind a confirmation dialog. The Worker endpoint validates the key, requires `confirm: true`, scopes the setting to the paired owner, and writes an activity log. The memory list is limited to 50 entries.
 - Private cloud text-document workspace in Android: authenticated listing and owner-confirmed creation of Markdown/text artifacts in D1, separate from local phone files. This is not yet a full Word/PDF/Excel cloud editor.
+- Private cloud documents now support authenticated full-content retrieval by document ID and owner-scoped permanent deletion. Android provides explicit open and delete controls; deletion requires a confirmation dialog, MASTER ON, matching owner ID, and an audit log. This remains a text/Markdown workspace, not a full Word/PDF/Excel editor.
 
 ## Mission proposal and gated execution API (source implemented, deployment pending)
 - Authenticated Android companion endpoint: `POST /api/companion/missions` accepts `{\"text\":\"...\"}` and uses the configured free-only model router to create a JSON proposal.
@@ -52,11 +53,11 @@ This file records verified implementation, not planned features.
 ## Not implemented or not end-to-end verified
 - Standalone pairing that does not require Telegram.
 - Fixed production signing key compatible with the first installed APK.
-- Server-side production deployment of the new companion endpoints.
+- Server-side production deployment of the new companion endpoints, including private-memory and cloud-document read/delete routes.
 - Exact 60 GB per-category allocations and complete file management.
 - A complete provider quota dashboard with reset times and historical per-model usage. Provider APIs do not consistently expose this information; currently only returned usage metadata is forwarded, not a verified remaining-quota counter.
 - General agent missions are available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions and step states; POST creates up to 8 proposal steps). The authenticated decision endpoint approves/rejects the plan. The first execution phase adds a prepare-and-confirm path for a narrow allowlist of read-only actions. Each prepared action is stored per step and requires a separate user tap to execute. This is not yet a general-purpose executor; messaging, calling, device control, purchases, deletion, file writes, GitHub writes, scheduling and other side effects remain unavailable. Production deployment, D1 migration, and end-to-end execution tests remain pending.
-- Email, calendar, messaging, browser automation and OAuth connectors inside Android.
+- Email, calendar, messaging, browser automation and OAuth connectors inside Android. The calendar page currently reads/writes Android's local calendar only; it is not connected to a cloud calendar provider.
 - Crypto/market analysis center and exchange data integration.
 - Contacts resolution and confirmed phone/video calling.
 - App launch/control, accessibility automation and supported Android settings controls.
