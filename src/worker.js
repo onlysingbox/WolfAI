@@ -3271,6 +3271,40 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
     }
+async function companionMemory(request, env) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  const settingKey = "owner_memory:" + String(device.owner_id);
+  let entries = [];
+  try {
+    const parsed = JSON.parse(await getSetting(env, settingKey, "[]"));
+    entries = Array.isArray(parsed) ? parsed : [];
+  } catch { entries = []; }
+  if (request.method === "GET") {
+    return json({
+      ok: true,
+      entries: entries.slice(-50).reverse().map(item => ({
+        key: String(item.key || "").slice(0, 120),
+        value: String(item.value || "").slice(0, 2000),
+        category: String(item.category || "general").slice(0, 60),
+        updated_at: item.updated_at || null
+      }))
+    });
+  }
+  if (request.method !== "DELETE") return json({ ok: false, error: "Method not allowed" }, 405);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const key = String(body?.key || "").trim();
+  if (!key || key.length > 120) return json({ ok: false, error: "کلید حافظه نامعتبر است." }, 400);
+  if (body?.confirm !== true) return json({ ok: false, error: "برای حذف این مورد، تأیید صریح لازم است.", requires_confirmation: true }, 409);
+  const before = entries.length;
+  entries = entries.filter(item => String(item.key || "").toLowerCase() !== key.toLowerCase());
+  if (entries.length === before) return json({ ok: false, error: "این مورد در حافظه پیدا نشد." }, 404);
+  await putSetting(env, settingKey, JSON.stringify(entries));
+  await log(env, device.owner_id, "companion.memory_deleted", "owner_memory", key, { remaining: entries.length });
+  return json({ ok: true, deleted: key, remaining: entries.length });
+}
+
 async function companionArtifacts(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
@@ -3295,6 +3329,9 @@ async function companionArtifacts(request, env) {
 
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/artifacts") {
       return await companionArtifacts(request, env);
+    }
+    if ((request.method === "GET" || request.method === "DELETE") && url.pathname === "/api/companion/memory") {
+      return await companionMemory(request, env);
     }
     if (request.method === "GET" && url.pathname === "/api/companion/status") {
       return await companionStatus(request, env);
