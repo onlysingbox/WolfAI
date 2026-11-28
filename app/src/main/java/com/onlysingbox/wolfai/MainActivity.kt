@@ -286,6 +286,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             executeMissionStep = { id, step -> apiMissionStep(securePrefs.safeString("device_token"), id, step, "execute") },
             setRemoteMaster = { enabled -> apiMaster(securePrefs.safeString("device_token"), enabled) },
             loadProviderStatus = { apiProviderStatus(securePrefs.safeString("device_token")) },
+            listMemory = { apiListMemory(securePrefs.safeString("device_token")) },
+            deleteMemory = { key -> apiDeleteMemory(securePrefs.safeString("device_token"), key) },
             speak = { text -> runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") } },
             stopSpeaking = { runCatching { tts?.stop() } },
             storagePrefs = securePrefs,
@@ -580,7 +582,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var localMode by remember { mutableStateOf(storagePrefs.safeBoolean("local_mode", false)) }
     var showStartupCrash by remember { mutableStateOf(startupCrashReport.isNotBlank()) }
@@ -983,9 +985,9 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     TextButton(onClick = {
                         pendingMemoryDelete = null
                         scope.launch {
-                            runCatching { apiDeleteMemory(token, memoryKey) }
+                            runCatching { deleteMemory(memoryKey) }
                                 .onSuccess {
-                                    runCatching { apiListMemory(token) }.onSuccess { remoteMemory = it }
+                                    runCatching { listMemory() }.onSuccess { remoteMemory = it }
                                     remoteMemoryStatus = "مورد «$memoryKey» حذف شد."
                                 }
                                 .onFailure { remoteMemoryStatus = "حذف انجام نشد: ${it.message}" }
@@ -1532,7 +1534,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         OutlinedButton(enabled = paired && !busy, onClick = {
                             remoteMemoryStatus = "در حال دریافت حافظه خصوصی..."
                             scope.launch {
-                                runCatching { apiListMemory(token) }
+                                runCatching { listMemory() }
                                     .onSuccess { remoteMemory = it; remoteMemoryStatus = "${it.length()} مورد حافظه دریافت شد." }
                                     .onFailure { remoteMemoryStatus = "دریافت حافظه ناموفق بود: ${it.message}" }
                             }
