@@ -66,8 +66,8 @@ This file records verified implementation, not planned features.
 - MASTER OFF is enforced in the deployed Worker at the shared AI model boundary and for queued WOLF work; final device-level behavior still requires acceptance testing.
 
 ## Release blockers
-1. Stable release signing is now configured in GitHub Actions through repository secrets, and a signed release APK artifact was successfully built in run 45553866282. The previously installed debug-signed APK cannot be updated in place; the user has already approved one uninstall/reinstall when the final stable APK is ready. Every future release must keep using the same persisted signing key and the unchanged application ID.
-2. The latest Worker deployment is live, and the production D1 database contains all 14 required application tables. The one-minute cron trigger was restored after deployment.
+1. Stable release signing is configured in GitHub Actions through repository secrets. WOLF AI 0.6.8 (versionCode 14) was built, signed, and verified successfully in run 46174690714; the direct APK artifact is `app-release.apk`. The previously installed debug-signed APK cannot be updated in place; the user has already approved one uninstall/reinstall when the final stable APK is ready. Every future release must keep using the same persisted signing key and the unchanged application ID.
+2. Worker `wolfai` deployment `d20b4153a31540f1b6e7aafa4211b0f8` is live. Production D1 contains all 14 required application tables, and the one-minute cron trigger is active.
 3. CI builds and mocked provider tests do not prove live model access or device-level behavior. Real provider tests, Android pairing/chat tests, and final device acceptance remain required.
 
 Do not mark WOLF AI as ready until the provider setup, production deployment, live acceptance tests, and agreed product-scope checks are complete.
