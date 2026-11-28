@@ -288,6 +288,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             loadProviderStatus = { apiProviderStatus(securePrefs.safeString("device_token")) },
             listMemory = { apiListMemory(securePrefs.safeString("device_token")) },
             deleteMemory = { key -> apiDeleteMemory(securePrefs.safeString("device_token"), key) },
+            listArtifacts = { apiListArtifacts(securePrefs.safeString("device_token")) },
+            createArtifact = { title, content -> apiCreateArtifact(securePrefs.safeString("device_token"), title, content) },
             speak = { text -> runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") } },
             stopSpeaking = { runCatching { tts?.stop() } },
             storagePrefs = securePrefs,
@@ -406,6 +408,33 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         runCatching { tts?.shutdown() }
         tts = null
         super.onDestroy()
+    }
+
+    private suspend fun apiListArtifacts(token: String): JSONArray = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/artifacts").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "دریافت اسناد ابری ناموفق بود"))
+            obj.optJSONArray("artifacts") ?: JSONArray()
+        } finally { conn.disconnect() }
+    }
+
+    private suspend fun apiCreateArtifact(token: String, title: String, content: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/artifacts").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "POST"; conn.connectTimeout = 10000; conn.readTimeout = 30000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("title", title).put("content", content).put("kind", "document").put("confirm", true).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "ذخیره سند ابری ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
     }
 
     private suspend fun apiListMemory(token: String): JSONArray = withContext(Dispatchers.IO) {
@@ -582,7 +611,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, listArtifacts: suspend ()->JSONArray, createArtifact: suspend (String, String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var localMode by remember { mutableStateOf(storagePrefs.safeBoolean("local_mode", false)) }
     var showStartupCrash by remember { mutableStateOf(startupCrashReport.isNotBlank()) }
@@ -615,6 +644,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         return null
     }
     var showStorage by remember { mutableStateOf(false) }
+    var remoteArtifacts by remember { mutableStateOf(JSONArray()) }
+    var cloudDocTitle by remember { mutableStateOf("") }
+    var cloudDocContent by remember { mutableStateOf("") }
+    var cloudDocStatus by remember { mutableStateOf("اسناد خصوصی ابری هنوز بارگذاری نشده‌اند.") }
     var remoteMemory by remember { mutableStateOf(JSONArray()) }
     var remoteMemoryStatus by remember { mutableStateOf("برای مشاهده حافظه خصوصی سرور، به‌روزرسانی را بزن.") }
     var remoteMemorySearch by remember { mutableStateOf("") }
@@ -1279,6 +1312,49 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("PDF، Word، Excel، تصویر، صوت و فایل‌های متنی را وارد کن. فایل اصلی در فضای خصوصی WOLF کپی می‌شود.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall)
                     Button(onClick={filePicker.launch(arrayOf("*/*"))},modifier=Modifier.fillMaxWidth()) { Text("انتخاب فایل از گوشی") }
                     Text(fileStatus,color=MaterialTheme.colorScheme.primary)
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    WolfSectionLabel("اسناد خصوصی ابری")
+                    Text("سندهای متنی در فضای خصوصی حساب مالک ذخیره می‌شوند؛ ذخیره فقط با فشردن دکمه انجام می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(value = cloudDocTitle, onValueChange = { cloudDocTitle = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("عنوان سند") })
+                    OutlinedTextField(value = cloudDocContent, onValueChange = { cloudDocContent = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 7, label = { Text("متن سند") })
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = paired && cloudDocTitle.isNotBlank() && cloudDocContent.isNotBlank() && !busy, onClick = {
+                            val title = cloudDocTitle.trim()
+                            val content = cloudDocContent.trim()
+                            cloudDocStatus = "در حال ذخیره سند خصوصی..."
+                            scope.launch {
+                                runCatching { createArtifact(title, content) }
+                                    .onSuccess {
+                                        cloudDocTitle = ""; cloudDocContent = ""
+                                        cloudDocStatus = "سند «$title» در فضای خصوصی ذخیره شد."
+                                        runCatching { listArtifacts() }.onSuccess { remoteArtifacts = it }
+                                    }
+                                    .onFailure { cloudDocStatus = "ذخیره سند ناموفق بود: ${it.message}" }
+                            }
+                        }, modifier = Modifier.weight(1f)) { Text("ذخیره در فضای ابری") }
+                        OutlinedButton(enabled = paired && !busy, onClick = {
+                            cloudDocStatus = "در حال دریافت اسناد..."
+                            scope.launch {
+                                runCatching { listArtifacts() }
+                                    .onSuccess { remoteArtifacts = it; cloudDocStatus = "${it.length()} سند خصوصی دریافت شد." }
+                                    .onFailure { cloudDocStatus = "دریافت اسناد ناموفق بود: ${it.message}" }
+                            }
+                        }, modifier = Modifier.weight(1f)) { Text("به‌روزرسانی") }
+                    }
+                    Text(cloudDocStatus, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 220.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items((0 until remoteArtifacts.length()).mapNotNull { remoteArtifacts.optJSONObject(it) }) { artifact ->
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
+                                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(artifact.optString("title"), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
+                                    Text(artifact.optString("excerpt"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                    Text(artifact.optString("created_at"), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    WolfSectionLabel("فایل‌های محلی گوشی")
                     var previewText by remember { mutableStateOf("") }
                     var previewFile by remember { mutableStateOf<File?>(null) }
                     val importedFiles = remember(filesRefresh) { File(storageRoot,"files").apply{mkdirs()}.listFiles()?.filter{it.isFile}?.sortedByDescending{it.lastModified()} ?: emptyList() }
