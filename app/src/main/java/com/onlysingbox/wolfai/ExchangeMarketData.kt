@@ -94,10 +94,11 @@ object ExchangeMarketData {
         ExchangeQuote(
             exchange = "Bitpin",
             symbol = base + "/IRT",
-            lastPriceRial = price,
+            // Bitpin's IRT quote asset is Toman; normalize internal storage to Rial.
+            lastPriceRial = price * 10.0,
             change24hPercent = bitpinRatioToPercent(market.optDouble("daily_change_price", Double.NaN).takeIf { it.isFinite() }),
-            highRial = market.optDouble("high", Double.NaN).takeIf { it.isFinite() },
-            lowRial = market.optDouble("low", Double.NaN).takeIf { it.isFinite() },
+            highRial = market.optDouble("high", Double.NaN).takeIf { it.isFinite() }?.times(10.0),
+            lowRial = market.optDouble("low", Double.NaN).takeIf { it.isFinite() }?.times(10.0),
             quoteVolumeRial = null,
             updatedAt = timestamp.takeIf { it.isFinite() && it > 0.0 }?.let {
                 Instant.ofEpochMilli((it * 1000.0).toLong()).toString()
