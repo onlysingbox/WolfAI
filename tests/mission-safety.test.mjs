@@ -268,3 +268,26 @@ test("Android-selectable Z.ai is accepted by the companion chat model allowlist"
   assert.ok(WOLF_ALLOWED_MODES.includes("zai"));
   assert.ok(WOLF_ALLOWED_MODES.includes("auto"));
 });
+
+
+import { removeOwnerMemoryEntry } from "../src/worker.js";
+
+test("private memory deletion is case-insensitive and preserves other owners' independent entries", () => {
+  const original = [
+    { key: "Work", value: "private" },
+    { key: "Travel", value: "trip" }
+  ];
+  const removed = removeOwnerMemoryEntry(original, " work ");
+  assert.equal(removed.removed, true);
+  assert.deepEqual(removed.entries, [{ key: "Travel", value: "trip" }]);
+  assert.deepEqual(original, [
+    { key: "Work", value: "private" },
+    { key: "Travel", value: "trip" }
+  ]);
+});
+
+test("private memory deletion rejects blank keys and missing entries without changing data", () => {
+  const original = [{ key: "Work", value: "private" }];
+  assert.deepEqual(removeOwnerMemoryEntry(original, "  "), { entries: original, removed: false });
+  assert.deepEqual(removeOwnerMemoryEntry(original, "unknown"), { entries: original, removed: false });
+});
