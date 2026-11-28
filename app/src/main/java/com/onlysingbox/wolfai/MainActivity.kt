@@ -707,6 +707,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var pendingCallNumber by remember { mutableStateOf<String?>(null) }
     var pendingCallType by remember { mutableStateOf("phone") }
     var pendingCallLabel by remember { mutableStateOf("") }
+    var pendingCallMessage by remember { mutableStateOf("") }
+    var pendingCallSubject by remember { mutableStateOf("") }
     val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val number = pendingCallNumber
         pendingCallNumber = null
@@ -723,6 +725,24 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         pendingCallType = "phone"
         pendingCallLabel = ""
         when (type) {
+            "email" -> {
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + Uri.encode(number))).apply {
+                    putExtra(Intent.EXTRA_SUBJECT, pendingCallSubject)
+                    putExtra(Intent.EXTRA_TEXT, pendingCallMessage)
+                }
+                pendingCallSubject = ""; pendingCallMessage = ""
+                runCatching { context.startActivity(intent) }
+                    .onSuccess { status = "پیش‌نویس ایمیل در برنامهٔ ایمیل باز شد؛ ارسال نهایی با خودت است." }
+                    .onFailure { status = "برنامهٔ ایمیل در دسترس نیست: ${it.message}" }
+            }
+            "whatsapp_message" -> {
+                val digits = number.filter { it.isDigit() }
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits?text=" + Uri.encode(pendingCallMessage))).setPackage("com.whatsapp")
+                pendingCallMessage = ""
+                runCatching { context.startActivity(intent) }
+                    .onSuccess { status = "پیش‌نویس پیام در واتساپ باز شد؛ ارسال نهایی با خودت است." }
+                    .onFailure { status = "بازکردن واتساپ ناموفق بود: ${it.message}" }
+            }
             "whatsapp" -> {
                 val digits = number.filter { it.isDigit() }
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")).setPackage("com.whatsapp")
@@ -851,7 +871,28 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             if (browser.resolveActivity(context.packageManager) != null) { context.startActivity(browser); return "صفحه در مرورگر باز شد: " + address }
             return "مرورگر انتخاب‌شده نصب نیست یا پیوند را باز نمی‌کند."
         }
+        val emailMatch = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE).find(raw)
+        if ((command.contains("ایمیل") || command.contains("email")) && emailMatch != null) {
+            val subject = Regex("موضوع\\s*[:：]\\s*(.+?)(?=\\s+متن\\s*[:：]|$)", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            val body = Regex("متن\\s*[:：]\\s*(.+)$", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            if (subject.isBlank() && body.isBlank()) return "برای ساخت پیش‌نویس ایمیل، از قالب «ایمیل به name@example.com موضوع: ... متن: ...» استفاده کن."
+            pendingCallNumber = emailMatch.value; pendingCallType = "email"
+            pendingCallSubject = subject; pendingCallMessage = body
+            pendingCallLabel = "پیش‌نویس ایمیل به ${emailMatch.value}\\nموضوع: ${subject.ifBlank { "بدون موضوع" }}\\nمتن: ${body.take(500)}"
+            return "پیش‌نویس آماده است. برای بازکردن برنامه ایمیل و بررسی آن، تأیید کن؛ ایمیل خودکار ارسال نمی‌شود."
+        }
         val isWhatsappCall = command.contains("واتساپ") || command.contains("whatsapp")
+        val isWhatsappMessage = isWhatsappCall && (command.contains("پیام") || command.contains("message"))
+        if (isWhatsappMessage) {
+            val target = raw.substringAfter("به ", "").substringBefore(" متن").trim()
+            val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
+            val body = Regex("(?:متن|message)\\s*[:：]\\s*(.+)$", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد؛ نام یا شمارهٔ دقیق مخاطب را وارد کن."
+            if (body.isBlank()) return "متن پیام مشخص نیست. از قالب «پیام واتساپ به شماره ... متن: ...» استفاده کن."
+            pendingCallNumber = number; pendingCallType = "whatsapp_message"; pendingCallMessage = body
+            pendingCallLabel = "پیش‌نویس پیام واتساپ به $number\\n${body.take(700)}"
+            return "پیش‌نویس پیام آماده است؛ برای بازکردن واتساپ و بررسی متن تأیید کن. پیام خودکار ارسال نمی‌شود."
+        }
         val callIntent = command.contains("زنگ بزن") || command.contains("تماس بگیر") || command.contains("تماس با") || command.contains("شماره گیری") || command.contains("call ")
         val isTelegramCall = command.contains("تلگرام") || command.contains("telegram")
         if (isTelegramCall && callIntent) {
@@ -1131,15 +1172,17 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     pendingCallLabel = ""
                     status = "درخواست تماس لغو شد؛ هیچ تماسی آغاز نشد."
                 },
-                title = { Text("تأیید تماس") },
+                title = { Text(if (pendingCallType == "email" || pendingCallType == "whatsapp_message") "تأیید پیش‌نویس پیام" else "تأیید تماس") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(pendingCallLabel)
                         Text(
-                            if (pendingCallType == "phone")
-                                "با تأیید، اندروید درخواست شماره‌گیری مستقیم را اجرا می‌کند. تماس فقط پس از اجازه سیستم آغاز می‌شود."
-                            else
-                                "با تأیید، فقط مخاطب در برنامه مربوط باز می‌شود. شروع تماس را باید خودت داخل همان برنامه انجام دهی.",
+                            when (pendingCallType) {
+                                "phone" -> "با تأیید، اندروید درخواست شماره‌گیری مستقیم را اجرا می‌کند. تماس فقط پس از اجازه سیستم آغاز می‌شود."
+                                "email" -> "با تأیید، فقط برنامه ایمیل و پیش‌نویس باز می‌شود؛ ارسال نهایی انجام نمی‌شود."
+                                "whatsapp_message" -> "با تأیید، فقط پیش‌نویس در واتساپ باز می‌شود؛ ارسال نهایی انجام نمی‌شود."
+                                else -> "با تأیید، فقط مخاطب در برنامه مربوط باز می‌شود. شروع تماس را باید خودت داخل همان برنامه انجام دهی."
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
