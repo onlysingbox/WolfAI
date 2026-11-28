@@ -874,11 +874,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         val emailMatch = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE).find(raw)
         if ((command.contains("ایمیل") || command.contains("email")) && emailMatch != null) {
             val subject = Regex("موضوع\\s*[:：]\\s*(.+?)(?=\\s+متن\\s*[:：]|$)", RegexOption.IGNORE_CASE).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
-            val body = Regex("متن\\s*[:：]\\s*(.+)$", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            val body = Regex("متن\\s*[:：]\\s*(.+)$", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
             if (subject.isBlank() && body.isBlank()) return "برای ساخت پیش‌نویس ایمیل، از قالب «ایمیل به name@example.com موضوع: ... متن: ...» استفاده کن."
             pendingCallNumber = emailMatch.value; pendingCallType = "email"
             pendingCallSubject = subject; pendingCallMessage = body
-            pendingCallLabel = "پیش‌نویس ایمیل به ${emailMatch.value}\\nموضوع: ${subject.ifBlank { "بدون موضوع" }}\\nمتن: ${body.take(500)}"
+            pendingCallLabel = "پیش‌نویس ایمیل به ${emailMatch.value}\nموضوع: ${subject.ifBlank { "بدون موضوع" }}\nمتن: ${body.take(500)}"
             return "پیش‌نویس آماده است. برای بازکردن برنامه ایمیل و بررسی آن، تأیید کن؛ ایمیل خودکار ارسال نمی‌شود."
         }
         val isWhatsappCall = command.contains("واتساپ") || command.contains("whatsapp")
@@ -886,11 +886,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (isWhatsappMessage) {
             val target = raw.substringAfter("به ", "").substringBefore(" متن").trim()
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
-            val body = Regex("(?:متن|message)\\s*[:：]\\s*(.+)$", RegexOption.IGNORE_CASE or RegexOption.DOT_MATCHES_ALL).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            val body = Regex("(?:متن|message)\\s*[:：]\\s*(.+)$", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
             if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد؛ نام یا شمارهٔ دقیق مخاطب را وارد کن."
             if (body.isBlank()) return "متن پیام مشخص نیست. از قالب «پیام واتساپ به شماره ... متن: ...» استفاده کن."
             pendingCallNumber = number; pendingCallType = "whatsapp_message"; pendingCallMessage = body
-            pendingCallLabel = "پیش‌نویس پیام واتساپ به $number\\n${body.take(700)}"
+            pendingCallLabel = "پیش‌نویس پیام واتساپ به $number\n${body.take(700)}"
             return "پیش‌نویس پیام آماده است؛ برای بازکردن واتساپ و بررسی متن تأیید کن. پیام خودکار ارسال نمی‌شود."
         }
         val callIntent = command.contains("زنگ بزن") || command.contains("تماس بگیر") || command.contains("تماس با") || command.contains("شماره گیری") || command.contains("call ")
