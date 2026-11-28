@@ -959,6 +959,76 @@ async function companionMissions(request, env) {
     return json({ ok: false, error: "طرح مأموریت ساخته نشد: " + String(error?.message || error).slice(0, 240) }, 502);
   }
 }
+function canControlCompanionMission(runStatus, action, runningSteps = 0) {
+  if (action === "pause") return runStatus === "approved_pending_execution" && Number(runningSteps) === 0;
+  if (action === "resume") return runStatus === "paused";
+  return false;
+}
+
+function canRetryCompanionMissionStep(runStatus, stepStatus, priorIncompleteCount = 0, runningCount = 0) {
+  return runStatus === "execution_failed" && stepStatus === "failed" &&
+    Number(priorIncompleteCount) === 0 && Number(runningCount) === 0;
+}
+
+async function controlCompanionMission(request, env, missionId) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  if (await getSetting(env, "companion_master_enabled", "true") !== "true") {
+    return json({ ok: false, error: "MASTER OFF است؛ کنترل مأموریت متوقف است." }, 423);
+  }
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const action = String(body?.action || "").toLowerCase();
+  if (!["pause", "resume"].includes(action)) return json({ ok: false, error: "عملیات باید pause یا resume باشد." }, 400);
+  if (!/^[0-9a-f-]{36}$/i.test(missionId)) return json({ ok: false, error: "شناسه مأموریت نامعتبر است." }, 400);
+  const mission = await getOwnedCompanionMission(env, missionId, device.owner_id);
+  if (!mission) return json({ ok: false, error: "مأموریت پیدا نشد." }, 404);
+  const running = await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND status='running'").bind(missionId).first();
+  const runningCount = Number(running?.n || 0);
+  if (!canControlCompanionMission(mission.status, action, runningCount)) {
+    return json({ ok: false, error: action === "pause"
+      ? "این مأموریت قابل توقف نیست؛ اجرای مرحله فعال باید ابتدا تمام شود."
+      : "فقط مأموریت متوقف‌شده قابل ادامه است." }, 409);
+  }
+  const nextStatus = action === "pause" ? "paused" : "approved_pending_execution";
+  const updated = await env.DB.prepare(
+    "UPDATE agent_runs SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status=?"
+  ).bind(nextStatus, missionId, String(device.owner_id), mission.status).run();
+  if (!updated?.meta?.changes) return json({ ok: false, error: "وضعیت مأموریت هم‌زمان تغییر کرده است؛ فهرست را تازه‌سازی کن." }, 409);
+  await log(env, device.owner_id, action === "pause" ? "companion.mission_paused" : "companion.mission_resumed", "agent_run", missionId);
+  return json({ ok: true, mission_id: missionId, status: nextStatus, executed: false });
+}
+
+async function retryCompanionMissionStep(request, env, missionId) {
+  const device = await authorizeCompanion(request, env);
+  if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
+  if (await getSetting(env, "companion_master_enabled", "true") !== "true") return json({ ok: false, error: "MASTER OFF است؛ تلاش مجدد متوقف است." }, 423);
+  let body;
+  try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+  const stepNo = Number(body?.step_no);
+  if (!Number.isInteger(stepNo) || stepNo < 1 || stepNo > 8) return json({ ok: false, error: "شماره مرحله نامعتبر است." }, 400);
+  const mission = await getOwnedCompanionMission(env, missionId, device.owner_id);
+  if (!mission) return json({ ok: false, error: "مأموریت پیدا نشد." }, 404);
+  const step = await env.DB.prepare("SELECT id,status,approved_by FROM agent_steps WHERE run_id=? AND step_no=?").bind(missionId, stepNo).first();
+  if (!step) return json({ ok: false, error: "مرحله پیدا نشد." }, 404);
+  const prior = await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND step_no<? AND status<>'completed'").bind(missionId, stepNo).first();
+  const running = await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_steps WHERE run_id=? AND status='running'").bind(missionId).first();
+  if (!canRetryCompanionMissionStep(mission.status, step.status, prior?.n || 0, running?.n || 0)) {
+    return json({ ok: false, error: "فقط مرحله ناموفقِ مأموریت متوقف‌شده، پس از تکمیل مراحل قبلی، قابل تلاش مجدد است." }, 409);
+  }
+  if (String(step.approved_by || "") !== String(device.owner_id)) {
+    return json({ ok: false, error: "تأیید قبلی این مرحله متعلق به مالک نیست." }, 403);
+  }
+  const updated = await env.DB.prepare(
+    "UPDATE agent_steps SET status='approved_pending_execution',input_json=(SELECT input_json FROM agent_steps WHERE id=?),error_text=NULL,started_at=NULL,completed_at=NULL WHERE id=? AND run_id=? AND status='failed' AND approved_by=?"
+  ).bind(step.id, step.id, missionId, String(device.owner_id)).run();
+  if (!updated?.meta?.changes) return json({ ok: false, error: "مرحله هم‌زمان تغییر کرده است؛ فهرست را تازه‌سازی کن." }, 409);
+  const runUpdated = await env.DB.prepare("UPDATE agent_runs SET status='approved_pending_execution',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status='execution_failed'").bind(missionId, String(device.owner_id)).run();
+  if (!runUpdated?.meta?.changes) return json({ ok: false, error: "وضعیت مأموریت تغییر کرده است." }, 409);
+  await log(env, device.owner_id, "companion.mission_step_retry_requested", "agent_step", step.id, { step_no: stepNo });
+  return json({ ok: true, mission_id: missionId, step_no: stepNo, status: "approved_pending_execution", requires_reprepare_and_approval: true, executed: false });
+}
+
 async function decideCompanionMission(request, env, missionId) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
@@ -3373,6 +3443,14 @@ async function companionArtifacts(request, env) {
     if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/missions") {
       return await companionMissions(request, env);
     }
+    const missionControlMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/control$/i);
+    if (request.method === "POST" && missionControlMatch) {
+      return await controlCompanionMission(request, env, missionControlMatch[1]);
+    }
+    const missionRetryMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/steps\/retry$/i);
+    if (request.method === "POST" && missionRetryMatch) {
+      return await retryCompanionMissionStep(request, env, missionRetryMatch[1]);
+    }
     const missionStepPrepareMatch = url.pathname.match(/^\/api\/companion\/missions\/([0-9a-f-]{36})\/steps\/prepare$/i);
     if (request.method === "POST" && missionStepPrepareMatch) {
       return await prepareCompanionMissionStep(request, env, missionStepPrepareMatch[1]);
@@ -3542,4 +3620,4 @@ async function companionArtifacts(request, env) {
     }
   }
 };
-export { validateCompanionReadOnlyAction, validateCompanionAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider, runDueSchedules };
+export { validateCompanionReadOnlyAction, validateCompanionAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, canControlCompanionMission, canRetryCompanionMissionStep, wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS, callWolfProvider, runDueSchedules };
