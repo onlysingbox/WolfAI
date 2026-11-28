@@ -342,16 +342,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private fun findPhoneNumberByName(query: String): String? {
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        val contacts = mutableListOf<ContactPhone>()
         contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
             val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
             val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-            while (cursor.moveToNext()) {
-                val name = cursor.getString(nameCol).orEmpty()
-                val number = cursor.getString(numberCol).orEmpty()
-                if (name.contains(query, ignoreCase = true) && number.isNotBlank()) return number
-            }
+            while (cursor.moveToNext()) contacts.add(ContactPhone(cursor.getString(nameCol).orEmpty(), cursor.getString(numberCol).orEmpty()))
         }
-        return null
+        return (ContactResolver.resolve(query, contacts) as? ContactLookup.Match)?.contact?.number
     }
 
     private suspend fun readPhoneContacts(): List<Pair<String, String>> = withContext(Dispatchers.IO) {
@@ -709,16 +706,13 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     }
     fun findPhoneNumberByName(query: String): String? {
         if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
+        val found = mutableListOf<ContactPhone>()
         context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
             val nameCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
             val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-            while (cursor.moveToNext()) {
-                val name = cursor.getString(nameCol).orEmpty()
-                val number = cursor.getString(numberCol).orEmpty()
-                if (name.contains(query, ignoreCase = true) && number.isNotBlank()) return number
-            }
+            while (cursor.moveToNext()) found.add(ContactPhone(cursor.getString(nameCol).orEmpty(), cursor.getString(numberCol).orEmpty()))
         }
-        return null
+        return (ContactResolver.resolve(query, found) as? ContactLookup.Match)?.contact?.number
     }
     var showStorage by remember { mutableStateOf(false) }
     var showMarket by remember { mutableStateOf(false) }
