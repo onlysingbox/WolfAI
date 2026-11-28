@@ -22,5 +22,5 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
-      - name: Compile Android Kotlin sources without packaging an APK
-        run: gradle --no-daemon :app:compileDebugKotlin
+      - name: Compile Android Kotlin sources and run local unit tests without packaging an APK
+        run: gradle --no-daemon :app:compileDebugKotlin :app:testDebugUnitTest
