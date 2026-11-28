@@ -649,6 +649,21 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(if (startupCrashReport.isBlank()) "آماده گفتگو" else "گزارش خطای اجرای قبلی ذخیره شده است.") }
     val context = androidx.compose.ui.platform.LocalContext.current
+    var pendingExportFile by remember { mutableStateOf<File?>(null) }
+    var exportStatus by remember { mutableStateOf("برای خروجی گرفتن، متن سند را وارد کن.") }
+    fun copyExportToUri(uri: Uri?) {
+        val source = pendingExportFile
+        if (uri == null || source == null) { exportStatus = "ذخیره خروجی لغو شد."; return }
+        runCatching {
+            context.contentResolver.openOutputStream(uri, "wt")?.use { output -> source.inputStream().use { input -> input.copyTo(output) } }
+                ?: error("امکان نوشتن فایل مقصد وجود ندارد.")
+        }.onSuccess { exportStatus = "فایل با موفقیت در محل انتخاب‌شده ذخیره شد." }
+            .onFailure { exportStatus = "ذخیره فایل ناموفق بود: ${it.message}" }
+        pendingExportFile = null
+    }
+    val pdfSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { copyExportToUri(it) }
+    val docxSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.wordprocessingml.document")) { copyExportToUri(it) }
+    val xlsxSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { copyExportToUri(it) }
     if (showStartupCrash) {
         AlertDialog(
             onDismissRequest = { showStartupCrash = false },
@@ -1480,6 +1495,33 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Text("سندهای متنی در فضای خصوصی حساب مالک ذخیره می‌شوند؛ ذخیره فقط با فشردن دکمه انجام می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(value = cloudDocTitle, onValueChange = { cloudDocTitle = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("عنوان سند") })
                     OutlinedTextField(value = cloudDocContent, onValueChange = { cloudDocContent = it }, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 7, label = { Text("متن سند") })
+                    Text("خروجی فایل (با پشتیبانی از متن فارسی و راست‌به‌چپ)", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    Text(exportStatus, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(enabled = cloudDocTitle.isNotBlank() && cloudDocContent.isNotBlank() && !busy, modifier = Modifier.weight(1f), onClick = {
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { DocumentExport.createPdf(context, cloudDocTitle, cloudDocContent, File(storageRoot, "files/wolf_export.pdf")) } }
+                                    .onSuccess { pendingExportFile = it; pdfSaveLauncher.launch(cloudDocTitle.trim().take(50).ifBlank { "WOLF" } + ".pdf") }
+                                    .onFailure { exportStatus = "ساخت PDF ناموفق بود: ${it.message}" }
+                            }
+                        }) { Text("PDF") }
+                        OutlinedButton(enabled = cloudDocTitle.isNotBlank() && cloudDocContent.isNotBlank() && !busy, modifier = Modifier.weight(1f), onClick = {
+                            scope.launch {
+                                runCatching { withContext(Dispatchers.IO) { DocumentExport.createDocx(cloudDocTitle, cloudDocContent, File(storageRoot, "files/wolf_export.docx")) } }
+                                    .onSuccess { pendingExportFile = it; docxSaveLauncher.launch(cloudDocTitle.trim().take(50).ifBlank { "WOLF" } + ".docx") }
+                                    .onFailure { exportStatus = "ساخت Word ناموفق بود: ${it.message}" }
+                            }
+                        }) { Text("Word") }
+                        OutlinedButton(enabled = cloudDocTitle.isNotBlank() && cloudDocContent.isNotBlank() && !busy, modifier = Modifier.weight(1f), onClick = {
+                            scope.launch {
+                                runCatching {
+                                    val rows = cloudDocContent.lines().filter { it.isNotBlank() }.map { line -> line.split('\t').map(String::trim) }
+                                    withContext(Dispatchers.IO) { DocumentExport.createXlsx(rows, File(storageRoot, "files/wolf_export.xlsx")) }
+                                }.onSuccess { pendingExportFile = it; xlsxSaveLauncher.launch(cloudDocTitle.trim().take(50).ifBlank { "WOLF" } + ".xlsx") }
+                                    .onFailure { exportStatus = "ساخت Excel ناموفق بود: ${it.message}" }
+                            }
+                        }) { Text("Excel") }
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(enabled = paired && cloudDocTitle.isNotBlank() && cloudDocContent.isNotBlank() && !busy, onClick = {
                             val title = cloudDocTitle.trim()
