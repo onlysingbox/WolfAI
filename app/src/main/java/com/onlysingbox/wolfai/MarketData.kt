@@ -45,16 +45,15 @@ object MarketData {
     suspend fun search(query: String): List<CoinQuote> = withContext(Dispatchers.IO) {
         val q = query.trim()
         require(q.isNotBlank()) { "نام یا نماد رمزارز را وارد کن." }
-        val geckoFailure = runCatching { searchCoinGecko(q) }.exceptionOrNull()
-        if (geckoFailure == null) {
-            val geckoResults = runCatching { searchCoinGecko(q) }.getOrNull()
-            if (!geckoResults.isNullOrEmpty()) return@withContext geckoResults
-        }
-        val paprikaResults = runCatching { searchCoinPaprika(q) }.getOrNull()
-        if (!paprikaResults.isNullOrEmpty()) return@withContext paprikaResults
+        val geckoAttempt = runCatching { searchCoinGecko(q) }
+        geckoAttempt.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        val paprikaAttempt = runCatching { searchCoinPaprika(q) }
+        paprikaAttempt.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
         throw IllegalStateException(
             "CoinGecko و CoinPaprika هر دو در دسترس نبودند یا نتیجه‌ای پیدا نکردند. " +
-                (geckoFailure?.message ?: "جست‌وجوی CoinGecko نتیجه نداد.")
+                (geckoAttempt.exceptionOrNull()?.message
+                    ?: paprikaAttempt.exceptionOrNull()?.message
+                    ?: "برای این عبارت رمزارزی پیدا نشد.")
         )
     }
 
