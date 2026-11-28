@@ -726,7 +726,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         pendingCallLabel = ""
         when (type) {
             "email" -> {
-                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + Uri.encode(number))).apply {
+                val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + number)).apply {
                     putExtra(Intent.EXTRA_SUBJECT, pendingCallSubject)
                     putExtra(Intent.EXTRA_TEXT, pendingCallMessage)
                 }
