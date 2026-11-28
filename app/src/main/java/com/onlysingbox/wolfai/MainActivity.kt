@@ -810,11 +810,24 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         }
     }
     val scope = rememberCoroutineScope()
+    fun acceptProviderStatus(status: JSONObject) {
+        providerStatus = status
+        providerStatusError = ""
+        val providers = status.optJSONArray("providers") ?: JSONArray()
+        val selectedAvailable = (0 until providers.length()).any { index ->
+            val item = providers.optJSONObject(index)
+            item?.optString("id") == selectedModel && item.optBoolean("configured")
+        }
+        if (selectedModel != "auto" && !selectedAvailable) {
+            selectedModel = "auto"
+            storagePrefs.safeEdit { putString("ai_model", "auto") }
+        }
+    }
     LaunchedEffect(paired) {
         if (paired) {
             providerStatusBusy = true
             runCatching { loadProviderStatus() }
-                .onSuccess { providerStatus = it; providerStatusError = "" }
+                .onSuccess { acceptProviderStatus(it) }
                 .onFailure { providerStatusError = it.message ?: "ارتباط با سرور برقرار نشد." }
             providerStatusBusy = false
         }
@@ -1636,14 +1649,14 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                             scope.launch {
                                 providerStatusBusy = true
                                 runCatching { loadProviderStatus() }
-                                    .onSuccess { providerStatus = it; providerStatusError = "" }
+                                    .onSuccess { acceptProviderStatus(it) }
                                     .onFailure { providerStatusError = it.message ?: "خطا در دریافت وضعیت" }
                                 providerStatusBusy = false
                             }
                         }) { Text("تازه‌سازی") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("auto" to "خودکار", "glm" to "GLM", "zai" to "Z.ai GLM", "gemma" to "Gemma", "gemini" to "Gemini", "groq" to "Groq", "openrouter" to "OpenRouter رایگان").forEach { (key, label) ->
+                        listOf("auto" to "خودکار", "zai" to "Z.AI رایگان", "groq" to "Groq رایگان").forEach { (key, label) ->
                             FilterChip(selected = selectedModel == key, enabled = providerIsConfigured(key), onClick = { selectedModel = key; storagePrefs.safeEdit { putString("ai_model", key) } }, label = { Text(label) })
                         }
                     }
@@ -1653,8 +1666,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         if (item.optString("id") == "auto" || item.optString("id") == "deepseek") continue
                         Text((item.optString("label") + " | " + if (item.optBoolean("configured")) "پیکربندی شده" else "نیازمند اتصال یا کلید"), color = if (item.optBoolean("configured")) Cyan else Gold, style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("کلیدها فقط در Cloudflare ذخیره می‌شوند. Gemini در طرح رایگان ممکن است از داده‌ها برای بهبود محصولات Google استفاده کند؛ اطلاعات محرمانه نفرست. Workers AI در طرح رایگان روزانه ۱۰٬۰۰۰ Neuron دارد؛ در طرح پولی مصرف اضافه ممکن است هزینه داشته باشد. برای جلوگیری از هزینه، طرح پولی را فعال نکن.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "glm" -> "Cloudflare GLM-4.7-Flash"; "zai" -> "Z.ai GLM-4.7-Flash"; "gemma" -> "Cloudflare Gemma 4 26B"; "gemini" -> "Google Gemini 2.5 Flash"; "groq" -> "Groq GPT-OSS 120B"; "openrouter" -> "OpenRouter Free"; else -> "خودکار" }, color = Cyan)
+                    Text("حالت رایگان فقط از Z.AI و Groq استفاده می‌کند. سهمیه هر دو محدود است؛ با تمام شدن سهمیه، برنامه خطا می‌دهد و به سرویس پولی تغییر مسیر نمی‌دهد. کلیدها فقط در Cloudflare نگهداری می‌شوند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Text("مدل انتخاب‌شده: " + when(selectedModel) { "zai" -> "Z.AI GLM-4.7-Flash رایگان"; "groq" -> "Groq GPT-OSS 120B رایگان"; else -> "خودکار، فقط رایگان" }, color = Cyan)
                 }
                 else if (showStorage) {
                     WolfPageHeader("حافظه و یادداشت‌ها","فضای محلی، یادداشت‌ها و فایل‌های ذخیره‌شده را مدیریت کن","PRIVATE STORAGE")
