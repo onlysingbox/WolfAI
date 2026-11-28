@@ -7,6 +7,7 @@ import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 
@@ -95,8 +96,9 @@ object MarketData {
             currencies.optJSONObject(i)?.takeIf { it.optBoolean("is_active", true) }
         }
         if (candidates.isEmpty()) return emptyList()
-        return candidates.map { coin ->
-            async(Dispatchers.IO) {
+        return coroutineScope {
+            candidates.map { coin ->
+                async(Dispatchers.IO) {
                 val id = coin.optString("id")
                 require(id.matches(Regex("[a-z0-9-]{2,100}"))) { "شناسه رمزارز نامعتبر است." }
                 val ticker = JSONObject(get("https://api.coinpaprika.com/v1/tickers/$id"))
@@ -115,8 +117,9 @@ object MarketData {
                     source = "CoinPaprika",
                     updatedAt = ticker.optString("last_updated").takeIf(String::isNotBlank)
                 )
-            }
-        }.awaitAll()
+                }
+            }.awaitAll()
+        }
     }
 
     fun format(quote: CoinQuote): String = buildString {
