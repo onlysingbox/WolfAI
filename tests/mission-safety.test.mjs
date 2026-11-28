@@ -257,11 +257,11 @@ test("Groq and Z.AI adapters use only their approved free model identifiers", as
     const groq = await callWolfProvider({ GROQ_API_KEY: "never-log-this" }, "groq", messages);
     assert.equal(groq.answer, "free provider test reply");
     assert.equal(calls.at(-1).url, "https://api.groq.com/openai/v1/chat/completions");
-    assert.match(calls.at(-1).init.body, /openai\\/gpt-oss-120b/);
+    assert.match(calls.at(-1).init.body, /openai\/gpt-oss-120b/);
     const zai = await callWolfProvider({ ZAI_API_KEY: "never-log-this" }, "zai", messages);
     assert.equal(zai.answer, "free provider test reply");
     assert.equal(calls.at(-1).url, "https://api.z.ai/api/paas/v4/chat/completions");
-    assert.match(calls.at(-1).init.body, /glm-4\\.7-flash/);
+    assert.match(calls.at(-1).init.body, /glm-4\.7-flash/);
     assert.ok(calls.every(x => !x.url.includes("never-log-this")));
   } finally {
     globalThis.fetch = originalFetch;
