@@ -13,8 +13,8 @@ This file records verified implementation, not planned features.
 - MASTER OFF immediately cancels the active Android request and suppresses late replies.
 - Server-side companion MASTER OFF endpoint is enforced at the shared AI model boundary for Android and Telegram AI requests; queued WOLF agent jobs are acknowledged and dropped while OFF, so they do not replay when re-enabled. Internal delayed-message cleanup remains operational.
 - Conversation context is sent from local Android storage; companion chat turns are no longer written to D1 per message.
-- AI model selection UI reads the server provider catalog. The server exposes only automatic, Z.AI GLM-4.7-Flash, Groq GPT-OSS 120B, Cloudflare GLM-4.7-Flash and Cloudflare Gemma 4 26B.
-- A server-side hard allowlist blocks every provider except Z.AI GLM-4.7-Flash, Groq GPT-OSS 120B and the two Cloudflare Workers AI models. Automatic fallback prioritizes Z.AI, then Groq, then Cloudflare AI. Gemini and OpenRouter are deliberately excluded so an old client selection or stale secret cannot route requests to them.
+- AI model selection UI reads the server provider catalog. In strict zero-billing mode the server exposes only automatic, Z.AI GLM-4.7-Flash and Groq GPT-OSS 120B.
+- A server-side hard allowlist permits only Z.AI GLM-4.7-Flash and Groq GPT-OSS 120B, in that order. Cloudflare Workers AI is deliberately excluded from runtime routing because usage above its daily free allocation can be billable on paid Workers plans. Gemini and OpenRouter are also blocked, including requests from stale clients.
 - Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
 - Private long-term memory workspace in Android: authenticated owner-only listing, local search over the returned entries, and item deletion behind a confirmation dialog. The Worker endpoint validates the key, requires `confirm: true`, scopes the setting to the paired owner, and writes an activity log. The memory list is limited to 50 entries.
@@ -79,7 +79,7 @@ The following Cloudflare Worker secrets are optional and are never stored in the
 - `GEMINI_API_KEY` for the Gemini 2.5 Flash free tier. Google states free-tier prompts may be used to improve its products; do not send sensitive/private material through this provider unless that policy is acceptable.
 - `GROQ_API_KEY` for Groq's Free tier using `openai/gpt-oss-120b`; do not upgrade the Groq account to a paid tier if zero-cost use is required.
 - `OPENROUTER_API_KEY` for the free-only model `meta-llama/llama-3.3-70b-instruct:free`. Provider access and rate limits can change.
-- Existing `AI` binding continues to provide Cloudflare GLM and Gemma.
+- The existing Cloudflare `AI` binding remains configured but is intentionally not called by WOLF AI in strict zero-billing mode, because usage beyond the free allocation can be billed on paid plans.
 
 No DeepSeek API key is used, and no paid model or paid fallback is enabled. A user must configure each optional secret in Cloudflare before that provider can answer. Cloudflare documents a 10,000-Neuron daily free allocation; on Workers Free, requests fail after the allocation, while Workers Paid can bill usage above it. Keep the account on Workers Free if no charge is acceptable. Gemini's free tier may use submitted content to improve Google products. Groq must remain on its Free tier; OpenRouter is pinned to the `:free` model. Exact remaining quota is shown only when a provider exposes reliable usage information.
 
