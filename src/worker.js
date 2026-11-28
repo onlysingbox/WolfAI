@@ -3316,8 +3316,27 @@ async function companionArtifacts(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
   if (request.method === "GET") {
+    const url = new URL(request.url);
+    const id = String(url.searchParams.get("id") || "").trim();
+    if (id) {
+      const artifact = await env.DB.prepare("SELECT id,kind,title,mime_type,created_at,content_text FROM artifacts WHERE id=? AND owner_id=? LIMIT 1").bind(id, String(device.owner_id)).first();
+      if (!artifact) return json({ ok: false, error: "سند پیدا نشد یا به این حساب تعلق ندارد." }, 404);
+      return json({ ok: true, artifact });
+    }
     const rows = await env.DB.prepare("SELECT id,kind,title,mime_type,created_at,substr(content_text,1,1200) AS excerpt FROM artifacts WHERE owner_id=? ORDER BY created_at DESC LIMIT 100").bind(String(device.owner_id)).all();
     return json({ ok: true, artifacts: rows.results || [] });
+  }
+  if (request.method === "DELETE") {
+    if (await getSetting(env, "companion_master_enabled", "true") !== "true") return json({ ok: false, error: "MASTER OFF است؛ حذف سند متوقف است." }, 423);
+    let body;
+    try { body = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
+    const id = String(body?.id || "").trim();
+    if (!id || id.length > 80) return json({ ok: false, error: "شناسه سند نامعتبر است." }, 400);
+    if (body?.confirm !== true) return json({ ok: false, error: "برای حذف سند، تأیید صریح لازم است.", requires_confirmation: true }, 409);
+    const result = await env.DB.prepare("DELETE FROM artifacts WHERE id=? AND owner_id=?").bind(id, String(device.owner_id)).run();
+    if (!result.meta?.changes) return json({ ok: false, error: "سند پیدا نشد یا به این حساب تعلق ندارد." }, 404);
+    await log(env, device.owner_id, "companion.artifact_deleted", "artifact", id, { confirmed: true });
+    return json({ ok: true, deleted: id });
   }
   if (request.method !== "POST") return json({ ok: false, error: "Method not allowed" }, 405);
   if (await getSetting(env, "companion_master_enabled", "true") !== "true") return json({ ok: false, error: "MASTER OFF است؛ ذخیره سند متوقف است." }, 423);
@@ -3334,7 +3353,7 @@ async function companionArtifacts(request, env) {
   return json({ ok: true, artifact: { id, title, kind, characters: content.length } });
 }
 
-    if ((request.method === "GET" || request.method === "POST") && url.pathname === "/api/companion/artifacts") {
+    if ((request.method === "GET" || request.method === "POST" || request.method === "DELETE") && url.pathname === "/api/companion/artifacts") {
       return await companionArtifacts(request, env);
     }
     if ((request.method === "GET" || request.method === "DELETE") && url.pathname === "/api/companion/memory") {
