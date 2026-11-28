@@ -705,6 +705,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         )
     }
     fun findPhoneNumberByName(query: String): String? {
+        contactLookupAmbiguous = false
         if (context.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return null
         val found = mutableListOf<ContactPhone>()
         context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER), null, null, null)?.use { cursor ->
@@ -712,7 +713,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             val numberCol = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
             while (cursor.moveToNext()) found.add(ContactPhone(cursor.getString(nameCol).orEmpty(), cursor.getString(numberCol).orEmpty()))
         }
-        return (ContactResolver.resolve(query, found) as? ContactLookup.Match)?.contact?.number
+        return when (val resolution = ContactResolver.resolve(query, found)) {
+            is ContactLookup.Match -> resolution.contact.number
+            is ContactLookup.Ambiguous -> {
+                contactLookupAmbiguous = true
+                contacts = resolution.contacts.map { it.name to it.number }
+                contactSearch = query
+                contactsStatus = "چند مخاطب با این نام پیدا شد. شخص درست را از فهرست انتخاب کن؛ هیچ تماسی برقرار نشده است."
+                showContacts = true
+                null
+            }
+            ContactLookup.NotFound -> null
+        }
     }
     var showStorage by remember { mutableStateOf(false) }
     var showMarket by remember { mutableStateOf(false) }
@@ -840,6 +852,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var contacts by remember { mutableStateOf<List<Pair<String,String>>>(emptyList()) }
     var contactSearch by remember { mutableStateOf("") }
     var contactsStatus by remember { mutableStateOf("برای مشاهده مخاطبین، مجوز گوشی لازم است.") }
+    var contactLookupAmbiguous by remember { mutableStateOf(false) }
     var showMissions by remember { mutableStateOf(false) }
     var missionText by remember { mutableStateOf("") }
     var missionBusy by remember { mutableStateOf(false) }
@@ -990,7 +1003,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 .replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
                 ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
-            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. برای تماس تلگرام، شماره مخاطب یا نام ذخیره‌شده‌اش لازم است."
+            if (number.isNullOrBlank()) return if (contactLookupAmbiguous) "چند مخاطب با این نام پیدا شد؛ فهرست مخاطبین باز شد. فرد درست را انتخاب کن و سپس تماس را شروع کن." else "شماره مخاطب پیدا نشد. برای تماس تلگرام، شماره مخاطب یا نام ذخیره‌شده‌اش لازم است."
             val digits = number.filter { it.isDigit() }
             val telegram = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?phone=$digits")).setPackage("org.telegram.messenger")
             if (telegram.resolveActivity(context.packageManager) == null) return "تلگرام اصلی نصب نیست یا پیوند مخاطب را پشتیبانی نمی‌کند."
@@ -1002,7 +1015,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (isWhatsappCall && callIntent) {
             val target = raw.substringAfter("به ", raw.substringAfter("با واتساپ", raw.substringAfter("با whatsapp", ""))).replace("زنگ بزن", "").replace("تماس بگیر", "").trim()
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value ?: if (target.isNotBlank()) findPhoneNumberByName(target) else null
-            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام مخاطب را دقیق بنویس و مجوز مخاطبین را فعال کن."
+            if (number.isNullOrBlank()) return if (contactLookupAmbiguous) "چند مخاطب با این نام پیدا شد؛ فهرست مخاطبین باز شد. فرد درست را انتخاب کن و سپس تماس را شروع کن." else "شماره مخاطب پیدا نشد. نام مخاطب را دقیق بنویس و مجوز مخاطبین را فعال کن."
             val digits = number.filter { it.isDigit() }
             val wa = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$digits")).setPackage("com.whatsapp")
             if (wa.resolveActivity(context.packageManager) == null) return "واتساپ نصب نیست یا لینک مخاطب را باز نمی‌کند."
@@ -1014,7 +1027,7 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         if (callIntent) {
             val number = Regex("[+]?\\d[\\d ()-]{5,}").find(raw)?.value
                 ?: raw.substringAfter("با ", raw.substringAfter("به ", "")).let { findPhoneNumberByName(it.replace("زنگ بزن", "").replace("تماس بگیر", "").trim()) }
-            if (number.isNullOrBlank()) return "شماره مخاطب پیدا نشد. نام یا شماره را دقیق بنویس و مجوز مخاطبین را فعال کن."
+            if (number.isNullOrBlank()) return if (contactLookupAmbiguous) "چند مخاطب با این نام پیدا شد؛ فهرست مخاطبین باز شد. فرد درست را انتخاب کن و سپس تماس را شروع کن." else "شماره مخاطب پیدا نشد. نام یا شماره را دقیق بنویس و مجوز مخاطبین را فعال کن."
             pendingCallNumber = number
             pendingCallType = "phone"
             pendingCallLabel = "تماس تلفنی مستقیم با شماره $number"
