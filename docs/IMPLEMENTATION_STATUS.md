@@ -19,7 +19,7 @@ This file records verified implementation, not planned features.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
 - Private long-term memory workspace in Android: authenticated owner-only listing, local search over the returned entries, and item deletion behind a confirmation dialog. The Worker endpoint validates the key, requires `confirm: true`, scopes the setting to the paired owner, and writes an activity log. The memory list is limited to 50 entries.
 - Private cloud text-document workspace in Android: authenticated listing and owner-confirmed creation of Markdown/text artifacts in D1, separate from local phone files. This is not yet a full Word/PDF/Excel cloud editor.
-- Private cloud documents now support authenticated full-content retrieval by document ID and owner-scoped permanent deletion. Android provides explicit open and delete controls; deletion requires a confirmation dialog, MASTER ON, matching owner ID, and an audit log. This remains a text/Markdown workspace, not a full Word/PDF/Excel editor.
+- Private cloud documents support authenticated full-content retrieval by document ID and owner-scoped permanent deletion. Android provides explicit open and delete controls; deletion requires a confirmation dialog, MASTER ON, matching owner ID, and an audit log. Local document workspace now includes export actions for PDF (Android native text layout with RTL direction), DOCX and XLSX, with Android's system save picker. This is export from the current title/body editor, not a full office editor or cloud document conversion. File opening and layout need device-level acceptance testing.
 
 ## Mission proposal and gated execution API (source implemented, deployment pending)
 - Authenticated Android companion endpoint: `POST /api/companion/missions` accepts `{\"text\":\"...\"}` and uses the configured free-only model router to create a JSON proposal.
@@ -56,10 +56,10 @@ This file records verified implementation, not planned features.
 - A complete provider quota dashboard with reset times and historical per-model usage. Provider APIs do not consistently expose this information; currently only returned usage metadata is forwarded, not a verified remaining-quota counter.
 - General agent missions are available through authenticated `/api/companion/missions` (GET lists up to 50 owner missions and step states; POST creates up to 8 proposal steps). The authenticated decision endpoint approves/rejects the plan. The first execution phase adds a prepare-and-confirm path for a narrow allowlist of read-only actions. Each prepared action is stored per step and requires a separate user tap to execute. This is not yet a general-purpose executor; messaging, calling, device control, purchases, deletion, file writes, GitHub writes, and other side effects remain unavailable. End-to-end execution tests on a paired Android device remain pending.
 - Email, calendar, messaging, browser automation and OAuth connectors inside Android. The calendar page currently reads/writes Android's local calendar only; it is not connected to a cloud calendar provider.
-- Crypto/market analysis center and exchange data integration.
+- A basic global crypto market lookup screen is implemented using CoinGecko search/markets endpoints (price, 24-hour change, market cap and volume). It is not a technical-analysis or trading-signal engine, has no exchange-specific adapters for Nobitex/Bitpin/Saraf, and live API availability/rate limits have not been verified.
 - Contacts resolution and confirmed phone/video calling.
 - App launch/control, accessibility automation and supported Android settings controls.
-- Document creation/editing for PDF, Word and Excel.
+- Full document editing for PDF, Word and Excel; current implementation only exports the text in the document workspace to PDF/DOCX/XLSX. PDF Persian/RTL rendering uses Android's native text layout, but visual fidelity and Office interoperability require device-level tests.
 - Turn-taking live voice with interruption.
 - End-to-end validation of the memory and cloud-document screens against the newly deployed Worker on a paired Android device.
 - Full privacy, security, storage, and end-to-end device tests.
