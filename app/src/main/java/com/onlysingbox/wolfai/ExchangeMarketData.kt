@@ -37,6 +37,11 @@ object ExchangeMarketData {
     fun bitpinRatioToPercent(value: Double?): Double? =
         value?.takeIf { it.isFinite() }?.times(100.0)
 
+    fun bitpinTomanToRial(value: Double): Double {
+        require(value.isFinite() && value >= 0.0) { "قیمت بیت‌پین معتبر نیست." }
+        return value * 10.0
+    }
+
     private fun get(url: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -95,9 +100,9 @@ object ExchangeMarketData {
             exchange = "Bitpin",
             symbol = base + "/IRT",
             // Bitpin's IRT quote asset is Toman; normalize internal storage to Rial.
-            lastPriceRial = price * 10.0,
+            lastPriceRial = bitpinTomanToRial(price),
             change24hPercent = bitpinRatioToPercent(market.optDouble("daily_change_price", Double.NaN).takeIf { it.isFinite() }),
-            highRial = market.optDouble("high", Double.NaN).takeIf { it.isFinite() }?.times(10.0),
+            highRial = market.optDouble("high", Double.NaN).takeIf { it.isFinite() }?.let(::bitpinTomanToRial),
             lowRial = market.optDouble("low", Double.NaN).takeIf { it.isFinite() }?.times(10.0),
             quoteVolumeRial = null,
             updatedAt = timestamp.takeIf { it.isFinite() && it > 0.0 }?.let {
