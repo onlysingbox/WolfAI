@@ -406,6 +406,33 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
+    private suspend fun apiListMemory(token: String): JSONArray = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/memory").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "دریافت حافظه ناموفق بود"))
+            obj.optJSONArray("entries") ?: JSONArray()
+        } finally { conn.disconnect() }
+    }
+
+    private suspend fun apiDeleteMemory(token: String, key: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/memory").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "DELETE"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("key", key).put("confirm", true).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "حذف حافظه ناموفق بود"))
+            obj
+        } finally { conn.disconnect() }
+    }
+
     private suspend fun apiCreateMission(token: String, text: String): JSONObject = withContext(Dispatchers.IO) {
         val conn = (URL("$BASE_URL/api/companion/missions").openConnection() as HttpURLConnection)
         try {
@@ -586,6 +613,10 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         return null
     }
     var showStorage by remember { mutableStateOf(false) }
+    var remoteMemory by remember { mutableStateOf(JSONArray()) }
+    var remoteMemoryStatus by remember { mutableStateOf("برای مشاهده حافظه خصوصی سرور، به‌روزرسانی را بزن.") }
+    var remoteMemorySearch by remember { mutableStateOf("") }
+    var pendingMemoryDelete by remember { mutableStateOf<String?>(null) }
     var showFiles by remember { mutableStateOf(false) }
     var showPlanner by remember { mutableStateOf(false) }
     var showNotifications by remember { mutableStateOf(false) }
@@ -941,6 +972,27 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 dismissButton = {
                     TextButton(onClick = { pendingDeleteBucket = null }) { Text("انصراف") }
                 }
+            )
+        }
+        pendingMemoryDelete?.let { memoryKey ->
+            AlertDialog(
+                onDismissRequest = { pendingMemoryDelete = null },
+                title = { Text("حذف از حافظه خصوصی") },
+                text = { Text("مورد «$memoryKey» برای همیشه از حافظه بلندمدت حساب مالک حذف می‌شود. این عمل قابل بازگشت نیست.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingMemoryDelete = null
+                        scope.launch {
+                            runCatching { apiDeleteMemory(token, memoryKey) }
+                                .onSuccess {
+                                    runCatching { apiListMemory(token) }.onSuccess { remoteMemory = it }
+                                    remoteMemoryStatus = "مورد «$memoryKey» حذف شد."
+                                }
+                                .onFailure { remoteMemoryStatus = "حذف انجام نشد: ${it.message}" }
+                        }
+                    }) { Text("حذف دائمی", color = Color(0xFFFF7777)) }
+                },
+                dismissButton = { TextButton(onClick = { pendingMemoryDelete = null }) { Text("انصراف") } }
             )
         }
         if (showClearChatConfirm) {
@@ -1473,7 +1525,40 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     Button(onClick = { storagePrefs.safeEdit { putInt("storage_quota_gb", quotaGb.toInt()) }; status = "سقف حافظه ذخیره شد" }) { Text("ذخیره سقف جدید") }
                     Text("فضای آزاد قابل استفاده گوشی: %.1f GB".format(phoneFreeGb), color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                    HorizontalDivider(color = Color(0xFF33445E))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                    WolfSectionLabel("حافظه بلندمدت خصوصی")
+                    Text("این موارد در حساب مالک روی سرور ذخیره شده‌اند و با یادداشت‌ها یا فایل‌های محلی گوشی فرق دارند.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(enabled = paired && !busy, onClick = {
+                            remoteMemoryStatus = "در حال دریافت حافظه خصوصی..."
+                            scope.launch {
+                                runCatching { apiListMemory(token) }
+                                    .onSuccess { remoteMemory = it; remoteMemoryStatus = "${it.length()} مورد حافظه دریافت شد." }
+                                    .onFailure { remoteMemoryStatus = "دریافت حافظه ناموفق بود: ${it.message}" }
+                            }
+                        }) { Text("به‌روزرسانی حافظه") }
+                        Text(remoteMemoryStatus, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    }
+                    OutlinedTextField(value = remoteMemorySearch, onValueChange = { remoteMemorySearch = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, label = { Text("جست‌وجو در حافظه بلندمدت") })
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items((0 until remoteMemory.length()).mapNotNull { remoteMemory.optJSONObject(it) }.filter { item ->
+                            val q = remoteMemorySearch.trim()
+                            q.isBlank() || item.optString("key").contains(q, true) || item.optString("value").contains(q, true) || item.optString("category").contains(q, true)
+                        }) { item ->
+                            val key = item.optString("key")
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
+                                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(key, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = { pendingMemoryDelete = key }) { Text("حذف") }
+                                    }
+                                    Text(item.optString("value"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                                    Text(item.optString("category"), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                     WolfSectionLabel("یادداشت‌های شخصی")
                     Text(noteStatus, color = Cyan, style = MaterialTheme.typography.bodySmall)
                     OutlinedTextField(value = noteTitle, onValueChange = { noteTitle = it }, modifier = Modifier.fillMaxWidth(), label = { Text("عنوان یادداشت") }, singleLine = true)
