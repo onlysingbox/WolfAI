@@ -16,7 +16,7 @@ const checks = [
     url: "https://api.bitpin.org/api/v1/mkt/tickers/",
     validate(data) {
       const rows = data?.body ?? data?.results;
-      if (!Array.isArray(rows)) throw new Error("Bitpin ticker response has no body/results array");
+      if (!Array.isArray(rows)) throw new Error("Bitpin ticker response has no body/results array; response=" + JSON.stringify(data).slice(0, 1000));
       const quote = rows.find(row => String(row?.symbol).toUpperCase() === "BTC_IRT");
       const price = Number(quote?.price);
       if (!Number.isFinite(price) || price <= 0) throw new Error("Bitpin BTC/IRT price is missing");
