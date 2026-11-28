@@ -3259,6 +3259,13 @@ async function runDueSchedules(env) {
   return { processed };
 }
 
+export function removeOwnerMemoryEntry(entries, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized || !Array.isArray(entries)) return { entries: Array.isArray(entries) ? entries : [], removed: false };
+  const next = entries.filter(item => String(item?.key || "").toLowerCase() !== normalized);
+  return { entries: next, removed: next.length !== entries.length };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -3271,13 +3278,6 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
     }
-export function removeOwnerMemoryEntry(entries, key) {
-  const normalized = String(key || "").trim().toLowerCase();
-  if (!normalized || !Array.isArray(entries)) return { entries: Array.isArray(entries) ? entries : [], removed: false };
-  const next = entries.filter(item => String(item?.key || "").toLowerCase() !== normalized);
-  return { entries: next, removed: next.length !== entries.length };
-}
-
 async function companionMemory(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
