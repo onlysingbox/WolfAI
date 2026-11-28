@@ -723,6 +723,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var showStorage by remember { mutableStateOf(false) }
     var showMarket by remember { mutableStateOf(false) }
     var marketQuery by remember { mutableStateOf("") }
+    var marketSource by remember { mutableStateOf("global") }
+    var exchangeQuote by remember { mutableStateOf<ExchangeQuote?>(null) }
     var marketStatus by remember { mutableStateOf("نام یا نماد رمزارز را جست‌وجو کن.") }
     var marketBusy by remember { mutableStateOf(false) }
     var marketQuotes by remember { mutableStateOf<List<CoinQuote>>(emptyList()) }
@@ -1409,36 +1411,74 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if(showMarket) {
-                    WolfPageHeader("بازار رمزارز","جست‌وجوی قیمت و تغییرات بازار جهانی","CRYPTO MARKET")
-                    OutlinedTextField(marketQuery, { marketQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("نام یا نماد رمزارز، مثل Bitcoin یا BTC") }, singleLine = true)
+                    WolfPageHeader("بازار رمزارز","قیمت جهانی و بازار ریالی صرافی‌ها","CRYPTO MARKET")
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(selected = marketSource == "global", onClick = { marketSource = "global"; marketQuotes = emptyList(); exchangeQuote = null }, label = { Text("جهانی") })
+                        FilterChip(selected = marketSource == "nobitex", onClick = { marketSource = "nobitex"; marketQuotes = emptyList(); exchangeQuote = null }, label = { Text("نوبیتکس") })
+                        FilterChip(selected = marketSource == "bitpin", onClick = { marketSource = "bitpin"; marketQuotes = emptyList(); exchangeQuote = null }, label = { Text("بیت‌پین") })
+                    }
+                    OutlinedTextField(
+                        marketQuery, { marketQuery = it }, modifier = Modifier.fillMaxWidth(),
+                        label = { Text(if (marketSource == "global") "نام یا نماد، مثل Bitcoin یا BTC" else "نماد پایه، مثل BTC یا ETH") },
+                        singleLine = true
+                    )
                     Button(enabled = marketQuery.isNotBlank() && !marketBusy, modifier = Modifier.fillMaxWidth(), onClick = {
                         marketBusy = true
                         marketStatus = "در حال دریافت داده‌های بازار..."
+                        marketQuotes = emptyList()
+                        exchangeQuote = null
                         scope.launch {
-                            runCatching { MarketData.search(marketQuery) }
-                                .onSuccess { marketQuotes = it; marketStatus = if (it.isEmpty()) "داده‌ای برای این رمزارز دریافت نشد." else "${it.size} نتیجه دریافت شد. داده‌ها از بازار جهانی هستند." }
-                                .onFailure { marketStatus = "دریافت بازار ناموفق بود: ${it.message}" }
+                            if (marketSource == "global") {
+                                runCatching { MarketData.search(marketQuery) }
+                                    .onSuccess { marketQuotes = it; marketStatus = if (it.isEmpty()) "داده‌ای برای این رمزارز دریافت نشد." else "${it.size} نتیجه از بازار جهانی دریافت شد." }
+                                    .onFailure { marketStatus = "دریافت بازار ناموفق بود: ${it.message}" }
+                            } else {
+                                val result = runCatching {
+                                    if (marketSource == "nobitex") ExchangeMarketData.nobitex(marketQuery)
+                                    else ExchangeMarketData.bitpin(marketQuery)
+                                }
+                                result.onSuccess { exchangeQuote = it; marketStatus = "قیمت بازار ${it.exchange} دریافت شد." }
+                                    .onFailure { marketStatus = "دریافت قیمت صرافی ناموفق بود: ${it.message}" }
+                            }
                             marketBusy = false
                         }
                     }) { Text(if (marketBusy) "در حال دریافت..." else "جست‌وجوی بازار") }
                     Text(marketStatus, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(marketQuotes) { quote ->
-                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
-                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text("${quote.name} (${quote.symbol})", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-                                    Text(if (quote.priceUsd.isFinite()) "$" + String.format(Locale.US, "%,.8f", quote.priceUsd).trimEnd('0').trimEnd('.') else "قیمت ناموجود", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineSmall)
-                                    Text("تغییر ۲۴ ساعت: " + (quote.change24h?.let { String.format(Locale.US, "%.2f%%", it) } ?: "ناموجود"), color = quote.change24h?.let { if (it >= 0) Color(0xFF55D6A0) else Color(0xFFFF7777) } ?: MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("ارزش بازار: " + (quote.marketCapUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    Text("حجم ۲۴ ساعته: " + (quote.volume24hUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                                    Text("منبع: ${quote.source}" + (quote.updatedAt?.let { " | به‌روزرسانی: $it" } ?: ""), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                    if (marketSource == "global") {
+                        LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(marketQuotes) { quote ->
+                                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
+                                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text("${quote.name} (${quote.symbol})", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                                        Text(if (quote.priceUsd.isFinite()) "$" + String.format(Locale.US, "%,.8f", quote.priceUsd).trimEnd('0').trimEnd('.') else "قیمت ناموجود", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineSmall)
+                                        Text("تغییر ۲۴ ساعت: " + (quote.change24h?.let { String.format(Locale.US, "%.2f%%", it) } ?: "ناموجود"), color = quote.change24h?.let { if (it >= 0) Color(0xFF55D6A0) else Color(0xFFFF7777) } ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text("ارزش بازار: " + (quote.marketCapUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                        Text("حجم ۲۴ ساعته: " + (quote.volume24hUsd?.let { String.format(Locale.US, "$%,.0f", it) } ?: "ناموجود"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                                        Text("منبع: ${quote.source}" + (quote.updatedAt?.let { " | به‌روزرسانی: $it" } ?: ""), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        exchangeQuote?.let { quote ->
+                            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))) {
+                                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                                    Text("${quote.exchange} • ${quote.symbol}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+                                    Text(String.format(Locale.US, "%,.0f ریال", quote.lastPriceRial), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.headlineSmall)
+                                    Text(String.format(Locale.US, "%,.0f تومان", quote.lastPriceToman), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleLarge)
+                                    Text("تغییر ۲۴ ساعت: " + (quote.change24hPercent?.let { String.format(Locale.US, "%.2f%%", it) } ?: "ناموجود"), color = quote.change24hPercent?.let { if (it >= 0) Color(0xFF55D6A0) else Color(0xFFFF7777) } ?: MaterialTheme.colorScheme.onSurfaceVariant)
+                                    quote.highRial?.let { Text("بیشترین قیمت: ${String.format(Locale.US, "%,.0f ریال", it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    quote.lowRial?.let { Text("کمترین قیمت: ${String.format(Locale.US, "%,.0f ریال", it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    quote.quoteVolumeRial?.let { Text("حجم ۲۴ ساعته: ${String.format(Locale.US, "%,.0f ریال", it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    Text("زمان: ${quote.updatedAt ?: "نامشخص"}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                    if (quote.marketClosed == true) Text("این بازار طبق پاسخ صرافی بسته است.", color = Gold)
+                                }
+                            }
+                        }
+                        Text("داده‌ها فقط خواندنی‌اند. هیچ سفارش خرید یا فروشی ثبت نمی‌شود. قیمت ریال و تومان از یک داده بازار و با تبدیل ۱۰ به ۱ نمایش داده می‌شود.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("منابع: CoinGecko و CoinPaprika (منبع هر نتیجه جداگانه درج شده است). این داده‌ها قیمت جهانی‌اند، نه قیمت لحظه‌ای Nobitex، Bitpin یا Saraf و نه سیگنال خریدوفروش.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                }
-                else if(showDeviceTools) {
+                    if (marketSource == "global") Text("منابع: CoinGecko و CoinPaprika. داده جهانی است و قیمت صرافی‌ها را نشان نمی‌دهد.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                } {
                     WolfPageHeader("ابزارهای گوشی","اجرای برنامه‌ها، تنظیم هشدار و دسترسی به امکانات اندروید","DEVICE CONTROL")
                     Text(deviceStatus,color=Cyan)
                     WolfSectionLabel("تنظیم هشدار")
