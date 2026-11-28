@@ -1020,8 +1020,8 @@ async function retryCompanionMissionStep(request, env, missionId) {
     return json({ ok: false, error: "تأیید قبلی این مرحله متعلق به مالک نیست." }, 403);
   }
   const updated = await env.DB.prepare(
-    "UPDATE agent_steps SET status='approved_pending_execution',input_json=(SELECT input_json FROM agent_steps WHERE id=?),error_text=NULL,started_at=NULL,completed_at=NULL WHERE id=? AND run_id=? AND status='failed' AND approved_by=?"
-  ).bind(step.id, step.id, missionId, String(device.owner_id)).run();
+    "UPDATE agent_steps SET status='approved_pending_execution',input_json=json_remove(input_json,'$.prepared_action'),error_text=NULL,started_at=NULL,completed_at=NULL WHERE id=? AND run_id=? AND status='failed' AND approved_by=? AND EXISTS (SELECT 1 FROM agent_runs WHERE id=? AND owner_id=? AND status='execution_failed')"
+  ).bind(step.id, missionId, String(device.owner_id), missionId, String(device.owner_id)).run();
   if (!updated?.meta?.changes) return json({ ok: false, error: "مرحله هم‌زمان تغییر کرده است؛ فهرست را تازه‌سازی کن." }, 409);
   const runUpdated = await env.DB.prepare("UPDATE agent_runs SET status='approved_pending_execution',updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_id=? AND status='execution_failed'").bind(missionId, String(device.owner_id)).run();
   if (!runUpdated?.meta?.changes) return json({ ok: false, error: "وضعیت مأموریت تغییر کرده است." }, 409);
