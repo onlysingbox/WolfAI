@@ -659,18 +659,19 @@ const WOLF_AI_MODELS = {
   gemma: "@cf/google/gemma-4-26b-a4b-it"
 };
 const WOLF_AI_DEFAULT_MODEL = "auto";
-const WOLF_ALLOWED_MODES = ["auto", "glm", "zai", "gemma", "gemini", "groq", "openrouter"];
+const WOLF_ALLOWED_MODES = ["auto", "zai", "groq", "glm", "gemma"];
+const WOLF_FREE_PROVIDER_IDS = new Set(["zai", "groq", "glm", "gemma"]);
 
 // Provider adapters only use endpoints with a documented free tier or the
 // existing Workers AI binding. No billing fallback is ever attempted.
 const WOLF_EXTERNAL_PROVIDERS = {
-  gemini: { key: "GEMINI_API_KEY", model: "gemini-2.5-flash", freeTier: true },
-  groq: { key: "GROQ_API_KEY", model: "openai/gpt-oss-120b", freeTier: true },
+  // Only providers with an explicitly free model are eligible for routing.
+  // Never add a paid/credit-based model to this allowlist.
   zai: { key: "ZAI_API_KEY", model: "glm-4.7-flash", freeTier: true },
-  openrouter: { key: "OPENROUTER_API_KEY", model: "meta-llama/llama-3.3-70b-instruct:free", freeTier: true }
+  groq: { key: "GROQ_API_KEY", model: "openai/gpt-oss-120b", freeTier: true }
 };
 function wolfHasAnyProvider(env) {
-  return !!(env.AI?.run || env.GEMINI_API_KEY || env.GROQ_API_KEY || env.ZAI_API_KEY || env.OPENROUTER_API_KEY);
+  return !!(env.AI?.run || env.GROQ_API_KEY || env.ZAI_API_KEY);
 }
 function wolfProviderCatalog(env) {
   return [
@@ -678,9 +679,9 @@ function wolfProviderCatalog(env) {
     { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.glm },
     { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.gemma },
     ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
-      id, label: id === "gemini" ? "Google Gemini 2.5 Flash" : id === "groq" ? "Groq GPT-OSS 120B" : id === "zai" ? "Z.ai GLM-4.7-Flash" : "OpenRouter Free",
+      id, label: id === "groq" ? "Groq GPT-OSS 120B (Free)" : "Z.ai GLM-4.7-Flash (Free)",
       configured: !!env[p.key], freeOnly: true, model: p.model,
-      quota: "از API عمومی قابل تأیید نیست"
+      quota: "سهمیه رایگان محدود است؛ مقدار باقی‌مانده از اینجا قابل تأیید نیست"
     })),
     { id: "deepseek", label: "DeepSeek API", configured: false, freeOnly: false, note: "تا زمانی که API رایگانِ بدون صورتحساب تأیید نشود فعال نمی‌شود." }
   ];
@@ -717,6 +718,9 @@ async function callGemini(env, messages, maxTokens = 900) {
   return { answer, usage: data.usageMetadata || null };
 }
 async function callWolfProvider(env, id, messages) {
+  // Hard safety boundary: even a stale client or direct caller cannot invoke
+  // Gemini, OpenRouter, or any provider/model outside the verified free list.
+  if (!WOLF_FREE_PROVIDER_IDS.has(id)) throw new Error("Paid or unapproved provider is blocked by WOLF free-only policy: " + id);
   if (id === "glm" || id === "gemma") {
     if (!env.AI?.run) throw new Error("Workers AI binding is unavailable");
     const result = await env.AI.run(WOLF_AI_MODELS[id], { messages, max_tokens: 900, chat_template_kwargs: { enable_thinking: false } });
@@ -743,12 +747,12 @@ async function callWolfProvider(env, id, messages) {
   throw new Error("Unknown or disabled provider: " + id);
 }
 function wolfProviderOrder(env, requested, complex) {
-  const configured = wolfProviderCatalog(env).filter(p => p.configured && p.id !== "auto").map(p => p.id);
+  const configured = wolfProviderCatalog(env).filter(p => p.configured && WOLF_FREE_PROVIDER_IDS.has(p.id)).map(p => p.id);
   if (requested && requested !== "auto") {
     if (!configured.includes(requested)) throw new Error("این موتور هنوز کلید API یا اتصال فعال ندارد: " + requested);
     return [requested];
   }
-  const preferred = complex ? ["groq", "zai", "gemma", "glm", "gemini", "openrouter"] : ["glm", "zai", "groq", "gemma", "gemini", "openrouter"];
+  const preferred = complex ? ["zai", "groq", "gemma", "glm"] : ["zai", "groq", "glm", "gemma"];
   return preferred.filter(id => configured.includes(id));
 }
 
