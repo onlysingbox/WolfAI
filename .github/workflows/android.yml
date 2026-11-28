@@ -1,5 +1,12 @@
 name: Build WOLF AI Android
 on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "src/**"
+      - "tests/**"
+      - ".github/workflows/android.yml"
   workflow_dispatch:
 jobs:
   build:
