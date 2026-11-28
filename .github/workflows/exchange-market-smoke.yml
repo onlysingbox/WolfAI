@@ -1,0 +1,21 @@
+name: WOLF AI exchange market API smoke test
+
+on:
+  push:
+    paths:
+      - "app/src/main/java/com/onlysingbox/wolfai/ExchangeMarketData.kt"
+      - "scripts/exchange-market-smoke.mjs"
+      - ".github/workflows/exchange-market-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  public-market-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify public Nobitex and Bitpin market endpoints
+        run: node scripts/exchange-market-smoke.mjs
