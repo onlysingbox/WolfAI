@@ -289,6 +289,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             listMemory = { apiListMemory(securePrefs.safeString("device_token")) },
             deleteMemory = { key -> apiDeleteMemory(securePrefs.safeString("device_token"), key) },
             listArtifacts = { apiListArtifacts(securePrefs.safeString("device_token")) },
+            getArtifact = { id -> apiGetArtifact(securePrefs.safeString("device_token"), id) },
+            deleteArtifact = { id -> apiDeleteArtifact(securePrefs.safeString("device_token"), id) },
             createArtifact = { title, content -> apiCreateArtifact(securePrefs.safeString("device_token"), title, content) },
             speak = { text -> runCatching { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "wolf-reply") } },
             stopSpeaking = { runCatching { tts?.stop() } },
@@ -419,6 +421,33 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val obj = JSONObject(stream.bufferedReader().use { it.readText() })
             if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "دریافت اسناد ابری ناموفق بود"))
             obj.optJSONArray("artifacts") ?: JSONArray()
+        } finally { conn.disconnect() }
+    }
+
+    private suspend fun apiGetArtifact(token: String, id: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/artifacts?id=" + java.net.URLEncoder.encode(id, "UTF-8")).openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "دریافت سند ناموفق بود"))
+            obj.optJSONObject("artifact") ?: throw IllegalStateException("محتوای سند خالی است.")
+        } finally { conn.disconnect() }
+    }
+
+    private suspend fun apiDeleteArtifact(token: String, id: String): JSONObject = withContext(Dispatchers.IO) {
+        val conn = (URL("$BASE_URL/api/companion/artifacts").openConnection() as HttpURLConnection)
+        try {
+            conn.requestMethod = "DELETE"; conn.connectTimeout = 10000; conn.readTimeout = 20000
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer $token")
+            conn.doOutput = true
+            conn.outputStream.use { it.write(JSONObject().put("id", id).put("confirm", true).toString().toByteArray()) }
+            val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+            val obj = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!obj.optBoolean("ok")) throw IllegalStateException(obj.optString("error", "حذف سند ناموفق بود"))
+            obj
         } finally { conn.disconnect() }
     }
 
@@ -611,7 +640,7 @@ private fun NavigationChip(label:String, selected:Boolean, onClick:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, listArtifacts: suspend ()->JSONArray, createArtifact: suspend (String, String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
+private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (String, List<Pair<String,String>>, String)->String, createMission: suspend (String)->JSONObject, listMissions: suspend ()->JSONArray, decideMission: suspend (String, String)->JSONObject, prepareMissionStep: suspend (String, Int)->JSONObject, executeMissionStep: suspend (String, Int)->JSONObject, setRemoteMaster: suspend (Boolean)->Unit, loadProviderStatus: suspend ()->JSONObject, listMemory: suspend ()->JSONArray, deleteMemory: suspend (String)->JSONObject, listArtifacts: suspend ()->JSONArray, getArtifact: suspend (String)->JSONObject, deleteArtifact: suspend (String)->JSONObject, createArtifact: suspend (String, String)->JSONObject, speak: (String)->Unit, stopSpeaking: ()->Unit, storagePrefs: SharedPreferences, storageRoot: File, historyFile: File, loadContacts: suspend () -> List<Pair<String,String>>, loadCalendarEvents: suspend () -> List<CalendarEvent>, startupCrashReport: String) {
     var paired by remember { mutableStateOf(token.isNotBlank()) }
     var localMode by remember { mutableStateOf(storagePrefs.safeBoolean("local_mode", false)) }
     var showStartupCrash by remember { mutableStateOf(startupCrashReport.isNotBlank()) }
@@ -648,6 +677,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var cloudDocTitle by remember { mutableStateOf("") }
     var cloudDocContent by remember { mutableStateOf("") }
     var cloudDocStatus by remember { mutableStateOf("اسناد خصوصی ابری هنوز بارگذاری نشده‌اند.") }
+    var selectedCloudDoc by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingCloudDocDelete by remember { mutableStateOf<JSONObject?>(null) }
     var remoteMemory by remember { mutableStateOf(JSONArray()) }
     var remoteMemoryStatus by remember { mutableStateOf("برای مشاهده حافظه خصوصی سرور، به‌روزرسانی را بزن.") }
     var remoteMemorySearch by remember { mutableStateOf("") }
@@ -1009,6 +1040,36 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                 }
             )
         }
+        selectedCloudDoc?.let { (title, content) ->
+            AlertDialog(
+                onDismissRequest = { selectedCloudDoc = null },
+                title = { Text(title) },
+                text = { Text(content, modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) },
+                confirmButton = { TextButton(onClick = { selectedCloudDoc = null }) { Text("بستن") } }
+            )
+        }
+        pendingCloudDocDelete?.let { doc ->
+            AlertDialog(
+                onDismissRequest = { pendingCloudDocDelete = null },
+                title = { Text("حذف سند خصوصی") },
+                text = { Text("سند «${doc.optString("title")}» برای همیشه از فضای ابری حساب مالک حذف می‌شود. ادامه می‌دهی؟") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val id = doc.optString("id")
+                        pendingCloudDocDelete = null
+                        scope.launch {
+                            runCatching { deleteArtifact(id) }
+                                .onSuccess {
+                                    runCatching { listArtifacts() }.onSuccess { remoteArtifacts = it }
+                                    cloudDocStatus = "سند حذف شد."
+                                }
+                                .onFailure { cloudDocStatus = "حذف سند ناموفق بود: ${it.message}" }
+                        }
+                    }) { Text("حذف دائمی", color = Color(0xFFFF7777)) }
+                },
+                dismissButton = { TextButton(onClick = { pendingCloudDocDelete = null }) { Text("انصراف") } }
+            )
+        }
         pendingMemoryDelete?.let { memoryKey ->
             AlertDialog(
                 onDismissRequest = { pendingMemoryDelete = null },
@@ -1349,6 +1410,17 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                                     Text(artifact.optString("title"), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleSmall)
                                     Text(artifact.optString("excerpt"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                                     Text(artifact.optString("created_at"), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        TextButton(onClick = {
+                                            cloudDocStatus = "در حال دریافت متن سند..."
+                                            scope.launch {
+                                                runCatching { getArtifact(artifact.optString("id")) }
+                                                    .onSuccess { selectedCloudDoc = it.optString("title") to it.optString("content_text"); cloudDocStatus = "متن سند دریافت شد." }
+                                                    .onFailure { cloudDocStatus = "دریافت متن سند ناموفق بود: ${it.message}" }
+                                            }
+                                        }) { Text("بازکردن") }
+                                        TextButton(onClick = { pendingCloudDocDelete = JSONObject(artifact.toString()) }) { Text("حذف") }
+                                    }
                                 }
                             }
                         }
