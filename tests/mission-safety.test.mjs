@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission } from "../src/worker.js";
+import { validateCompanionReadOnlyAction, executeCompanionReadOnlyAction, claimCompanionMissionStep, getOwnedCompanionMission, canControlCompanionMission, canRetryCompanionMissionStep } from "../src/worker.js";
 
 test("accepts a bounded web search", () => {
   assert.deepEqual(
@@ -301,4 +301,22 @@ test("private memory deletion rejects blank keys and missing entries without cha
   const original = [{ key: "Work", value: "private" }];
   assert.deepEqual(removeOwnerMemoryEntry(original, "  "), { entries: original, removed: false });
   assert.deepEqual(removeOwnerMemoryEntry(original, "unknown"), { entries: original, removed: false });
+});
+
+
+test("mission pause is allowed only before a step is running and resume only from paused", () => {
+  assert.equal(canControlCompanionMission("approved_pending_execution", "pause", 0), true);
+  assert.equal(canControlCompanionMission("approved_pending_execution", "pause", 1), false);
+  assert.equal(canControlCompanionMission("running", "pause", 0), false);
+  assert.equal(canControlCompanionMission("paused", "resume", 0), true);
+  assert.equal(canControlCompanionMission("execution_failed", "resume", 0), false);
+  assert.equal(canControlCompanionMission("paused", "pause", 0), false);
+});
+
+test("mission retry is limited to a failed step after all earlier steps are complete", () => {
+  assert.equal(canRetryCompanionMissionStep("execution_failed", "failed", 0, 0), true);
+  assert.equal(canRetryCompanionMissionStep("execution_failed", "failed", 1, 0), false);
+  assert.equal(canRetryCompanionMissionStep("execution_failed", "failed", 0, 1), false);
+  assert.equal(canRetryCompanionMissionStep("approved_pending_execution", "failed", 0, 0), false);
+  assert.equal(canRetryCompanionMissionStep("execution_failed", "completed", 0, 0), false);
 });
