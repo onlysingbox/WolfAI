@@ -3271,6 +3271,13 @@ export default {
     if (request.method === "POST" && url.pathname === "/api/companion/pair") {
       return await companionPair(request, env);
     }
+export function removeOwnerMemoryEntry(entries, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (!normalized || !Array.isArray(entries)) return { entries: Array.isArray(entries) ? entries : [], removed: false };
+  const next = entries.filter(item => String(item?.key || "").toLowerCase() !== normalized);
+  return { entries: next, removed: next.length !== entries.length };
+}
+
 async function companionMemory(request, env) {
   const device = await authorizeCompanion(request, env);
   if (!device) return json({ ok: false, error: "دستگاه مجاز نیست." }, 401);
@@ -3297,9 +3304,9 @@ async function companionMemory(request, env) {
   const key = String(body?.key || "").trim();
   if (!key || key.length > 120) return json({ ok: false, error: "کلید حافظه نامعتبر است." }, 400);
   if (body?.confirm !== true) return json({ ok: false, error: "برای حذف این مورد، تأیید صریح لازم است.", requires_confirmation: true }, 409);
-  const before = entries.length;
-  entries = entries.filter(item => String(item.key || "").toLowerCase() !== key.toLowerCase());
-  if (entries.length === before) return json({ ok: false, error: "این مورد در حافظه پیدا نشد." }, 404);
+  const removal = removeOwnerMemoryEntry(entries, key);
+  if (!removal.removed) return json({ ok: false, error: "این مورد در حافظه پیدا نشد." }, 404);
+  entries = removal.entries;
   await putSetting(env, settingKey, JSON.stringify(entries));
   await log(env, device.owner_id, "companion.memory_deleted", "owner_memory", key, { remaining: entries.length });
   return json({ ok: true, deleted: key, remaining: entries.length });
