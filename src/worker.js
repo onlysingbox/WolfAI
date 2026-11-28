@@ -659,8 +659,11 @@ const WOLF_AI_MODELS = {
   gemma: "@cf/google/gemma-4-26b-a4b-it"
 };
 const WOLF_AI_DEFAULT_MODEL = "auto";
-const WOLF_ALLOWED_MODES = ["auto", "zai", "groq", "glm", "gemma"];
-const WOLF_FREE_PROVIDER_IDS = new Set(["zai", "groq", "glm", "gemma"]);
+// Strict zero-billing mode: only provider free tiers that reject over-quota
+// requests are eligible. Workers AI is excluded because paid plans can bill
+// beyond the daily free allocation.
+const WOLF_ALLOWED_MODES = ["auto", "zai", "groq"];
+const WOLF_FREE_PROVIDER_IDS = new Set(["zai", "groq"]);
 
 // Provider adapters only use endpoints with a documented free tier or the
 // existing Workers AI binding. No billing fallback is ever attempted.
@@ -671,13 +674,11 @@ const WOLF_EXTERNAL_PROVIDERS = {
   groq: { key: "GROQ_API_KEY", model: "openai/gpt-oss-120b", freeTier: true }
 };
 function wolfHasAnyProvider(env) {
-  return !!(env.AI?.run || env.GROQ_API_KEY || env.ZAI_API_KEY);
+  return !!(env.GROQ_API_KEY || env.ZAI_API_KEY);
 }
 function wolfProviderCatalog(env) {
   return [
-    { id: "auto", label: "خودکار", configured: true, freeOnly: true },
-    { id: "glm", label: "Cloudflare GLM-4.7-Flash", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.glm },
-    { id: "gemma", label: "Cloudflare Gemma 4 26B", configured: !!env.AI?.run, freeOnly: true, model: WOLF_AI_MODELS.gemma },
+    { id: "auto", label: "خودکار (فقط رایگان)", configured: true, freeOnly: true },
     ...Object.entries(WOLF_EXTERNAL_PROVIDERS).map(([id, p]) => ({
       id, label: id === "groq" ? "Groq GPT-OSS 120B (Free)" : "Z.ai GLM-4.7-Flash (Free)",
       configured: !!env[p.key], freeOnly: true, model: p.model,
@@ -752,7 +753,7 @@ function wolfProviderOrder(env, requested, complex) {
     if (!configured.includes(requested)) throw new Error("این موتور هنوز کلید API یا اتصال فعال ندارد: " + requested);
     return [requested];
   }
-  const preferred = complex ? ["zai", "groq", "gemma", "glm"] : ["zai", "groq", "glm", "gemma"];
+  const preferred = ["zai", "groq"];
   return preferred.filter(id => configured.includes(id));
 }
 
