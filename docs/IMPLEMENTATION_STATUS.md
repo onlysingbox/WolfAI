@@ -1,6 +1,6 @@
 # WOLF AI implementation status
 
-Updated: 2026-11-25
+Updated: 2026-11-28
 
 This file records verified implementation, not planned features.
 
@@ -17,6 +17,8 @@ This file records verified implementation, not planned features.
 - Worker provider adapters and free-only fallback routing added for Cloudflare Workers AI, Gemini, Groq, and OpenRouter. External providers remain unavailable until their API keys are configured as Worker secrets. DeepSeek API is deliberately disabled because a reliably free, no-billing API tier has not been verified.
 - Provider responses return reported usage metadata when available; otherwise quota is explicitly unknown. The app does not fabricate quota counts.
 - Storage usage panel for app-private folders, real device free-space display, and 80%/90% warnings. The 60 GB category allocations are not yet finalized in code.
+- Private long-term memory workspace in Android: authenticated owner-only listing, local search over the returned entries, and item deletion behind a confirmation dialog. The Worker endpoint validates the key, requires `confirm: true`, scopes the setting to the paired owner, and writes an activity log. The memory list is limited to 50 entries.
+- Private cloud text-document workspace in Android: authenticated listing and owner-confirmed creation of Markdown/text artifacts in D1, separate from local phone files. This is not yet a full Word/PDF/Excel cloud editor.
 
 ## Mission proposal and gated execution API (source implemented, deployment pending)
 - Authenticated Android companion endpoint: `POST /api/companion/missions` accepts `{\"text\":\"...\"}` and uses the configured free-only model router to create a JSON proposal.
@@ -42,6 +44,7 @@ This file records verified implementation, not planned features.
 
 ## CI verification
 - Earlier mission UI and atomic-write commits passed GitHub Actions, including `node --check src/worker.js` and Android `assembleDebug`.
+- On 2026-11-28, Worker syntax/tests passed after adding the owner-memory deletion helper and regression tests (run `46171837768`). The Android Kotlin compile passed for the memory-workspace callbacks and UI (run `46171884423`); a newer compile for the cloud-document workspace was still running when this status file was updated.
 - A Node built-in safety suite covers the mission action allowlist, capability matching, HTTPS/local-target rejection, finance date/currency validation, GitHub path traversal, extra-parameter rejection, MASTER OFF rejection, and owner-scoped lookup.
 - A separate Node 22 `node:sqlite` integration suite executes the actual D1-compatible SQL statements against an in-memory SQLite database. It checks owner isolation, duplicate concurrent claims, sequential step ordering, wrong-owner approvals, active sibling steps, and stopped missions. The workflow runs both suites before the Android build.
 - These tests exercise the SQL and state-transition contract locally; they do not contact the production Cloudflare D1 database or deploy the Worker. Live Cloudflare integration and device-level acceptance tests remain pending.
@@ -59,7 +62,7 @@ This file records verified implementation, not planned features.
 - App launch/control, accessibility automation and supported Android settings controls.
 - Document creation/editing for PDF, Word and Excel.
 - Turn-taking live voice with interruption.
-- Logo assets based on the owner's exact wolf image.
+- End-to-end validation of the new memory and cloud-document screens against the deployed Worker; the source changes are committed but production deployment is still pending.
 - Full privacy, security, storage, and end-to-end device tests.
 - MASTER OFF is now enforced for model execution and queued WOLF work in source; production behavior remains unverified until the Worker is deployed with owner approval.
 
