@@ -180,96 +180,107 @@ test("D1 claim gate rejects another owner's approval and a running mission step"
 });
 
 
-import { wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, WOLF_AI_MODELS } from "../src/worker.js";
+import { wolfProviderCatalog, wolfProviderOrder, wolfHasAnyProvider, WOLF_ALLOWED_MODES, WOLF_EXTERNAL_PROVIDERS, callWolfProvider } from "../src/worker.js";
 
-test("provider catalog reports only actually configured engines", () => {
-  const env = { AI: { run() {} }, GEMINI_API_KEY: "configured", GROQ_API_KEY: "", ZAI_API_KEY: "configured", OPENROUTER_API_KEY: "configured" };
+test("provider catalog exposes only configured, explicitly free external engines", () => {
+  const env = {
+    AI: { run() {} },
+    GEMINI_API_KEY: "configured",
+    GROQ_API_KEY: "",
+    ZAI_API_KEY: "configured",
+    OPENROUTER_API_KEY: "configured"
+  };
   const catalog = wolfProviderCatalog(env);
-  assert.equal(catalog.find(x => x.id === "glm").configured, true);
-  assert.equal(catalog.find(x => x.id === "gemma").configured, true);
-  assert.equal(catalog.find(x => x.id === "gemini").configured, true);
-  assert.equal(catalog.find(x => x.id === "groq").configured, false);
+  assert.deepEqual(catalog.map(x => x.id), ["auto", "zai", "groq", "deepseek"]);
   assert.equal(catalog.find(x => x.id === "zai").configured, true);
-  assert.equal(catalog.find(x => x.id === "openrouter").configured, true);
-  assert.ok(catalog.filter(x => ["glm","gemma","gemini","groq","zai","openrouter"].includes(x.id)).every(x => x.freeOnly));
+  assert.equal(catalog.find(x => x.id === "groq").configured, false);
+  assert.equal(catalog.find(x => x.id === "auto").freeOnly, true);
+  assert.ok(catalog.filter(x => x.id !== "deepseek").every(x => x.freeOnly));
+  assert.equal(catalog.some(x => ["glm", "gemma", "gemini", "openrouter"].includes(x.id)), false);
 });
 
-test("automatic routing falls back only across configured free engines", () => {
-  const env = { AI: { run() {} }, GEMINI_API_KEY: "g", GROQ_API_KEY: "", ZAI_API_KEY: "z", OPENROUTER_API_KEY: "o" };
-  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["glm","zai","gemma","gemini","openrouter"]);
-  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["zai","gemma","glm","gemini","openrouter"]);
-  assert.throws(() => wolfProviderOrder(env, "groq", false), /هنوز کلید API/);
+test("automatic routing uses Z.AI first and Groq second, never a paid fallback", () => {
+  const env = {
+    AI: { run() {} },
+    GEMINI_API_KEY: "g",
+    GROQ_API_KEY: "gq",
+    ZAI_API_KEY: "z",
+    OPENROUTER_API_KEY: "o"
+  };
+  assert.deepEqual(wolfProviderOrder(env, "auto", false), ["zai", "groq"]);
+  assert.deepEqual(wolfProviderOrder(env, "auto", true), ["zai", "groq"]);
+  assert.deepEqual(wolfProviderOrder({ ZAI_API_KEY: "z" }, "auto", false), ["zai"]);
+  assert.throws(() => wolfProviderOrder(env, "gemini", false), /هنوز کلید API/);
+  assert.throws(() => wolfProviderOrder(env, "glm", false), /هنوز کلید API/);
 });
 
-test("provider model identifiers are current and never select the retired Groq Llama model", () => {
-  assert.equal(WOLF_AI_MODELS.glm, "@cf/zai-org/glm-4.7-flash");
-  assert.equal(WOLF_AI_MODELS.gemma, "@cf/google/gemma-4-26b-a4b-it");
-  assert.equal(WOLF_EXTERNAL_PROVIDERS.gemini.model, "gemini-2.5-flash");
+test("free provider model identifiers are fixed to the approved models", () => {
+  assert.deepEqual(Object.keys(WOLF_EXTERNAL_PROVIDERS).sort(), ["groq", "zai"]);
   assert.equal(WOLF_EXTERNAL_PROVIDERS.groq.model, "openai/gpt-oss-120b");
   assert.equal(WOLF_EXTERNAL_PROVIDERS.zai.model, "glm-4.7-flash");
-  assert.equal(WOLF_EXTERNAL_PROVIDERS.openrouter.model, "meta-llama/llama-3.3-70b-instruct:free");
+  assert.deepEqual([...WOLF_ALLOWED_MODES], ["auto", "zai", "groq"]);
 });
 
+test("provider dispatch blocks Cloudflare, Gemini and OpenRouter before any network call", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls++;
+    throw new Error("Network must not be called");
+  };
+  try {
+    for (const id of ["glm", "gemma", "gemini", "openrouter", "deepseek", "unknown"]) {
+      await assert.rejects(callWolfProvider({
+        AI: { async run() { throw new Error("AI must not be called"); } },
+        GEMINI_API_KEY: "present",
+        OPENROUTER_API_KEY: "present"
+      }, id, [{ role: "user", content: "test" }]), /blocked by WOLF free-only policy/);
+    }
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-import { callWolfProvider } from "../src/worker.js";
-
-test("all six provider adapters parse successful mocked responses without exposing keys", async () => {
+test("Groq and Z.AI adapters use only their approved free model identifiers", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), init });
-    if (String(url).includes("generativelanguage.googleapis.com")) {
-      return new Response(JSON.stringify({
-        candidates: [{ content: { parts: [{ text: "Gemini test reply" }] } }],
-        usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 3 }
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
     return new Response(JSON.stringify({
-      choices: [{ message: { content: "OpenAI compatible test reply" } }],
+      choices: [{ message: { content: "free provider test reply" } }],
       usage: { prompt_tokens: 5, completion_tokens: 4 }
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
     const messages = [{ role: "user", content: "test" }];
-    const cloudflareEnv = { AI: { async run(model) { return { choices: [{ message: { content: model + " reply" } }], usage: { total_tokens: 2 } }; } } };
-    assert.match((await callWolfProvider(cloudflareEnv, "glm", messages)).answer, /glm-4.7-flash/);
-    assert.match((await callWolfProvider(cloudflareEnv, "gemma", messages)).answer, /gemma-4-26b-a4b-it/);
-    const gemini = await callWolfProvider({ GEMINI_API_KEY: "never-log-this" }, "gemini", messages);
-    assert.equal(gemini.answer, "Gemini test reply");
-    assert.equal(gemini.usage.promptTokenCount, 4);
     const groq = await callWolfProvider({ GROQ_API_KEY: "never-log-this" }, "groq", messages);
-    assert.equal(groq.answer, "OpenAI compatible test reply");
-    assert.match(calls.at(-1).init.body, /openai\/gpt-oss-120b/);
+    assert.equal(groq.answer, "free provider test reply");
+    assert.equal(calls.at(-1).url, "https://api.groq.com/openai/v1/chat/completions");
+    assert.match(calls.at(-1).init.body, /openai\\/gpt-oss-120b/);
     const zai = await callWolfProvider({ ZAI_API_KEY: "never-log-this" }, "zai", messages);
-    assert.equal(zai.answer, "OpenAI compatible test reply");
+    assert.equal(zai.answer, "free provider test reply");
     assert.equal(calls.at(-1).url, "https://api.z.ai/api/paas/v4/chat/completions");
-    assert.equal(calls.at(-1).init.headers.authorization, "Bearer never-log-this");
-    assert.match(calls.at(-1).init.body, /glm-4\.7-flash/);
-    const openrouter = await callWolfProvider({ OPENROUTER_API_KEY: "never-log-this" }, "openrouter", messages);
-    assert.equal(openrouter.answer, "OpenAI compatible test reply");
-    assert.equal(calls.at(-1).init.headers["HTTP-Referer"], "https://wolfai.onlysingbox.workers.dev");
-    assert.match(calls.at(-1).init.body, /llama-3\.3-70b-instruct:free/);
+    assert.match(calls.at(-1).init.body, /glm-4\\.7-flash/);
     assert.ok(calls.every(x => !x.url.includes("never-log-this")));
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-
-test("chat availability accepts Z.ai as the only configured provider", () => {
+test("chat availability is true only when an approved free external key is present", () => {
   assert.equal(wolfHasAnyProvider({ ZAI_API_KEY: "configured" }), true);
   assert.equal(wolfHasAnyProvider({ GROQ_API_KEY: "configured" }), true);
-  assert.equal(wolfHasAnyProvider({ AI: { run() {} } }), true);
+  assert.equal(wolfHasAnyProvider({ AI: { run() {} } }), false);
+  assert.equal(wolfHasAnyProvider({ GEMINI_API_KEY: "configured" }), false);
+  assert.equal(wolfHasAnyProvider({ OPENROUTER_API_KEY: "configured" }), false);
   assert.equal(wolfHasAnyProvider({}), false);
 });
 
-
-test("Android-selectable Z.ai is accepted by the companion chat model allowlist", () => {
-  assert.ok(WOLF_ALLOWED_MODES.includes("zai"));
-  assert.ok(WOLF_ALLOWED_MODES.includes("auto"));
+test("Android-selectable modes match the strict free-only server allowlist", () => {
+  assert.deepEqual([...WOLF_ALLOWED_MODES], ["auto", "zai", "groq"]);
 });
-
-
+ 
 import { removeOwnerMemoryEntry } from "../src/worker.js";
 
 test("private memory deletion is case-insensitive and preserves other owners' independent entries", () => {
