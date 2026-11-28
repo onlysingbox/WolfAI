@@ -709,6 +709,11 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
     var pendingCallLabel by remember { mutableStateOf("") }
     var pendingCallMessage by remember { mutableStateOf("") }
     var pendingCallSubject by remember { mutableStateOf("") }
+    var pendingCalendarTitle by remember { mutableStateOf("") }
+    var pendingCalendarStart by remember { mutableStateOf(0L) }
+    var pendingCalendarEnd by remember { mutableStateOf(0L) }
+    var pendingCalendarLocation by remember { mutableStateOf("") }
+    var pendingCalendarDescription by remember { mutableStateOf("") }
     val callPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         val number = pendingCallNumber
         pendingCallNumber = null
@@ -725,6 +730,20 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
         pendingCallType = "phone"
         pendingCallLabel = ""
         when (type) {
+            "calendar" -> {
+                val intent = Intent(Intent.ACTION_INSERT).setData(CalendarContract.Events.CONTENT_URI).apply {
+                    putExtra(CalendarContract.Events.TITLE, pendingCalendarTitle)
+                    putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, pendingCalendarStart)
+                    putExtra(CalendarContract.EXTRA_EVENT_END_TIME, pendingCalendarEnd)
+                    putExtra(CalendarContract.Events.EVENT_LOCATION, pendingCalendarLocation)
+                    putExtra(CalendarContract.Events.DESCRIPTION, pendingCalendarDescription)
+                }
+                pendingCalendarTitle = ""; pendingCalendarLocation = ""; pendingCalendarDescription = ""
+                pendingCalendarStart = 0L; pendingCalendarEnd = 0L
+                runCatching { context.startActivity(intent) }
+                    .onSuccess { status = "فرم رویداد در تقویم باز شد؛ ذخیره نهایی با تأیید خودت در برنامه تقویم انجام می‌شود." }
+                    .onFailure { status = "برنامه تقویم در دسترس نیست: ${it.message}" }
+            }
             "email" -> {
                 val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:" + number)).apply {
                     putExtra(Intent.EXTRA_SUBJECT, pendingCallSubject)
@@ -870,6 +889,28 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
             if (command.contains("firefox")) browser.setPackage("org.mozilla.firefox") else if (command.contains("chrome")) browser.setPackage("com.android.chrome")
             if (browser.resolveActivity(context.packageManager) != null) { context.startActivity(browser); return "صفحه در مرورگر باز شد: " + address }
             return "مرورگر انتخاب‌شده نصب نیست یا پیوند را باز نمی‌کند."
+        }
+        val calendarCommand = command.contains("رویداد تقویم") || command.contains("calendar event")
+        if (calendarCommand) {
+            fun field(name: String): String = Regex("(?:^|\\s)${Regex.escape(name)}\\s*[:：]\\s*(.+?)(?=\\s+(?:عنوان|شروع|پایان|مکان|توضیح|title|start|end|location|description)\\s*[:：]|$)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)).find(raw)?.groupValues?.get(1)?.trim().orEmpty()
+            val title = field("عنوان").ifBlank { field("title") }
+            val startRaw = field("شروع").ifBlank { field("start") }
+            val endRaw = field("پایان").ifBlank { field("end") }
+            val location = field("مکان").ifBlank { field("location") }
+            val description = field("توضیح").ifBlank { field("description") }
+            if (title.isBlank() || startRaw.isBlank() || endRaw.isBlank()) return "قالب رویداد: رویداد تقویم عنوان: جلسه شروع: 2026-11-29T14:00 پایان: 2026-11-29T15:00 مکان: دفتر توضیح: متن"
+            val start = runCatching { java.time.LocalDateTime.parse(startRaw).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull()
+                ?: return "زمان شروع معتبر نیست؛ قالب تاریخ و ساعت باید YYYY-MM-DDTHH:mm باشد."
+            val end = runCatching { java.time.LocalDateTime.parse(endRaw).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }.getOrNull()
+                ?: return "زمان پایان معتبر نیست؛ قالب تاریخ و ساعت باید YYYY-MM-DDTHH:mm باشد."
+            if (end <= start) return "زمان پایان باید بعد از زمان شروع باشد."
+            if (start < System.currentTimeMillis() - 60_000L) return "زمان شروع رویداد در گذشته است؛ زمان آینده وارد کن."
+            pendingCallNumber = "calendar-event"; pendingCallType = "calendar"
+            pendingCalendarTitle = title; pendingCalendarStart = start; pendingCalendarEnd = end
+            pendingCalendarLocation = location; pendingCalendarDescription = description
+            val formatter = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+            pendingCallLabel = "رویداد تقویم: $title\\nشروع: ${formatter.format(java.util.Date(start))}\\nپایان: ${formatter.format(java.util.Date(end))}\\nمکان: ${location.ifBlank { "تعیین نشده" }}"
+            return "رویداد آماده بررسی است. پس از تأیید، فرم تقویم با جزئیات باز می‌شود و ذخیره نهایی را خودت انجام می‌دهی."
         }
         val emailMatch = Regex("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", RegexOption.IGNORE_CASE).find(raw)
         if ((command.contains("ایمیل") || command.contains("email")) && emailMatch != null) {
@@ -1170,15 +1211,18 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                     pendingCallNumber = null
                     pendingCallType = "phone"
                     pendingCallLabel = ""; pendingCallMessage = ""; pendingCallSubject = ""
+                    pendingCalendarTitle = ""; pendingCalendarLocation = ""; pendingCalendarDescription = ""
+                    pendingCalendarStart = 0L; pendingCalendarEnd = 0L
                     status = "درخواست لغو شد؛ هیچ اقدامی انجام نشد."
                 },
-                title = { Text(if (pendingCallType == "email" || pendingCallType == "whatsapp_message") "تأیید پیش‌نویس پیام" else "تأیید تماس") },
+                title = { Text(if (pendingCallType == "calendar") "تأیید رویداد تقویم" else if (pendingCallType == "email" || pendingCallType == "whatsapp_message") "تأیید پیش‌نویس پیام" else "تأیید تماس") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(pendingCallLabel)
                         Text(
                             when (pendingCallType) {
                                 "phone" -> "با تأیید، اندروید درخواست شماره‌گیری مستقیم را اجرا می‌کند. تماس فقط پس از اجازه سیستم آغاز می‌شود."
+                                "calendar" -> "با تأیید، فرم رویداد در تقویم گوشی باز می‌شود؛ رویداد تا وقتی خودت در تقویم ذخیره نکنی ثبت نخواهد شد."
                                 "email" -> "با تأیید، فقط برنامه ایمیل و پیش‌نویس باز می‌شود؛ ارسال نهایی انجام نمی‌شود."
                                 "whatsapp_message" -> "با تأیید، فقط پیش‌نویس در واتساپ باز می‌شود؛ ارسال نهایی انجام نمی‌شود."
                                 else -> "با تأیید، فقط مخاطب در برنامه مربوط باز می‌شود. شروع تماس را باید خودت داخل همان برنامه انجام دهی."
@@ -1195,6 +1239,8 @@ private fun WolfApp(token: String, saveToken: (String)->Unit, send: suspend (Str
                         pendingCallNumber = null
                         pendingCallType = "phone"
                         pendingCallLabel = ""; pendingCallMessage = ""; pendingCallSubject = ""
+                        pendingCalendarTitle = ""; pendingCalendarLocation = ""; pendingCalendarDescription = ""
+                        pendingCalendarStart = 0L; pendingCalendarEnd = 0L
                         status = "درخواست لغو شد؛ هیچ اقدامی انجام نشد."
                     }) { Text("لغو") }
                 }
